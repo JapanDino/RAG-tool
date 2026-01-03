@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+*.min.js linguist-generated
+*.min.css linguist-generated
+*.map linguist-generated
+dist/** linguist-generated
+build/** linguist-generated
+coverage/** linguist-generated
+.next/** linguist-generated

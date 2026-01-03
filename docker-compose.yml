@@ -1,0 +1,58 @@
+version: "3.9"
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    env_file: [ ./backend/.env ]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    command: >
+      bash -lc "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    volumes: [ "./backend:/app" ]
+
+  worker:
+    build: ./backend
+    env_file: [ ./backend/.env ]
+    depends_on: [ backend, redis ]
+    command: bash -lc "celery -A app.celery_app worker -l INFO"
+    volumes: [ "./backend:/app" ]
+
+  frontend:
+    build: ./frontend
+    environment:
+      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+    depends_on: [ backend ]
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes: [ "./frontend:/app" ]
+
+volumes:
+  dbdata:
