@@ -1,3 +1,21 @@
+## Project status (sync with plan)
+
+Main plan: `docs/DEVELOPMENT_PLAN_TZ_BLOOM.md`
+
+Done (code exists):
+- Rubrics (CRUD + migrations + seeds)
+- Annotation management API (CRUD)
+- Validation + fallback
+- Quality metrics + stats endpoint
+- LLM provider abstraction (heuristic/openai)
+
+Next (recommended):
+- C1/D1 MVP from the plan: “text → nodes → Bloom multi‑label probabilities”
+- Graph API + basic graph UI
+- Desktop packaging track (.exe)
+
+---
+
 Next steps to run later:
 1) Apply migration:
    psql -U rag -d rag_db -f backend/migrations/0001_init.sql
