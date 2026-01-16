@@ -20,5 +20,50 @@ class AnnotateIn(BaseModel):
     rubric: Optional[str]=None
 
 class AnnotationOut(BaseModel):
-    id:int; chunk_id:int; level:BloomLevel; label:str; rationale:str; score:float
+    id:int; chunk_id:int; level:BloomLevel; label:str; rationale:str; score:float; version:int
     class Config: from_attributes=True
+
+class AnnotationUpdateIn(BaseModel):
+    label: Optional[str] = None
+    rationale: Optional[str] = None
+    score: Optional[float] = None
+
+class AnnotationWithChunkOut(BaseModel):
+    id:int
+    chunk_id:int
+    level:BloomLevel
+    label:str
+    rationale:str
+    score:float
+    version:int
+    chunk_text:str
+    chunk_idx:int
+    document_id:int
+    document_title:str
+    class Config: from_attributes=True
+
+class AnnotationListOut(BaseModel):
+    total:int
+    items: List[AnnotationWithChunkOut]
+
+class RubricIn(BaseModel):
+    level: BloomLevel
+    name: str
+    description: str
+    criteria: Optional[dict] = None
+    version: Optional[int] = 1
+    is_active: Optional[bool] = True
+
+class RubricOut(BaseModel):
+    id:int
+    level:BloomLevel
+    name:str
+    description:str
+    criteria:dict
+    version:int
+    is_active:bool
+    class Config: from_attributes=True
+
+class RubricListOut(BaseModel):
+    total:int
+    items: List[RubricOut]

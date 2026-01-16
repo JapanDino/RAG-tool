@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Text, JSON, DateTime, ForeignKey, Enum, Float
+from sqlalchemy import String, Integer, Text, JSON, DateTime, ForeignKey, Enum, Float, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
@@ -44,6 +44,17 @@ class Embedding(Base):
     model: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+class Rubric(Base):
+    __tablename__="rubrics"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    level: Mapped[str] = mapped_column(Enum(BloomLevel), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text)
+    criteria: Mapped[dict] = mapped_column(JSON, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 class BloomAnnotation(Base):
     __tablename__="bloom_annotations"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -52,6 +63,9 @@ class BloomAnnotation(Base):
     label: Mapped[str] = mapped_column(String(200))
     rationale: Mapped[str] = mapped_column(Text)
     score: Mapped[float] = mapped_column(Float)
+    rubric_id: Mapped[int | None] = mapped_column(ForeignKey("rubrics.id", ondelete="SET NULL"), nullable=True, index=True)
+    rubric = relationship("Rubric", lazy="joined")
+    version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class Job(Base):
