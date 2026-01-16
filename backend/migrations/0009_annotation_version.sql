@@ -1,0 +1,3 @@
+ALTER TABLE bloom_annotations
+  ADD COLUMN IF NOT EXISTS version INT DEFAULT 1;
+
