@@ -67,3 +67,31 @@ class RubricOut(BaseModel):
 class RubricListOut(BaseModel):
     total:int
     items: List[RubricOut]
+
+class ExtractNodesIn(BaseModel):
+    text: str
+    max_nodes: int = 30
+    min_freq: int = 1
+
+class ExtractNodeOut(BaseModel):
+    title: str
+    context_snippet: str
+    frequency: int
+
+class ExtractNodesOut(BaseModel):
+    nodes: List[ExtractNodeOut]
+
+class ClassifyNodeIn(BaseModel):
+    title: str
+    context_snippet: Optional[str] = None
+
+class ClassifyNodesIn(BaseModel):
+    nodes: List[ClassifyNodeIn]
+
+class ClassifyNodeOut(BaseModel):
+    title: str
+    prob_vector: List[float]
+    top_levels: List[BloomLevel]
+
+class ClassifyNodesOut(BaseModel):
+    nodes: List[ClassifyNodeOut]
