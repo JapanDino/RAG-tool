@@ -70,6 +70,8 @@ class RubricListOut(BaseModel):
 
 class AnalyzeIn(BaseModel):
     text: str
+    edge_threshold: Optional[float] = 0.2
+    max_edges: Optional[int] = 50
 
 class AnalyzeChunkOut(BaseModel):
     idx: int
