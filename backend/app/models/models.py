@@ -52,12 +52,22 @@ class KnowledgeNode(Base):
     chunk_id: Mapped[int | None] = mapped_column(ForeignKey("chunks.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(Text)
     context_text: Mapped[str] = mapped_column(Text)
-    prob_vector: Mapped[dict] = mapped_column(JSON, default=dict)
+    prob_vector: Mapped[list] = mapped_column(JSON, default=list)
     top_levels: Mapped[list] = mapped_column(JSON, default=list)
     embedding_dim: Mapped[int] = mapped_column(Integer, default=1536)
     embedding_model: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
     version: Mapped[int] = mapped_column(Integer, default=1)
     model_info: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class KnowledgeEdge(Base):
+    __tablename__ = "knowledge_edges"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
+    from_node_id: Mapped[int] = mapped_column(ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True)
+    to_node_id: Mapped[int] = mapped_column(ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True)
+    weight: Mapped[float] = mapped_column(Float, default=0.0)
+    method: Mapped[str] = mapped_column(String(100), default="vector_topk")
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class Rubric(Base):

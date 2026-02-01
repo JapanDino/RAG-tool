@@ -30,19 +30,19 @@ const LEVEL_COLORS: Record<BloomLevel, string> = {
   create: "#76b7b2",
 };
 
-type ExtractedNode = {
+type AnalyzeNode = {
+  id: number;
   title: string;
-  context_snippet: string;
-  frequency: number;
-};
-
-type ClassifiedNode = {
-  title: string;
+  context_text: string;
   prob_vector: number[];
   top_levels: BloomLevel[];
 };
 
-type NodeView = ExtractedNode & ClassifiedNode & { id: number };
+type GraphEdge = {
+  from_id: number;
+  to_id: number;
+  weight: number;
+};
 
 const getSortedLevels = (probs: number[]) =>
   BLOOM_LEVELS.map((lvl, idx) => ({ lvl, prob: probs[idx] }))
@@ -55,8 +55,13 @@ export default function Home() {
   const [lastJob, setLastJob] = useState<number | undefined>();
   const [activeTab, setActiveTab] = useState<"analysis" | "graph">("analysis");
   const [textInput, setTextInput] = useState("");
-  const [nodes, setNodes] = useState<NodeView[]>([]);
+  const [nodes, setNodes] = useState<AnalyzeNode[]>([]);
+  const [graphNodesData, setGraphNodesData] = useState<AnalyzeNode[]>([]);
+  const [graphEdgesData, setGraphEdgesData] = useState<GraphEdge[]>([]);
   const [threshold, setThreshold] = useState(0.3);
+  const [graphTopK, setGraphTopK] = useState(3);
+  const [graphMinWeight, setGraphMinWeight] = useState(0.6);
+  const [graphRebuild, setGraphRebuild] = useState(false);
   const [filters, setFilters] = useState<Record<BloomLevel, boolean>>({
     remember: true,
     understand: true,
@@ -65,7 +70,7 @@ export default function Home() {
     evaluate: true,
     create: true,
   });
-  const [hoveredNode, setHoveredNode] = useState<NodeView | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<AnalyzeNode | null>(null);
   const api = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
   const createDataset = async () => {
@@ -94,40 +99,74 @@ export default function Home() {
   const exportJsonl = () => { if(!ds) return; window.open(`${api}/export/datasets/${ds}?format=jsonl`, "_blank"); };
 
   const analyzeText = async () => {
-    if (!textInput.trim()) return;
-    const extractResp = await fetch(`${api}/analyze/extract`, {
+    if (!textInput.trim() || !ds) return;
+    const resp = await fetch(`${api}/analyze/content`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: textInput }),
+      body: JSON.stringify({ text: textInput, dataset_id: ds }),
     });
-    const extractJson = await extractResp.json();
-    const extracted: ExtractedNode[] = extractJson.nodes || [];
+    const json = await resp.json();
+    const items: AnalyzeNode[] = json.nodes || [];
+    setNodes(items);
+  };
 
-    const classifyResp = await fetch(`${api}/analyze/classify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        nodes: extracted.map((n) => ({
-          title: n.title,
-          context_snippet: n.context_snippet,
-        })),
-      }),
+  const loadTextFile = async (f: File | null) => {
+    if (!f) return;
+    const text = await f.text();
+    setTextInput(text);
+  };
+
+  const exportNodesJson = () => {
+    if (!nodes.length) return;
+    const blob = new Blob([JSON.stringify(nodes, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "knowledge_nodes.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportNodesCsv = () => {
+    if (!nodes.length) return;
+    const header = ["id", "title", "context_text", "top_levels", "prob_vector"].join(",");
+    const rows = nodes.map((n) =>
+      [
+        n.id,
+        `"${n.title.replace(/"/g, '""')}"`,
+        `"${n.context_text.replace(/"/g, '""')}"`,
+        `"${n.top_levels.join("|")}"`,
+        `"${n.prob_vector.join("|")}"`,
+      ].join(",")
+    );
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "knowledge_nodes.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const loadGraph = async () => {
+    if (!ds) return;
+    const params = new URLSearchParams({
+      dataset_id: String(ds),
+      top_k: String(graphTopK),
+      min_weight: String(graphMinWeight),
+      rebuild: graphRebuild ? "true" : "false",
     });
-    const classifyJson = await classifyResp.json();
-    const classified: ClassifiedNode[] = classifyJson.nodes || [];
-
-    const combined = extracted.map((node, idx) => ({
-      ...node,
-      ...classified[idx],
-      id: idx + 1,
-    }));
-    setNodes(combined);
+    const resp = await fetch(`${api}/graph?${params.toString()}`);
+    const json = await resp.json();
+    setGraphNodesData(json.nodes || []);
+    setGraphEdgesData(json.edges || []);
   };
 
   const filteredNodes = useMemo(
     () =>
-      nodes.filter((n) => n.top_levels.some((lvl) => filters[lvl])),
-    [nodes, filters]
+      graphNodesData.filter((n) => n.top_levels.some((lvl) => filters[lvl])),
+    [graphNodesData, filters]
   );
 
   const graphNodes = useMemo(() => {
@@ -144,12 +183,11 @@ export default function Home() {
   }, [filteredNodes]);
 
   const graphEdges = useMemo(() => {
-    const edges: { from: number; to: number }[] = [];
-    for (let i = 0; i < graphNodes.length - 1; i += 1) {
-      edges.push({ from: graphNodes[i].id, to: graphNodes[i + 1].id });
-    }
-    return edges;
-  }, [graphNodes]);
+    const nodeIds = new Set(graphNodes.map((n) => n.id));
+    return graphEdgesData
+      .filter((e) => nodeIds.has(e.from_id) && nodeIds.has(e.to_id))
+      .map((e) => ({ from: e.from_id, to: e.to_id, weight: e.weight }));
+  }, [graphEdgesData, graphNodes]);
 
   return (
     <div style={{maxWidth:720, margin:"40px auto", fontFamily:"sans-serif"}}>
@@ -171,7 +209,22 @@ export default function Home() {
             value={textInput}
             onChange={(e) => setTextInput(e.target.value)}
           />
-          <button onClick={analyzeText}>Анализировать</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button onClick={analyzeText} disabled={!ds || !textInput.trim()}>
+              Анализировать
+            </button>
+            <input
+              type="file"
+              accept=".txt"
+              onChange={(e) => loadTextFile(e.target.files?.[0] || null)}
+            />
+            <button onClick={exportNodesJson} disabled={!nodes.length}>
+              Export JSON
+            </button>
+            <button onClick={exportNodesCsv} disabled={!nodes.length}>
+              Export CSV
+            </button>
+          </div>
 
           {nodes.length > 0 && (
             <div style={{ border: "1px solid #ddd", padding: 8 }}>
@@ -180,6 +233,7 @@ export default function Home() {
                 <thead>
                   <tr>
                     <th style={{ textAlign: "left" }}>Узел</th>
+                    <th style={{ textAlign: "left" }}>Контекст</th>
                     <th style={{ textAlign: "left" }}>Top уровни</th>
                     <th style={{ textAlign: "left" }}>Вероятности</th>
                   </tr>
@@ -188,6 +242,9 @@ export default function Home() {
                   {nodes.map((n) => (
                     <tr key={n.id}>
                       <td style={{ padding: "6px 4px" }}>{n.title}</td>
+                      <td style={{ padding: "6px 4px", fontSize: 12 }}>
+                        {n.context_text}
+                      </td>
                       <td style={{ padding: "6px 4px" }}>
                         {n.top_levels.map((lvl) => LEVEL_LABELS[lvl]).join(", ")}
                       </td>
@@ -262,6 +319,40 @@ export default function Home() {
                 style={{ width: 60 }}
               />
             </label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              Top‑K
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={graphTopK}
+                onChange={(e) => setGraphTopK(Number(e.target.value))}
+                style={{ width: 60 }}
+              />
+            </label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              Min weight
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="1"
+                value={graphMinWeight}
+                onChange={(e) => setGraphMinWeight(Number(e.target.value))}
+                style={{ width: 60 }}
+              />
+            </label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={graphRebuild}
+                onChange={(e) => setGraphRebuild(e.target.checked)}
+              />
+              Перестроить рёбра
+            </label>
+            <button onClick={loadGraph} disabled={!ds}>
+              Загрузить граф
+            </button>
           </div>
 
           <div style={{ border: "1px solid #ddd", padding: 8, position: "relative" }}>
@@ -332,7 +423,7 @@ export default function Home() {
                 }}
               >
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>{hoveredNode.title}</div>
-                <div style={{ marginBottom: 6 }}>{hoveredNode.context_snippet}</div>
+                <div style={{ marginBottom: 6 }}>{hoveredNode.context_text}</div>
                 <div>
                   {getSortedLevels(hoveredNode.prob_vector)
                     .map((p) => `${LEVEL_LABELS[p.lvl]}: ${p.prob}`)

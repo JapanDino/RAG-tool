@@ -95,3 +95,113 @@ class ClassifyNodeOut(BaseModel):
 
 class ClassifyNodesOut(BaseModel):
     nodes: List[ClassifyNodeOut]
+
+class AnalyzeIn(BaseModel):
+    text: str
+    edge_threshold: Optional[float] = 0.2
+    max_edges: Optional[int] = 50
+
+class AnalyzeChunkOut(BaseModel):
+    idx: int
+    text: str
+    bloom: dict[str, float]
+
+class AnalyzeEdgeOut(BaseModel):
+    source: int
+    target: int
+    weight: float
+
+class AnalyzeOut(BaseModel):
+    total: int
+    items: List[AnalyzeChunkOut]
+    edges: List[AnalyzeEdgeOut]
+
+class KnowledgeNodeIn(BaseModel):
+    dataset_id: int
+    document_id: Optional[int] = None
+    chunk_id: Optional[int] = None
+    title: str
+    context_text: str
+    prob_vector: List[float]
+    top_levels: List[BloomLevel]
+    embedding_dim: Optional[int] = 1536
+    embedding_model: Optional[str] = "text-embedding-3-small"
+    version: Optional[int] = 1
+    model_info: Optional[dict] = None
+
+class KnowledgeNodeOut(BaseModel):
+    id: int
+    dataset_id: int
+    document_id: Optional[int] = None
+    chunk_id: Optional[int] = None
+    title: str
+    context_text: str
+    prob_vector: List[float]
+    top_levels: List[BloomLevel]
+    embedding_dim: int
+    embedding_model: str
+    version: int
+    model_info: dict
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class KnowledgeNodeUpdateIn(BaseModel):
+    title: Optional[str] = None
+    context_text: Optional[str] = None
+    prob_vector: Optional[List[float]] = None
+    top_levels: Optional[List[BloomLevel]] = None
+    embedding_dim: Optional[int] = None
+    embedding_model: Optional[str] = None
+    version: Optional[int] = None
+    model_info: Optional[dict] = None
+
+class KnowledgeNodeBulkIn(BaseModel):
+    nodes: List[KnowledgeNodeIn]
+
+class KnowledgeNodeListOut(BaseModel):
+    total: int
+    items: List[KnowledgeNodeOut]
+
+class KnowledgeNodeSearchHit(BaseModel):
+    node_id: int
+    title: str
+    context_text: str
+    score: float
+    dataset_id: int
+    document_id: Optional[int] = None
+    chunk_id: Optional[int] = None
+
+class AnalyzeContentIn(BaseModel):
+    text: str
+    dataset_id: int
+    document_id: Optional[int] = None
+    max_nodes: int = 30
+    min_freq: int = 1
+
+class AnalyzeNodeOut(BaseModel):
+    id: int
+    title: str
+    context_text: str
+    prob_vector: List[float]
+    top_levels: List[BloomLevel]
+
+class AnalyzeContentOut(BaseModel):
+    nodes: List[AnalyzeNodeOut]
+
+class GraphNodeOut(BaseModel):
+    id: int
+    title: str
+    context_text: str
+    prob_vector: List[float]
+    top_levels: List[BloomLevel]
+
+class GraphEdgeOut(BaseModel):
+    from_id: int
+    to_id: int
+    weight: float
+
+class GraphOut(BaseModel):
+    nodes: List[GraphNodeOut]
+    edges: List[GraphEdgeOut]
