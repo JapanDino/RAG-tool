@@ -67,3 +67,21 @@ class RubricOut(BaseModel):
 class RubricListOut(BaseModel):
     total:int
     items: List[RubricOut]
+
+class AnalyzeIn(BaseModel):
+    text: str
+
+class AnalyzeChunkOut(BaseModel):
+    idx: int
+    text: str
+    bloom: dict[str, float]
+
+class AnalyzeEdgeOut(BaseModel):
+    source: int
+    target: int
+    weight: float
+
+class AnalyzeOut(BaseModel):
+    total: int
+    items: List[AnalyzeChunkOut]
+    edges: List[AnalyzeEdgeOut]
