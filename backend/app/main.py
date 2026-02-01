@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from .routers import datasets, search, export, annotate, jobs, status, rubrics, analyze, taxonomy
+from .routers import datasets, search, export, annotate, jobs, status, rubrics, analyze, taxonomy, nodes, graph
 
 app = FastAPI(title="RAG Bloom API", version="0.2.0")
 app.include_router(datasets.router)
@@ -11,6 +11,10 @@ app.include_router(status.router)
 app.include_router(rubrics.router)
 app.include_router(analyze.router)
 app.include_router(taxonomy.router)
+app.include_router(nodes.router)
+app.include_router(graph.router)
+
 
 @app.get("/health")
-def health(): return {"ok": True}
+def health():
+    return {"ok": True}
