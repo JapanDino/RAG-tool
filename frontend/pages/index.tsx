@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import JobStatus from "../components/JobStatus";
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<"analyze" | "graph">("analyze");
   const [name, setName] = useState("");
   const [ds, setDs] = useState<number | undefined>();
   const [file, setFile] = useState<File | null>(null);
