@@ -15,8 +15,8 @@
 | S2 | Миграции БД под `KnowledgeNode` и multi‑label | done |
 | S3 | CRUD/API для узлов | done |
 | S4 | ExtractNodes (MVP) | done |
-| S5 | Multi‑label классификация (MVP) | todo |
-| S6 | Endpoint “Анализ контента” | todo |
+| S5 | Multi‑label классификация (MVP) | done |
+| S6 | Endpoint “Анализ контента” | done |
 | S7 | Embeddings для узлов | todo |
 | S8 | Рёбра графа | todo |
 | S9 | UI: вкладка “Анализ контента” | todo |
@@ -25,6 +25,8 @@
 | S12 | Материалы для защиты | todo |
 
 ## История изменений (кратко)
+- 2026‑02‑02: S6 — Endpoint “Анализ контента” (`/analyze/content`).
+- 2026‑02‑02: S5 — Multi‑label классификация (MVP) (`/analyze/classify`).
 - 2026‑02‑02: S4 — ExtractNodes (MVP) (`/analyze/extract`), node_type.
 - 2026‑02‑02: S3 — CRUD/API для узлов (`/nodes`), PR #13.
 - 2026‑02‑02: S2 — миграции `knowledge_nodes` (дефолты/индексы), PR #12.
@@ -37,6 +39,11 @@
 - FastAPI backend и сущности `Dataset`, `Document`, `Chunk`, `Embedding`, `Rubric`, `BloomAnnotation`, `Job`.
 - Базовый API анализа `/analyze` (простое чанкование) и эвристическая оценка уровней Блума.
 - ExtractNodes (MVP): `/analyze/extract` с node_type (`proper_noun`, `keyword`).
+<<<<<<< Updated upstream
+=======
+- Multi‑label классификация (MVP): `/analyze/classify` с prob_vector/top_levels.
+- Endpoint “Анализ контента”: `/analyze/content` с сохранением и эмбеддингами.
+>>>>>>> Stashed changes
 - Миграции для `knowledge_nodes` и `knowledge_edges`.
 - CRUD/API для узлов (`/nodes`) и схемы в `backend/app/schemas`.
 - Черновая визуализация графа на фронте (без реальных рёбер/данных из БД).

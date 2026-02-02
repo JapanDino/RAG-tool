@@ -181,6 +181,12 @@ class AnalyzeContentIn(BaseModel):
     document_id: Optional[int] = None
     max_nodes: int = 30
     min_freq: int = 1
+    min_prob: Optional[float] = 0.2
+    max_levels: Optional[int] = 2
+    embedding_dim: Optional[int] = 1536
+    embedding_model: Optional[str] = "text-embedding-3-small"
+    extractor: Optional[str] = "heuristic-v1"
+    classifier: Optional[str] = "keyword-v1"
 
 class AnalyzeNodeOut(BaseModel):
     id: int
