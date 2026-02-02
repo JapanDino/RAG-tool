@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional, Literal, List
 
 BloomLevel = Literal["remember","understand","apply","analyze","evaluate","create"]
+NodeType = Literal["proper_noun","keyword"]
 
 class DatasetIn(BaseModel): name: str
 class DatasetOut(BaseModel):
@@ -77,6 +78,7 @@ class ExtractNodeOut(BaseModel):
     title: str
     context_snippet: str
     frequency: int
+    node_type: NodeType
 
 class ExtractNodesOut(BaseModel):
     nodes: List[ExtractNodeOut]
