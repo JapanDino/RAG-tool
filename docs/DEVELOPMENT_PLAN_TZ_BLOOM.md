@@ -12,10 +12,10 @@
 | --- | --- | --- |
 | S0 | Нормализация плана и трекинга | done |
 | S1 | Контракт данных “узел” и “вероятности” | todo |
-| S2 | Миграции БД под `KnowledgeNode` и multi‑label | in_progress |
+| S2 | Миграции БД под `KnowledgeNode` и multi‑label | todo |
 | S3 | CRUD/API для узлов | todo |
-| S4 | ExtractNodes (MVP) | done |
-| S5 | Multi‑label классификация (MVP) | done |
+| S4 | ExtractNodes (MVP) | todo |
+| S5 | Multi‑label классификация (MVP) | todo |
 | S6 | Endpoint “Анализ контента” | todo |
 | S7 | Embeddings для узлов | todo |
 | S8 | Рёбра графа | todo |
@@ -121,17 +121,14 @@
 Сделано:
 - FastAPI backend и сущности `Dataset`, `Document`, `Chunk`, `Embedding`, `Rubric`, `BloomAnnotation`, `Job`.
 - Загрузка документов и чанкование (фиксированный размер).
-- Индексация embedding’ов в pgvector и поиск по `chunks`.
+- Индексация embedding’ов в pgvector и поиск.
 - Rubrics CRUD+seed.
 - Single‑level аннотация + валидация/fallback.
-- Базовые ExtractNodes и multi‑label классификация (эвристики).
-- Черновая модель `KnowledgeNode` и миграция (без полного контракта и API).
 
 Не сделано по ТЗ:
-- Контракт данных `KnowledgeNode` и единый формат `prob_vector` (list vs dict).
-- CRUD/API для узлов и сквозной `/analyze`.
-- Embeddings и поиск по `knowledge_nodes`.
-- Формирование рёбер и API графа.
-- Полноценный UI с 2 вкладками и данными из БД.
+- Узлы знаний как отдельная сущность (NER/semantic chunking).
+- Multi‑label вероятности по 6 уровням на каждый узел.
+- Формирование рёбер и UI графа.
+- UI с 2 вкладками.
 - Метрики multi‑label качества на экспертной разметке 100+ примеров.
 - Материалы для защиты (дампы/скриншоты/видео).
