@@ -18,7 +18,7 @@
 | S5 | Multi‑label классификация (MVP) | done |
 | S6 | Endpoint “Анализ контента” | done |
 | S7 | Embeddings для узлов | done |
-| S8 | Рёбра графа | todo |
+| S8 | Рёбра графа | done |
 | S9 | UI: вкладка “Анализ контента” | done |
 | S10 | UI: вкладка “Граф знаний” | todo |
 | S11 | Метрики качества (Hamming, F1) | todo |
@@ -26,6 +26,7 @@
 
 ## История изменений (кратко)
 - 2026‑02‑02: S9 — UI: вкладка “Анализ контента”.
+- 2026‑02‑02: S8 — Рёбра графа (`/graph`).
 - 2026‑02‑02: S7 — Embeddings для узлов (`/nodes/search`).
 - 2026‑02‑02: S6 — Endpoint “Анализ контента” (`/analyze/content`).
 - 2026‑02‑02: S5 — Multi‑label классификация (MVP) (`/analyze/classify`).
@@ -43,6 +44,7 @@
 - ExtractNodes (MVP): `/analyze/extract` с node_type (`proper_noun`, `keyword`).
 - Multi‑label классификация (MVP): `/analyze/classify` с prob_vector/top_levels.
 - Поиск по узлам: `/nodes/search` по embedding-вектору.
+- Граф знаний: `/graph` возвращает nodes+edges с фильтрами.
 - Endpoint “Анализ контента”: `/analyze/content` с сохранением и эмбеддингами.
 - UI “Анализ контента”: загрузка текста/файла, таблица узлов, экспорт JSON/CSV.
 - Миграции для `knowledge_nodes` и `knowledge_edges`.
