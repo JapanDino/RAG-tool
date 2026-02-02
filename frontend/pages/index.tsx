@@ -56,6 +56,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<"analysis" | "graph">("analysis");
   const [textInput, setTextInput] = useState("");
   const [nodes, setNodes] = useState<AnalyzeNode[]>([]);
+  const [nodesStatus, setNodesStatus] = useState<string | null>(null);
   const [graphNodesData, setGraphNodesData] = useState<AnalyzeNode[]>([]);
   const [graphEdgesData, setGraphEdgesData] = useState<GraphEdge[]>([]);
   const [threshold, setThreshold] = useState(0.3);
@@ -100,6 +101,7 @@ export default function Home() {
 
   const analyzeText = async () => {
     if (!textInput.trim() || !ds) return;
+    setNodesStatus("Анализируем текст...");
     const resp = await fetch(`${api}/analyze/content`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -108,6 +110,7 @@ export default function Home() {
     const json = await resp.json();
     const items: AnalyzeNode[] = json.nodes || [];
     setNodes(items);
+    setNodesStatus(items.length ? `Найдено узлов: ${items.length}` : "Узлы не найдены");
   };
 
   const loadTextFile = async (f: File | null) => {
@@ -147,6 +150,21 @@ export default function Home() {
     a.download = "knowledge_nodes.csv";
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const loadNodesFromDb = async () => {
+    if (!ds) return;
+    setNodesStatus("Загружаем узлы из БД...");
+    const params = new URLSearchParams({
+      dataset_id: String(ds),
+      limit: "1000",
+      offset: "0",
+    });
+    const resp = await fetch(`${api}/nodes?${params.toString()}`);
+    const json = await resp.json();
+    const items: AnalyzeNode[] = json.items || [];
+    setNodes(items);
+    setNodesStatus(items.length ? `Загружено узлов: ${items.length}` : "В БД нет узлов");
   };
 
   const loadGraph = async () => {
@@ -213,6 +231,9 @@ export default function Home() {
             <button onClick={analyzeText} disabled={!ds || !textInput.trim()}>
               Анализировать
             </button>
+            <button onClick={loadNodesFromDb} disabled={!ds}>
+              Загрузить из БД
+            </button>
             <input
               type="file"
               accept=".txt"
@@ -225,6 +246,7 @@ export default function Home() {
               Export CSV
             </button>
           </div>
+          {nodesStatus && <div style={{ fontSize: 12, color: "#666" }}>{nodesStatus}</div>}
 
           {nodes.length > 0 && (
             <div style={{ border: "1px solid #ddd", padding: 8 }}>
@@ -266,6 +288,12 @@ export default function Home() {
               <input placeholder="dataset name" value={name} onChange={e=>setName(e.target.value)} />
               <button onClick={createDataset}>Create dataset</button>
               <div>dataset id: {ds ?? "-"}</div>
+              <input
+                type="number"
+                placeholder="dataset id"
+                value={ds ?? ""}
+                onChange={(e) => setDs(e.target.value ? Number(e.target.value) : undefined)}
+              />
               <input type="file" onChange={e=>setFile(e.target.files?.[0] || null)} />
               <button onClick={upload} disabled={!ds || !file}>Upload document</button>
               <button onClick={indexDs} disabled={!ds}>Index</button>
