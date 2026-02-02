@@ -21,7 +21,11 @@ _BLOOM_KEYWORDS = {
     "create": ["создай", "придум", "спроект", "разработ", "сформулируй", "составь"],
 }
 
-def classify_bloom_multilabel(text: str):
+def classify_bloom_multilabel(
+    text: str,
+    min_prob: float = 0.2,
+    max_levels: int = 2,
+):
     lowered = text.lower()
     counts = []
     for level in ("remember","understand","apply","analyze","evaluate","create"):
@@ -33,13 +37,18 @@ def classify_bloom_multilabel(text: str):
 
     total = sum(counts)
     if total == 0:
-        probs = [round(1.0 / 6.0, 3)] * 6
+        raw = [1.0 / 6.0] * 6
     else:
-        probs = [round((c + 1) / (total + 6), 3) for c in counts]
+        raw = [(c + 1) / (total + 6) for c in counts]
+
+    probs = [round(p, 3) for p in raw]
+    drift = round(1.0 - sum(probs), 3)
+    if drift != 0:
+        probs[-1] = round(probs[-1] + drift, 3)
 
     level_order = ["remember","understand","apply","analyze","evaluate","create"]
     sorted_levels = sorted(zip(level_order, probs), key=lambda x: x[1], reverse=True)
-    top_levels = [lvl for lvl, p in sorted_levels if p >= 0.2][:2]
+    top_levels = [lvl for lvl, p in sorted_levels if p >= min_prob][:max_levels]
     if not top_levels:
         top_levels = [sorted_levels[0][0]]
 
