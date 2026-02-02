@@ -89,6 +89,8 @@ class ClassifyNodeIn(BaseModel):
 
 class ClassifyNodesIn(BaseModel):
     nodes: List[ClassifyNodeIn]
+    min_prob: Optional[float] = 0.2
+    max_levels: Optional[int] = 2
 
 class ClassifyNodeOut(BaseModel):
     title: str
@@ -181,6 +183,8 @@ class AnalyzeContentIn(BaseModel):
     document_id: Optional[int] = None
     max_nodes: int = 30
     min_freq: int = 1
+    min_prob: Optional[float] = 0.2
+    max_levels: Optional[int] = 2
 
 class AnalyzeNodeOut(BaseModel):
     id: int
