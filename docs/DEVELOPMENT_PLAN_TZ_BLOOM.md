@@ -11,7 +11,7 @@
 | Шаг | Название | Статус |
 | --- | --- | --- |
 | S0 | Нормализация плана и трекинга | done |
-| S1 | Контракт данных “узел” и “вероятности” | todo |
+| S1 | Контракт данных “узел” и “вероятности” | done |
 | S2 | Миграции БД под `KnowledgeNode` и multi‑label | todo |
 | S3 | CRUD/API для узлов | todo |
 | S4 | ExtractNodes (MVP) | todo |
@@ -63,6 +63,58 @@
 - Формат `prob_vector`: `[p_remember, p_understand, p_apply, p_analyze, p_evaluate, p_create]`.
 - Сущность `KnowledgeNode`: `dataset_id`, `title`, `context`, `prob_vector`, `top_levels`, `embedding`, `version`, `model_info`.
 - **Готово**: схема данных (можно Mermaid ERD) зафиксирована в этом документе.
+
+#### Контракт данных (зафиксирован)
+Порядок уровней Блума для `prob_vector`:
+`[remember, understand, apply, analyze, evaluate, create]`
+
+`KnowledgeNode`:
+- `dataset_id`: int
+- `document_id`: int | null
+- `chunk_id`: int | null
+- `title`: string
+- `context_text`: string
+- `prob_vector`: float[6] (в порядке выше)
+- `top_levels`: string[] (подмножество уровней Блума)
+- `embedding_dim`: int
+- `embedding_model`: string
+- `version`: int
+- `model_info`: object
+- `created_at`: datetime
+
+```mermaid
+erDiagram
+    Dataset ||--o{ KnowledgeNode : contains
+    Document ||--o{ KnowledgeNode : sources
+    Chunk ||--o{ KnowledgeNode : optional
+
+    Dataset {
+        int id
+        string name
+    }
+    Document {
+        int id
+        int dataset_id
+    }
+    Chunk {
+        int id
+        int document_id
+    }
+    KnowledgeNode {
+        int id
+        int dataset_id
+        int document_id
+        int chunk_id
+        string title
+        string context_text
+        float[] prob_vector
+        string[] top_levels
+        int embedding_dim
+        string embedding_model
+        int version
+        object model_info
+    }
+```
 
 ### Шаг 2 — Миграции БД под `KnowledgeNode`
 - Добавить таблицы для узлов и их embedding’ов.
