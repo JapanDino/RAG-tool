@@ -113,6 +113,8 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
         return {"nodes": []}
 
     stored_nodes: list[KnowledgeNode] = []
+    embedding_dim = payload.embedding_dim or 1536
+    embedding_model = payload.embedding_model or "text-embedding-3-small"
     for node in nodes:
         text_for_classify = node["context_snippet"] or node["title"]
         cls = classify_bloom_multilabel(
@@ -127,7 +129,13 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
             context_text=node["context_snippet"],
             prob_vector=cls["prob_vector"],
             top_levels=cls["top_levels"],
-            model_info={"classifier": "keyword-v1"},
+            embedding_dim=embedding_dim,
+            embedding_model=embedding_model,
+            model_info={
+                "extractor": payload.extractor or "heuristic-v1",
+                "classifier": payload.classifier or "keyword-v1",
+                "node_type": node.get("node_type"),
+            },
         )
         db.add(kn)
         stored_nodes.append(kn)
@@ -139,10 +147,7 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     embed_inputs = [
         f"{kn.title}. {kn.context_text}".strip() for kn in stored_nodes
     ]
-    vecs = embed_texts(
-        embed_inputs,
-        dim=stored_nodes[0].embedding_dim if stored_nodes else 1536,
-    )
+    vecs = embed_texts(embed_inputs, dim=embedding_dim)
     for kn, vec in zip(stored_nodes, vecs):
         db.execute(
             text("UPDATE knowledge_nodes SET vec = :v::vector WHERE id = :id"),
