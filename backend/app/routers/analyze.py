@@ -1,6 +1,6 @@
 import re
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -114,6 +114,8 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
 
     stored_nodes: list[KnowledgeNode] = []
     embedding_dim = payload.embedding_dim or 1536
+    if embedding_dim != 1536:
+        raise HTTPException(400, "embedding_dim must be 1536 for current storage")
     embedding_model = payload.embedding_model or "text-embedding-3-small"
     for node in nodes:
         text_for_classify = node["context_snippet"] or node["title"]
