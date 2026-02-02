@@ -34,16 +34,35 @@ def get_graph(
     limit_nodes: int = Query(500, ge=1, le=5000),
     db: Session = Depends(get_db),
 ):
-    query = db.query(KnowledgeNode)
+    filters = ["kn.vec IS NOT NULL"]
+    params: dict[str, object] = {"limit": limit_nodes}
     if dataset_id is not None:
-        query = query.filter(KnowledgeNode.dataset_id == dataset_id)
+        filters.append("kn.dataset_id = :ds")
+        params["ds"] = dataset_id
     if document_id is not None:
-        query = query.filter(KnowledgeNode.document_id == document_id)
+        filters.append("kn.document_id = :doc")
+        params["doc"] = document_id
     if embedding_model is not None:
-        query = query.filter(KnowledgeNode.embedding_model == embedding_model)
-
-    nodes = query.order_by(KnowledgeNode.id.asc()).limit(limit_nodes).all()
-    node_ids = [n.id for n in nodes]
+        filters.append("kn.embedding_model = :em")
+        params["em"] = embedding_model
+    where_clause = " AND ".join(filters)
+    ids_sql = f"""
+        SELECT kn.id
+        FROM knowledge_nodes kn
+        WHERE {where_clause}
+        ORDER BY kn.id ASC
+        LIMIT :limit
+    """
+    node_ids = [row[0] for row in db.execute(text(ids_sql), params).all()]
+    if node_ids:
+        nodes = (
+            db.query(KnowledgeNode)
+            .filter(KnowledgeNode.id.in_(node_ids))
+            .order_by(KnowledgeNode.id.asc())
+            .all()
+        )
+    else:
+        nodes = []
     node_index = {n.id: n for n in nodes}
 
     edges: dict[tuple[int, int, str], float] = {}

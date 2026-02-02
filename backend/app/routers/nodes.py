@@ -121,9 +121,11 @@ def search_nodes(
     dim: int = 1536,
     db: Session = Depends(get_db),
 ):
+    if dim != 1536:
+        raise HTTPException(400, "dim must be 1536 for current storage")
     qvec = embed_query(q, dim=dim)
     lit = vector_literal(qvec)
-    filters = []
+    filters = ["kn.vec IS NOT NULL"]
     params = {"qvec": lit, "k": top_k}
     if dataset_id is not None:
         filters.append("kn.dataset_id = :ds")
