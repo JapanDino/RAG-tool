@@ -61,8 +61,9 @@ export default function Home() {
   const [graphEdgesData, setGraphEdgesData] = useState<GraphEdge[]>([]);
   const [threshold, setThreshold] = useState(0.3);
   const [graphTopK, setGraphTopK] = useState(3);
-  const [graphMinWeight, setGraphMinWeight] = useState(0.6);
-  const [graphRebuild, setGraphRebuild] = useState(false);
+  const [graphMinScore, setGraphMinScore] = useState(0.6);
+  const [graphIncludeCo, setGraphIncludeCo] = useState(true);
+  const [graphLimitNodes, setGraphLimitNodes] = useState(300);
   const [filters, setFilters] = useState<Record<BloomLevel, boolean>>({
     remember: true,
     understand: true,
@@ -172,8 +173,9 @@ export default function Home() {
     const params = new URLSearchParams({
       dataset_id: String(ds),
       top_k: String(graphTopK),
-      min_weight: String(graphMinWeight),
-      rebuild: graphRebuild ? "true" : "false",
+      min_score: String(graphMinScore),
+      include_cooccurrence: graphIncludeCo ? "true" : "false",
+      limit_nodes: String(graphLimitNodes),
     });
     const resp = await fetch(`${api}/graph?${params.toString()}`);
     const json = await resp.json();
@@ -359,24 +361,35 @@ export default function Home() {
               />
             </label>
             <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              Min weight
+              Min score
               <input
                 type="number"
                 step="0.1"
                 min="0"
                 max="1"
-                value={graphMinWeight}
-                onChange={(e) => setGraphMinWeight(Number(e.target.value))}
+                value={graphMinScore}
+                onChange={(e) => setGraphMinScore(Number(e.target.value))}
                 style={{ width: 60 }}
               />
             </label>
             <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input
                 type="checkbox"
-                checked={graphRebuild}
-                onChange={(e) => setGraphRebuild(e.target.checked)}
+                checked={graphIncludeCo}
+                onChange={(e) => setGraphIncludeCo(e.target.checked)}
               />
-              Перестроить рёбра
+              Co‑occurrence
+            </label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              Limit nodes
+              <input
+                type="number"
+                min="10"
+                max="2000"
+                value={graphLimitNodes}
+                onChange={(e) => setGraphLimitNodes(Number(e.target.value))}
+                style={{ width: 80 }}
+              />
             </label>
             <button onClick={loadGraph} disabled={!ds}>
               Загрузить граф
