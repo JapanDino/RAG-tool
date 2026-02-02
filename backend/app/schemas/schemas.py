@@ -89,6 +89,8 @@ class ClassifyNodeIn(BaseModel):
 
 class ClassifyNodesIn(BaseModel):
     nodes: List[ClassifyNodeIn]
+    min_prob: Optional[float] = 0.2
+    max_levels: Optional[int] = 2
 
 class ClassifyNodeOut(BaseModel):
     title: str

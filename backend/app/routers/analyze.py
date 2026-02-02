@@ -89,7 +89,11 @@ def classify_nodes(payload: ClassifyNodesIn):
     out_nodes = []
     for node in payload.nodes:
         text = node.context_snippet or node.title
-        result = classify_bloom_multilabel(text)
+        result = classify_bloom_multilabel(
+            text,
+            min_prob=payload.min_prob or 0.2,
+            max_levels=payload.max_levels or 2,
+        )
         out_nodes.append({
             "title": node.title,
             "prob_vector": result["prob_vector"],
@@ -113,7 +117,11 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     embedding_model = payload.embedding_model or "text-embedding-3-small"
     for node in nodes:
         text_for_classify = node["context_snippet"] or node["title"]
-        cls = classify_bloom_multilabel(text_for_classify)
+        cls = classify_bloom_multilabel(
+            text_for_classify,
+            min_prob=payload.min_prob or 0.2,
+            max_levels=payload.max_levels or 2,
+        )
         kn = KnowledgeNode(
             dataset_id=payload.dataset_id,
             document_id=payload.document_id,
