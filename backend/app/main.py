@@ -14,7 +14,6 @@ app.include_router(taxonomy.router)
 app.include_router(nodes.router)
 app.include_router(graph.router)
 
-
 @app.get("/health")
 def health():
     return {"ok": True}
