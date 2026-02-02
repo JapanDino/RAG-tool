@@ -21,6 +21,7 @@ def extract_nodes_from_text(text: str, max_nodes: int = 30, min_freq: int = 1):
     sentences = [s.strip() for s in re.split(r"[.!?\\n]+", text) if s.strip()]
     token_counts: Counter[str] = Counter()
     proper_tokens: list[str] = []
+    display_names: dict[str, str] = {}
 
     for sent in sentences:
         tokens = _WORD_RE.findall(sent)
@@ -31,8 +32,9 @@ def extract_nodes_from_text(text: str, max_nodes: int = 30, min_freq: int = 1):
             token_counts[lower] += 1
             if tok[0].isupper() and lower not in _STOPWORDS:
                 proper_tokens.append(tok)
+                display_names.setdefault(lower, tok)
 
-    candidates = []
+    candidates: list[tuple[str, str]] = []
     seen = set()
 
     for tok in proper_tokens:
@@ -40,7 +42,7 @@ def extract_nodes_from_text(text: str, max_nodes: int = 30, min_freq: int = 1):
         if lower in seen:
             continue
         seen.add(lower)
-        candidates.append(lower)
+        candidates.append((lower, "proper_noun"))
 
     for tok, _cnt in token_counts.most_common():
         if tok in seen:
@@ -48,19 +50,20 @@ def extract_nodes_from_text(text: str, max_nodes: int = 30, min_freq: int = 1):
         if _cnt < min_freq:
             continue
         seen.add(tok)
-        candidates.append(tok)
+        candidates.append((tok, "keyword"))
 
     nodes = []
-    for tok in candidates[:max_nodes]:
+    for tok, node_type in candidates[:max_nodes]:
         context = ""
         for sent in sentences:
             if re.search(rf"\\b{re.escape(tok)}\\b", sent, flags=re.IGNORECASE):
                 context = sent
                 break
         nodes.append({
-            "title": tok,
+            "title": display_names.get(tok, tok),
             "context_snippet": context[:240],
             "frequency": token_counts.get(tok, 1),
+            "node_type": node_type,
         })
 
     return nodes
