@@ -13,7 +13,7 @@
 | S0 | Нормализация плана и трекинга | done |
 | S1 | Контракт данных “узел” и “вероятности” | done |
 | S2 | Миграции БД под `KnowledgeNode` и multi‑label | done |
-| S3 | CRUD/API для узлов | todo |
+| S3 | CRUD/API для узлов | done |
 | S4 | ExtractNodes (MVP) | todo |
 | S5 | Multi‑label классификация (MVP) | todo |
 | S6 | Endpoint “Анализ контента” | todo |
