@@ -17,7 +17,7 @@
 | S4 | ExtractNodes (MVP) | done |
 | S5 | Multi‑label классификация (MVP) | done |
 | S6 | Endpoint “Анализ контента” | done |
-| S7 | Embeddings для узлов | todo |
+| S7 | Embeddings для узлов | done |
 | S8 | Рёбра графа | todo |
 | S9 | UI: вкладка “Анализ контента” | todo |
 | S10 | UI: вкладка “Граф знаний” | todo |
@@ -25,6 +25,7 @@
 | S12 | Материалы для защиты | todo |
 
 ## История изменений (кратко)
+- 2026‑02‑02: S7 — Embeddings для узлов (`/nodes/search`).
 - 2026‑02‑02: S6 — Endpoint “Анализ контента” (`/analyze/content`).
 - 2026‑02‑02: S5 — Multi‑label классификация (MVP) (`/analyze/classify`).
 - 2026‑02‑02: S4 — ExtractNodes (MVP) (`/analyze/extract`), node_type.
@@ -40,6 +41,7 @@
 - Базовый API анализа `/analyze` (простое чанкование) и эвристическая оценка уровней Блума.
 - ExtractNodes (MVP): `/analyze/extract` с node_type (`proper_noun`, `keyword`).
 - Multi‑label классификация (MVP): `/analyze/classify` с prob_vector/top_levels.
+- Поиск по узлам: `/nodes/search` по embedding-вектору.
 - Endpoint “Анализ контента”: `/analyze/content` с сохранением и эмбеддингами.
 - Миграции для `knowledge_nodes` и `knowledge_edges`.
 - CRUD/API для узлов (`/nodes`) и схемы в `backend/app/schemas`.

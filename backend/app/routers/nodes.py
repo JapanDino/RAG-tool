@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from ..db.session import get_db
 from ..models.models import KnowledgeNode
@@ -7,8 +8,11 @@ from ..schemas.schemas import (
     KnowledgeNodeBulkIn,
     KnowledgeNodeListOut,
     KnowledgeNodeOut,
+    KnowledgeNodeSearchHit,
     KnowledgeNodeUpdateIn,
 )
+from ..services.query_embed import embed_query
+from ..utils.vector import vector_literal
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
@@ -106,3 +110,41 @@ def delete_node(node_id: int, db: Session = Depends(get_db)):
     db.delete(node)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/search", response_model=list[KnowledgeNodeSearchHit])
+def search_nodes(
+    q: str = Query(..., min_length=1),
+    dataset_id: int | None = None,
+    embedding_model: str | None = None,
+    top_k: int = 5,
+    dim: int = 1536,
+    db: Session = Depends(get_db),
+):
+    qvec = embed_query(q, dim=dim)
+    lit = vector_literal(qvec)
+    filters = []
+    params = {"qvec": lit, "k": top_k}
+    if dataset_id is not None:
+        filters.append("kn.dataset_id = :ds")
+        params["ds"] = dataset_id
+    if embedding_model is not None:
+        filters.append("kn.embedding_model = :em")
+        params["em"] = embedding_model
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+    sql = f"""
+        WITH q AS (SELECT :qvec::vector AS v)
+        SELECT kn.id as node_id,
+               kn.title,
+               kn.context_text,
+               kn.dataset_id,
+               kn.document_id,
+               kn.chunk_id,
+               1.0 - (kn.vec <-> (SELECT v FROM q)) as score
+        FROM knowledge_nodes kn
+        {where_clause}
+        ORDER BY kn.vec <-> (SELECT v FROM q)
+        LIMIT :k
+    """
+    rows = db.execute(text(sql), params).mappings().all()
+    return rows
