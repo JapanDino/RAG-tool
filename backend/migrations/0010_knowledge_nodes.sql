@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
   chunk_id INT REFERENCES chunks(id) ON DELETE SET NULL,
   title TEXT NOT NULL,
   context_text TEXT NOT NULL,
-  prob_vector JSONB NOT NULL DEFAULT '{}'::jsonb,
+  prob_vector JSONB NOT NULL DEFAULT '[]'::jsonb,
   top_levels JSONB NOT NULL DEFAULT '[]'::jsonb,
   embedding_dim INT NOT NULL DEFAULT 1536,
   embedding_model VARCHAR(100) DEFAULT 'text-embedding-3-small',
