@@ -25,9 +25,11 @@ def create_nodes(payload: KnowledgeNodeBulkIn, db: Session = Depends(get_db)):
             context_text=node.context_text,
             prob_vector=node.prob_vector,
             top_levels=node.top_levels,
-            embedding_dim=node.embedding_dim or 1536,
+            embedding_dim=(
+                node.embedding_dim if node.embedding_dim is not None else 1536
+            ),
             embedding_model=node.embedding_model or "text-embedding-3-small",
-            version=node.version or 1,
+            version=node.version if node.version is not None else 1,
             model_info=node.model_info or {},
         )
         db.add(obj)
