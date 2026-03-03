@@ -15,24 +15,26 @@ def export_dataset(
     min_score: float | None = Query(None, ge=0.0, le=1.0),
     db: Session = Depends(get_db),
 ):
-    base_sql = """
+    filters = "WHERE d.dataset_id = :ds"
+    if level:
+        filters += " AND a.level = :lvl"
+    if min_score is not None:
+        filters += " AND coalesce(a.score, 0) >= :minsc"
+
+    base_sql = f"""
         SELECT c.id as chunk_id, c.text, d.title as document_title,
                coalesce(a.level::text,'') as level, coalesce(a.label,'') as label,
                coalesce(a.rationale,'') as rationale, coalesce(a.score,0) as score
         FROM chunks c
         JOIN documents d ON d.id = c.document_id
         LEFT JOIN LATERAL (
-            SELECT * FROM bloom_annotations a2 WHERE a2.chunk_id=c.id ORDER BY a2.created_at DESC LIMIT 1
+            SELECT * FROM bloom_annotations a2
+            WHERE a2.chunk_id = c.id
+            ORDER BY a2.created_at DESC LIMIT 1
         ) a ON true
-        WHERE d.dataset_id = :ds
+        {filters}
         ORDER BY d.id, c.idx
     """
-    if level:
-        base_sql = base_sql.replace("ORDER BY", "AND a.level = :lvl ORDER BY")
-    if min_score is not None:
-        base_sql = base_sql.replace(
-            "ORDER BY", "AND coalesce(a.score,0) >= :minsc ORDER BY"
-        )
     params = {"ds": dataset_id}
     if level:
         params["lvl"] = level
