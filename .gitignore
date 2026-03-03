@@ -5,6 +5,8 @@
 .env.*
 .vscode
 .idea
+.cursor/
+.claude/
 
 # python
 .venv/
