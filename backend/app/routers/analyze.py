@@ -25,8 +25,6 @@ from ..services.bloom_multilabel import classify_bloom_multilabel
 from ..services.node_extractor import get_node_extractor
 from ..utils.vector import vector_literal
 
-import os
-
 router = APIRouter(prefix="/analyze", tags=["analyze"])
 
 WORD_RE = re.compile(r"[\w-]+", re.UNICODE)
@@ -123,17 +121,9 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     min_prob = payload.min_prob or 0.2
     max_levels = payload.max_levels or 2
 
-    # For LLM classifier: 1 call on the full text gives good context and avoids
-    # N×API latency. For keyword classifier: per-node context_snippet is fast & accurate.
-    use_llm = os.getenv("BLOOM_CLASSIFIER", "keyword").strip().lower() == "llm"
-    cls_full = classify_bloom_multilabel(payload.text, min_prob=min_prob, max_levels=max_levels) if use_llm else None
-
     for node in nodes:
-        if use_llm:
-            cls = cls_full
-        else:
-            text_for_cls = node.get("context_snippet") or node["title"]
-            cls = classify_bloom_multilabel(text_for_cls, min_prob=min_prob, max_levels=max_levels)
+        text_for_cls = node.get("context_snippet") or node["title"]
+        cls = classify_bloom_multilabel(text_for_cls, min_prob=min_prob, max_levels=max_levels)
         rationale = cls.get("rationale")
         node_rationales.append(rationale)
         kn = KnowledgeNode(
