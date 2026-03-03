@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from ..db.session import get_db
 from ..models.models import Dataset, KnowledgeNode, NodeLabel
-from ..schemas.schemas import LabelQueueOut, LabelQueueItem
+from ..schemas.schemas import LabelQueueOut, LabelQueueItem, NodeLabelsIn, NodeLabelsOut
 from ..services.embedding_provider import current_embedding_model
 
 
@@ -40,8 +40,11 @@ def labeling_queue(
 
     # Fetch nodes and (optional) existing labels for annotator.
     # Left join: if include_labeled=false, we filter out labeled in SQL.
-    where = ["kn.dataset_id = :ds", "kn.embedding_model = :em"]
-    params: dict[str, Any] = {"ds": dataset_id, "em": em, "ann": annotator, "limit": limit * 5}
+    where = ["kn.dataset_id = :ds"]
+    params: dict[str, Any] = {"ds": dataset_id, "ann": annotator, "limit": limit * 5}
+    if embedding_model:
+        where.append("kn.embedding_model = :em")
+        params["em"] = embedding_model
     if not include_labeled:
         where.append("nl.id IS NULL")
 
@@ -86,19 +89,18 @@ def labeling_queue(
     items = items[:limit]
 
     # total/labeled stats
-    total = db.query(KnowledgeNode).filter(
-        KnowledgeNode.dataset_id == dataset_id, KnowledgeNode.embedding_model == em
-    ).count()
-    labeled_total = (
+    total_q = db.query(KnowledgeNode).filter(KnowledgeNode.dataset_id == dataset_id)
+    if embedding_model:
+        total_q = total_q.filter(KnowledgeNode.embedding_model == embedding_model)
+    total = total_q.count()
+    labeled_q = (
         db.query(NodeLabel)
         .join(KnowledgeNode, NodeLabel.node_id == KnowledgeNode.id)
-        .filter(
-            KnowledgeNode.dataset_id == dataset_id,
-            KnowledgeNode.embedding_model == em,
-            NodeLabel.annotator == annotator,
-        )
-        .count()
+        .filter(KnowledgeNode.dataset_id == dataset_id, NodeLabel.annotator == annotator)
     )
+    if embedding_model:
+        labeled_q = labeled_q.filter(KnowledgeNode.embedding_model == embedding_model)
+    labeled_total = labeled_q.count()
 
     return LabelQueueOut(total=total, labeled=labeled_total, items=items)
 
@@ -140,4 +142,62 @@ def export_labels(
         )
     body = "\n".join(lines) + ("\n" if lines else "")
     return Response(content=body, media_type="application/jsonl")
+
+
+# ── Per-node label endpoints (prefix /nodes, registered via main.py as separate router) ─
+
+nodes_router = APIRouter(prefix="/nodes", tags=["labeling"])
+
+
+@nodes_router.post("/{node_id}/labels", response_model=NodeLabelsOut)
+def set_node_labels(
+    node_id: int,
+    payload: NodeLabelsIn,
+    db: Session = Depends(get_db),
+):
+    node = db.get(KnowledgeNode, node_id)
+    if not node:
+        raise HTTPException(404, "node not found")
+    nl = (
+        db.query(NodeLabel)
+        .filter(NodeLabel.node_id == node_id, NodeLabel.annotator == payload.annotator)
+        .first()
+    )
+    if nl:
+        nl.labels = list(payload.labels)
+    else:
+        nl = NodeLabel(node_id=node_id, labels=list(payload.labels), annotator=payload.annotator, source="human")
+        db.add(nl)
+    db.commit()
+    db.refresh(nl)
+    return NodeLabelsOut(
+        node_id=node_id,
+        annotator=nl.annotator,
+        labels=nl.labels,
+        created_at=str(nl.created_at),
+    )
+
+
+@nodes_router.get("/{node_id}/labels", response_model=NodeLabelsOut)
+def get_node_labels(
+    node_id: int,
+    annotator: str = "default",
+    db: Session = Depends(get_db),
+):
+    node = db.get(KnowledgeNode, node_id)
+    if not node:
+        raise HTTPException(404, "node not found")
+    nl = (
+        db.query(NodeLabel)
+        .filter(NodeLabel.node_id == node_id, NodeLabel.annotator == annotator)
+        .first()
+    )
+    if not nl:
+        raise HTTPException(404, "no labels found for this node/annotator")
+    return NodeLabelsOut(
+        node_id=node_id,
+        annotator=nl.annotator,
+        labels=nl.labels,
+        created_at=str(nl.created_at),
+    )
 

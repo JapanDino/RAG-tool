@@ -87,6 +87,7 @@ def _per_level(y_true: list[list[int]], y_pred: list[list[int]]) -> dict[str, di
     return out
 
 
+@router.get("/metrics")
 @router.get("/multilabel")
 def evaluate_multilabel(
     dataset_id: int = Query(..., ge=1),
@@ -96,18 +97,17 @@ def evaluate_multilabel(
     max_levels: int = 2,
     db: Session = Depends(get_db),
 ):
-    em = embedding_model or current_embedding_model()
-
-    rows = (
+    q = (
         db.query(NodeLabel, KnowledgeNode)
         .join(KnowledgeNode, NodeLabel.node_id == KnowledgeNode.id)
         .filter(
             KnowledgeNode.dataset_id == dataset_id,
-            KnowledgeNode.embedding_model == em,
             NodeLabel.annotator == annotator,
         )
-        .all()
     )
+    if embedding_model:
+        q = q.filter(KnowledgeNode.embedding_model == embedding_model)
+    rows = q.all()
     if not rows:
         raise HTTPException(404, "no labeled nodes found")
 
@@ -128,7 +128,7 @@ def evaluate_multilabel(
         "per_level": _per_level(y_true, y_pred),
         "min_prob": min_prob,
         "max_levels": max_levels,
-        "embedding_model": em,
+        "embedding_model": embedding_model or "all",
         "annotator": annotator,
     }
     return report

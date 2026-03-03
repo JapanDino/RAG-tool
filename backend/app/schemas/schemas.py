@@ -1,5 +1,6 @@
 from pydantic import BaseModel
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List, Union
+from datetime import datetime
 
 BloomLevel = Literal["remember","understand","apply","analyze","evaluate","create"]
 NodeType = Literal["proper_noun","concept","skill","keyword","formula","other"]
@@ -148,7 +149,7 @@ class KnowledgeNodeOut(BaseModel):
     embedding_model: str
     version: int
     model_info: dict
-    created_at: Optional[str] = None
+    created_at: Optional[Union[datetime, str]] = None
 
     class Config:
         from_attributes = True
@@ -187,7 +188,7 @@ class NodeLabelsOut(BaseModel):
     node_id: int
     annotator: str
     labels: List[BloomLevel]
-    created_at: Optional[str] = None
+    created_at: Optional[Union[datetime, str]] = None
 
 class LabelQueueItem(BaseModel):
     id: int

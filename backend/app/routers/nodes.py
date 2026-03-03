@@ -66,52 +66,6 @@ def list_nodes(
     return {"total": total, "items": items}
 
 
-@router.get("/{node_id}", response_model=KnowledgeNodeOut)
-def get_node(node_id: int, db: Session = Depends(get_db)):
-    node = db.get(KnowledgeNode, node_id)
-    if not node:
-        raise HTTPException(404, "node not found")
-    return node
-
-
-@router.put("/{node_id}", response_model=KnowledgeNodeOut)
-def update_node(node_id: int, payload: KnowledgeNodeUpdateIn, db: Session = Depends(get_db)):
-    node = db.get(KnowledgeNode, node_id)
-    if not node:
-        raise HTTPException(404, "node not found")
-
-    if payload.title is not None:
-        node.title = payload.title
-    if payload.context_text is not None:
-        node.context_text = payload.context_text
-    if payload.prob_vector is not None:
-        node.prob_vector = payload.prob_vector
-    if payload.top_levels is not None:
-        node.top_levels = payload.top_levels
-    if payload.embedding_dim is not None:
-        node.embedding_dim = payload.embedding_dim
-    if payload.embedding_model is not None:
-        node.embedding_model = payload.embedding_model
-    if payload.version is not None:
-        node.version = payload.version
-    if payload.model_info is not None:
-        node.model_info = payload.model_info
-
-    db.commit()
-    db.refresh(node)
-    return node
-
-
-@router.delete("/{node_id}")
-def delete_node(node_id: int, db: Session = Depends(get_db)):
-    node = db.get(KnowledgeNode, node_id)
-    if not node:
-        raise HTTPException(404, "node not found")
-    db.delete(node)
-    db.commit()
-    return {"ok": True}
-
-
 @router.get("/search", response_model=list[KnowledgeNodeSearchHit])
 def search_nodes(
     q: str = Query(..., min_length=1),
@@ -150,3 +104,47 @@ def search_nodes(
     """
     rows = db.execute(text(sql), params).mappings().all()
     return rows
+
+
+@router.get("/{node_id}", response_model=KnowledgeNodeOut)
+def get_node(node_id: int, db: Session = Depends(get_db)):
+    node = db.get(KnowledgeNode, node_id)
+    if not node:
+        raise HTTPException(404, "node not found")
+    return node
+
+
+@router.put("/{node_id}", response_model=KnowledgeNodeOut)
+def update_node(node_id: int, payload: KnowledgeNodeUpdateIn, db: Session = Depends(get_db)):
+    node = db.get(KnowledgeNode, node_id)
+    if not node:
+        raise HTTPException(404, "node not found")
+    if payload.title is not None:
+        node.title = payload.title
+    if payload.context_text is not None:
+        node.context_text = payload.context_text
+    if payload.prob_vector is not None:
+        node.prob_vector = payload.prob_vector
+    if payload.top_levels is not None:
+        node.top_levels = payload.top_levels
+    if payload.embedding_dim is not None:
+        node.embedding_dim = payload.embedding_dim
+    if payload.embedding_model is not None:
+        node.embedding_model = payload.embedding_model
+    if payload.version is not None:
+        node.version = payload.version
+    if payload.model_info is not None:
+        node.model_info = payload.model_info
+    db.commit()
+    db.refresh(node)
+    return node
+
+
+@router.delete("/{node_id}")
+def delete_node(node_id: int, db: Session = Depends(get_db)):
+    node = db.get(KnowledgeNode, node_id)
+    if not node:
+        raise HTTPException(404, "node not found")
+    db.delete(node)
+    db.commit()
+    return {"ok": True}
