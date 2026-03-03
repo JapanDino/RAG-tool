@@ -43,4 +43,5 @@ def start_index(dataset_id: int, db: Session = Depends(get_db)):
 def start_annotate(dataset_id: int, level: str = Query(..., pattern="^(remember|understand|apply|analyze|evaluate|create)$"), db: Session = Depends(get_db)):
     job = Job(type=JobType.annotate, status=JobStatus.queued, payload={"dataset_id": dataset_id, "level": level})
     db.add(job); db.commit(); db.refresh(job)
+    enqueue_or_mark(db, job)
     return {"job_id": job.id}

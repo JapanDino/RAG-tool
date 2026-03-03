@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from typing import Optional, Literal, List
 
 BloomLevel = Literal["remember","understand","apply","analyze","evaluate","create"]
-NodeType = Literal["proper_noun","keyword"]
+NodeType = Literal["proper_noun","concept","skill","keyword","formula","other"]
 
 class DatasetIn(BaseModel): name: str
 class DatasetOut(BaseModel):
@@ -79,6 +79,7 @@ class ExtractNodeOut(BaseModel):
     context_snippet: str
     frequency: int
     node_type: NodeType
+    source: Optional[dict] = None
 
 class ExtractNodesOut(BaseModel):
     nodes: List[ExtractNodeOut]
@@ -96,6 +97,7 @@ class ClassifyNodeOut(BaseModel):
     title: str
     prob_vector: List[float]
     top_levels: List[BloomLevel]
+    rationale: Optional[str] = None
 
 class ClassifyNodesOut(BaseModel):
     nodes: List[ClassifyNodeOut]
@@ -129,7 +131,7 @@ class KnowledgeNodeIn(BaseModel):
     prob_vector: List[float]
     top_levels: List[BloomLevel]
     embedding_dim: Optional[int] = 1536
-    embedding_model: Optional[str] = "text-embedding-3-small"
+    embedding_model: Optional[str] = None
     version: Optional[int] = 1
     model_info: Optional[dict] = None
 
@@ -177,6 +179,41 @@ class KnowledgeNodeSearchHit(BaseModel):
     document_id: Optional[int] = None
     chunk_id: Optional[int] = None
 
+class NodeLabelsIn(BaseModel):
+    labels: List[BloomLevel]
+    annotator: str = "default"
+
+class NodeLabelsOut(BaseModel):
+    node_id: int
+    annotator: str
+    labels: List[BloomLevel]
+    created_at: Optional[str] = None
+
+class LabelQueueItem(BaseModel):
+    id: int
+    title: str
+    context_text: str
+    prob_vector: List[float]
+    top_levels: List[BloomLevel]
+    frequency: Optional[int] = None
+    rationale: Optional[str] = None
+    labeled: bool = False
+    labels: Optional[List[BloomLevel]] = None
+
+class LabelQueueOut(BaseModel):
+    total: int
+    labeled: int
+    items: List[LabelQueueItem]
+
+class NodeMergeIn(BaseModel):
+    target_id: int
+    source_ids: List[int]
+
+class NodeMergeOut(BaseModel):
+    ok: bool
+    target_id: int
+    merged: int
+
 class AnalyzeContentIn(BaseModel):
     text: str
     dataset_id: int
@@ -186,7 +223,7 @@ class AnalyzeContentIn(BaseModel):
     min_prob: Optional[float] = 0.2
     max_levels: Optional[int] = 2
     embedding_dim: Optional[int] = 1536
-    embedding_model: Optional[str] = "text-embedding-3-small"
+    embedding_model: Optional[str] = None
     extractor: Optional[str] = "heuristic-v1"
     classifier: Optional[str] = "keyword-v1"
 
@@ -196,6 +233,8 @@ class AnalyzeNodeOut(BaseModel):
     context_text: str
     prob_vector: List[float]
     top_levels: List[BloomLevel]
+    frequency: Optional[int] = None
+    rationale: Optional[str] = None
 
 class AnalyzeContentOut(BaseModel):
     nodes: List[AnalyzeNodeOut]
@@ -206,6 +245,8 @@ class GraphNodeOut(BaseModel):
     context_text: str
     prob_vector: List[float]
     top_levels: List[BloomLevel]
+    frequency: Optional[int] = None
+    rationale: Optional[str] = None
 
 class GraphEdgeOut(BaseModel):
     from_id: int
@@ -215,3 +256,16 @@ class GraphEdgeOut(BaseModel):
 class GraphOut(BaseModel):
     nodes: List[GraphNodeOut]
     edges: List[GraphEdgeOut]
+
+class GraphRebuildIn(BaseModel):
+    dataset_id: int
+    embedding_model: Optional[str] = None
+    top_k: int = 5
+    min_score: float = 0.2
+    max_edges: int = 200
+    include_cooccurrence: bool = True
+    limit_nodes: int = 500
+    co_window: int = 2
+
+class GraphRebuildOut(BaseModel):
+    job_id: int
