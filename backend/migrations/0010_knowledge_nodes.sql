@@ -18,4 +18,4 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_dataset_id ON knowledge_nodes (dataset_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_document_id ON knowledge_nodes (document_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_chunk_id ON knowledge_nodes (chunk_id);
-CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_vec ON knowledge_nodes USING ivfflat (vec) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_vec ON knowledge_nodes USING ivfflat (vec vector_l2_ops) WITH (lists = 100);

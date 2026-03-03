@@ -1,3 +1,6 @@
+-- pgvector provides the `vector` type used for embeddings.
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS datasets (
   id SERIAL PRIMARY KEY,
   name VARCHAR(200) UNIQUE NOT NULL,
@@ -28,7 +31,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
   model VARCHAR(100) DEFAULT 'text-embedding-3-small',
   created_at TIMESTAMPTZ DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_embeddings_vec ON embeddings USING ivfflat (vec) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS idx_embeddings_vec ON embeddings USING ivfflat (vec vector_l2_ops) WITH (lists = 100);
 
 DO $$
 BEGIN
