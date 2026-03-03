@@ -150,6 +150,7 @@ nodes_router = APIRouter(prefix="/nodes", tags=["labeling"])
 
 
 @nodes_router.post("/{node_id}/labels", response_model=NodeLabelsOut)
+@nodes_router.put("/{node_id}/labels", response_model=NodeLabelsOut)
 def set_node_labels(
     node_id: int,
     payload: NodeLabelsIn,
