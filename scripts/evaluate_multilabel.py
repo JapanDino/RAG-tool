@@ -7,7 +7,9 @@ import sys
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from backend.app.utils.bloom import classify_bloom_multilabel
+from backend.app.services.bloom_multilabel import classify_bloom_multilabel
+from backend.app.db.session import SessionLocal
+from backend.app.models.models import KnowledgeNode, NodeLabel
 
 
 LEVELS = ["remember", "understand", "apply", "analyze", "evaluate", "create"]
@@ -70,15 +72,53 @@ def load_dataset(path: Path) -> list[dict]:
     return items
 
 
+def load_from_db(dataset_id: int, annotator: str = "default", embedding_model: str | None = None) -> list[dict]:
+    db = SessionLocal()
+    try:
+        q = (
+            db.query(NodeLabel, KnowledgeNode)
+            .join(KnowledgeNode, NodeLabel.node_id == KnowledgeNode.id)
+            .filter(KnowledgeNode.dataset_id == dataset_id, NodeLabel.annotator == annotator)
+        )
+        if embedding_model:
+            q = q.filter(KnowledgeNode.embedding_model == embedding_model)
+        rows = q.all()
+        items = []
+        for nl, kn in rows:
+            items.append(
+                {
+                    "text": f"{kn.title}. {kn.context_text}".strip(),
+                    "labels": nl.labels or [],
+                    "node_id": kn.id,
+                }
+            )
+        return items
+    finally:
+        db.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="data/bloom_dataset.jsonl")
+    parser.add_argument("--from-db", action="store_true", help="Load labeled nodes from DB (node_labels)")
+    parser.add_argument("--dataset-id", type=int, default=0)
+    parser.add_argument("--annotator", default="default")
+    parser.add_argument("--embedding-model", default="")
     parser.add_argument("--min-prob", type=float, default=0.2)
     parser.add_argument("--max-levels", type=int, default=2)
     parser.add_argument("--out", default="")
     args = parser.parse_args()
 
-    dataset = load_dataset(Path(args.data))
+    if args.from_db:
+        if not args.dataset_id:
+            raise SystemExit("--dataset-id is required with --from-db")
+        dataset = load_from_db(
+            args.dataset_id,
+            annotator=args.annotator,
+            embedding_model=args.embedding_model or None,
+        )
+    else:
+        dataset = load_dataset(Path(args.data))
     y_true: list[list[int]] = []
     y_pred: list[list[int]] = []
 
@@ -102,6 +142,9 @@ def main():
         "f1_macro": round(_f1_macro(y_true, y_pred), 4),
         "min_prob": args.min_prob,
         "max_levels": args.max_levels,
+        "from_db": bool(args.from_db),
+        "dataset_id": args.dataset_id or None,
+        "annotator": args.annotator if args.from_db else None,
     }
 
     out_text = json.dumps(report, ensure_ascii=False, indent=2)

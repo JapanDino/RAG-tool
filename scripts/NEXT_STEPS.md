@@ -7,7 +7,7 @@ Next steps to run later:
    # или одной командой:
    ./scripts/apply_migrations.sh
 2) Backend env (backend/.env):
-   DATABASE_URL=postgresql+psycopg2://rag:rag_pass@localhost:5432/rag_db
+   DATABASE_URL=postgresql+psycopg://rag:rag_pass@localhost:5432/rag_db
    REDIS_URL=redis://localhost:6379/0
    ENABLE_CELERY=1
    # LLM-аннотация (по умолчанию выключена):
