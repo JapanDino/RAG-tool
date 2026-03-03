@@ -135,7 +135,7 @@ def search_nodes(
         params["em"] = embedding_model
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     sql = f"""
-        WITH q AS (SELECT :qvec::vector AS v)
+        WITH q AS (SELECT CAST(:qvec AS vector) AS v)
         SELECT kn.id as node_id,
                kn.title,
                kn.context_text,

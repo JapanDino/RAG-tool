@@ -21,7 +21,7 @@ from ..schemas.schemas import (
 from ..services.bloom_classifier import bloom_probabilities
 from ..services.chunking import split_into_chunks
 from ..services.embedding import embed_texts
-from ..utils.bloom import classify_bloom_multilabel
+from ..services.bloom_multilabel import classify_bloom_multilabel
 from ..utils.node_extract import extract_nodes_from_text
 from ..utils.vector import vector_literal
 
@@ -113,17 +113,24 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
         return {"nodes": []}
 
     stored_nodes: list[KnowledgeNode] = []
+    node_rationales: list[str | None] = []
     embedding_dim = payload.embedding_dim or 1536
     if embedding_dim != 1536:
         raise HTTPException(400, "embedding_dim must be 1536 for current storage")
     embedding_model = payload.embedding_model or "text-embedding-3-small"
+
+    # Classify the full source text once, then reuse for all nodes.
+    # This avoids N LLM calls (one per word) and gives better context.
+    cls_full = classify_bloom_multilabel(
+        payload.text,
+        min_prob=payload.min_prob or 0.2,
+        max_levels=payload.max_levels or 2,
+    )
+
     for node in nodes:
-        text_for_classify = node["context_snippet"] or node["title"]
-        cls = classify_bloom_multilabel(
-            text_for_classify,
-            min_prob=payload.min_prob or 0.2,
-            max_levels=payload.max_levels or 2,
-        )
+        rationale = cls_full.get("rationale")
+        node_rationales.append(rationale)
+        cls = cls_full
         kn = KnowledgeNode(
             dataset_id=payload.dataset_id,
             document_id=payload.document_id,
@@ -137,6 +144,7 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
                 "extractor": payload.extractor or "heuristic-v1",
                 "classifier": payload.classifier or "keyword-v1",
                 "node_type": node.get("node_type"),
+                "rationale": rationale,
             },
         )
         db.add(kn)
@@ -152,7 +160,7 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     vecs = embed_texts(embed_inputs, dim=embedding_dim)
     for kn, vec in zip(stored_nodes, vecs):
         db.execute(
-            text("UPDATE knowledge_nodes SET vec = :v::vector WHERE id = :id"),
+            text("UPDATE knowledge_nodes SET vec = CAST(:v AS vector) WHERE id = :id"),
             {"v": vector_literal(vec), "id": kn.id},
         )
     db.commit()
@@ -165,7 +173,8 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
                 "context_text": kn.context_text,
                 "prob_vector": kn.prob_vector,
                 "top_levels": kn.top_levels,
+                "rationale": rationale,
             }
-            for kn in stored_nodes
+            for kn, rationale in zip(stored_nodes, node_rationales)
         ]
     }
