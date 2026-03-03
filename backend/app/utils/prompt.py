@@ -37,3 +37,32 @@ def build_bloom_prompt(chunk: str, level: str, rubric: str | None = None) -> str
         )
         .strip()
     )
+
+
+def build_bloom_multilabel_prompt(text: str) -> str:
+    return (
+        dedent(
+            f"""
+            Вы — эксперт-методист. Определите уровни таксономии Блума для фрагмента.
+            Нужно вернуть вероятности по 6 уровням пересмотренной таксономии (Remember..Create).
+
+            Требуемый формат JSON (без пояснений вне JSON):
+            {{
+              "prob_vector": [p_remember, p_understand, p_apply, p_analyze, p_evaluate, p_create],
+              "top_levels": ["remember", "analyze"],
+              "rationale": "<кратко почему>"
+            }}
+
+            Ограничения:
+            - prob_vector ровно 6 чисел, каждое в [0,1]
+            - сумма prob_vector должна быть 1.0 (или очень близко)
+            - top_levels: 1+ уровней из: remember/understand/apply/analyze/evaluate/create
+
+            Фрагмент:
+            ---
+            {text}
+            ---
+            """
+        )
+        .strip()
+    )
