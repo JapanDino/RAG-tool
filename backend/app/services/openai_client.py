@@ -3,8 +3,12 @@ import os
 
 import requests
 
-OPENAI_BASE = os.getenv("OPENAI_BASE", "https://api.openai.com/v1")
+_DEFAULT_BASE = "https://api.openai.com/v1"
 OPENAI_TIMEOUT = float(os.getenv("OPENAI_TIMEOUT", "30"))
+
+
+def _base() -> str:
+    return os.getenv("OPENAI_BASE", _DEFAULT_BASE).rstrip("/")
 
 def extract_json_block(text: str) -> str:
     """Возвращает JSON-строку из content: ищет ```json ... ``` или первую валидную JSON-структуру."""
@@ -34,7 +38,7 @@ def chat_completion_json(model: str, prompt: str, max_tokens: int = 400) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is empty")
-    url = f"{OPENAI_BASE}/chat/completions"
+    url = f"{_base()}/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -55,7 +59,7 @@ def embeddings(model: str, inputs: list[str]) -> list[list[float]]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is empty")
-    url = f"{OPENAI_BASE}/embeddings"
+    url = f"{_base()}/embeddings"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
