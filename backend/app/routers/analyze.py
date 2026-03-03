@@ -22,8 +22,10 @@ from ..services.bloom_classifier import bloom_probabilities
 from ..services.chunking import split_into_chunks
 from ..services.embedding import embed_texts
 from ..services.bloom_multilabel import classify_bloom_multilabel
-from ..utils.node_extract import extract_nodes_from_text
+from ..services.node_extractor import get_node_extractor
 from ..utils.vector import vector_literal
+
+import os
 
 router = APIRouter(prefix="/analyze", tags=["analyze"])
 
@@ -104,10 +106,10 @@ def classify_nodes(payload: ClassifyNodesIn):
 
 @router.post("/content", response_model=AnalyzeContentOut)
 def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
-    nodes = extract_nodes_from_text(
+    nodes = get_node_extractor().extract(
         payload.text,
-        max_nodes=payload.max_nodes,
-        min_freq=payload.min_freq,
+        max_nodes=payload.max_nodes or 30,
+        min_freq=payload.min_freq or 1,
     )
     if not nodes:
         return {"nodes": []}
@@ -118,19 +120,22 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     if embedding_dim != 1536:
         raise HTTPException(400, "embedding_dim must be 1536 for current storage")
     embedding_model = payload.embedding_model or "text-embedding-3-small"
+    min_prob = payload.min_prob or 0.2
+    max_levels = payload.max_levels or 2
 
-    # Classify the full source text once, then reuse for all nodes.
-    # This avoids N LLM calls (one per word) and gives better context.
-    cls_full = classify_bloom_multilabel(
-        payload.text,
-        min_prob=payload.min_prob or 0.2,
-        max_levels=payload.max_levels or 2,
-    )
+    # For LLM classifier: 1 call on the full text gives good context and avoids
+    # N×API latency. For keyword classifier: per-node context_snippet is fast & accurate.
+    use_llm = os.getenv("BLOOM_CLASSIFIER", "keyword").strip().lower() == "llm"
+    cls_full = classify_bloom_multilabel(payload.text, min_prob=min_prob, max_levels=max_levels) if use_llm else None
 
     for node in nodes:
-        rationale = cls_full.get("rationale")
+        if use_llm:
+            cls = cls_full
+        else:
+            text_for_cls = node.get("context_snippet") or node["title"]
+            cls = classify_bloom_multilabel(text_for_cls, min_prob=min_prob, max_levels=max_levels)
+        rationale = cls.get("rationale")
         node_rationales.append(rationale)
-        cls = cls_full
         kn = KnowledgeNode(
             dataset_id=payload.dataset_id,
             document_id=payload.document_id,

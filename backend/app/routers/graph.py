@@ -7,10 +7,34 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from ..db.session import get_db
-from ..models.models import KnowledgeNode
-from ..schemas.schemas import GraphOut, GraphNodeOut, GraphEdgeOut
+from ..models.models import KnowledgeNode, Job, JobType, JobStatus
+from ..schemas.schemas import GraphOut, GraphNodeOut, GraphEdgeOut, GraphRebuildIn, GraphRebuildOut
+from ..tasks.queue import enqueue_or_mark
 
 router = APIRouter(prefix="/graph", tags=["graph"])
+
+
+@router.post("/rebuild", response_model=GraphRebuildOut)
+def rebuild_graph(payload: GraphRebuildIn, db: Session = Depends(get_db)):
+    job = Job(
+        type=JobType.graph,
+        status=JobStatus.queued,
+        payload={
+            "dataset_id": payload.dataset_id,
+            "embedding_model": payload.embedding_model,
+            "top_k": payload.top_k,
+            "min_score": payload.min_score,
+            "max_edges": payload.max_edges,
+            "include_cooccurrence": payload.include_cooccurrence,
+            "limit_nodes": payload.limit_nodes,
+            "co_window": payload.co_window,
+        },
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    enqueue_or_mark(db, job)
+    return GraphRebuildOut(job_id=job.id)
 
 
 def _add_edge(edge_map: dict[tuple[int, int, str], float], a: int, b: int, weight: float, method: str):

@@ -56,7 +56,7 @@ def extract_nodes_from_text(text: str, max_nodes: int = 30, min_freq: int = 1):
     for tok, node_type in candidates[:max_nodes]:
         context = ""
         for sent in sentences:
-            if re.search(rf"\\b{re.escape(tok)}\\b", sent, flags=re.IGNORECASE):
+            if re.search(rf"\b{re.escape(tok)}\b", sent, flags=re.IGNORECASE):
                 context = sent
                 break
         nodes.append({
