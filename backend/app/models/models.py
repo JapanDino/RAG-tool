@@ -4,7 +4,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 import enum
 
-class JobType(str, enum.Enum): index="index"; annotate="annotate"; export="export"
+class JobType(str, enum.Enum): index="index"; annotate="annotate"; export="export"; graph="graph"
 class JobStatus(str, enum.Enum): queued="queued"; running="running"; done="done"; failed="failed"
 class BloomLevel(str, enum.Enum): remember="remember"; understand="understand"; apply="apply"; analyze="analyze"; evaluate="evaluate"; create="create"
 
@@ -68,6 +68,15 @@ class KnowledgeEdge(Base):
     to_node_id: Mapped[int] = mapped_column(ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True)
     weight: Mapped[float] = mapped_column(Float, default=0.0)
     method: Mapped[str] = mapped_column(String(100), default="vector_topk")
+    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class NodeLabel(Base):
+    __tablename__ = "node_labels"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True)
+    labels: Mapped[list] = mapped_column(JSON, default=list)
+    annotator: Mapped[str] = mapped_column(String(200), default="default", index=True)
+    source: Mapped[str] = mapped_column(String(50), default="human")
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class Rubric(Base):
