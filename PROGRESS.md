@@ -3,7 +3,7 @@
 > **TZ Source**: `docs/DEVELOPMENT_PLAN_TZ_BLOOM.md` (+ `docs/PRODUCT_PLAN.md`)
 > **Last Updated**: 2026-03-03
 > **Overall Progress**: 100% (13/13 core steps done -- MVP complete)
-> **Audit**: 2026-03-03 -- full source audit + smoke test; all bugs fixed; 34/34 endpoints green
+> **Audit**: 2026-03-03 -- full source audit + smoke test + UI test; all bugs fixed; 34/34 endpoints green; all 3 UI tabs verified
 
 ---
 
@@ -14,7 +14,7 @@
 | In Progress | 0 |
 | Pending | 0 |
 | Blocked | 0 |
-| Bugs (critical) | 0 (5 found, 5 fixed) |
+| Bugs (critical) | 0 (6 found, 6 fixed) |
 | Bugs (non-critical) | 0 (4 found, 4 fixed) |
 | Enhancements | 3 remaining |
 
@@ -129,6 +129,12 @@
 - **Fixed**: Added `field_validator("level", mode="before")` with `_enum_to_str()` helper
   to `RubricOut`, `AnnotationOut`, `AnnotationWithChunkOut` in `schemas.py`.
 
+### ✅ BUG-10 -- `PUT /nodes/{node_id}/labels` → 405 Method Not Allowed
+- **Found**: UI test (2026-03-03). Labeling tab "Сохранить и далее" sends `PUT /nodes/{id}/labels`
+  but only `POST` was registered → 405, label never saved.
+- **Fixed**: Added `@nodes_router.put("/{node_id}/labels")` decorator as alias to the same
+  `set_node_labels` handler in `labeling.py`.
+
 ---
 
 ## Blocked
@@ -155,6 +161,14 @@ None.
 ---
 
 ## Work Log
+
+### 2026-03-03 -- UI test (all 3 tabs verified)
+- Launched frontend container (Next.js 14, port 3000).
+- Tab "Анализ": created dataset, entered text → 17 nodes with Bloom levels, rationale, prob_vector. ✅
+- Tab "Граф": loaded 17 nodes, Rebuild edges job → status done. ✅
+- Tab "Разметка": loaded queue (17 items), saved label → BUG-10 found (PUT 405).
+- Fixed BUG-10: added PUT alias to `labeling.py`. Label saved, progress 1/17. ✅
+- Committed and pushed (9032406).
 
 ### 2026-03-03 -- Full smoke test (34/34 green)
 - Ran comprehensive smoke test covering all 34 registered endpoints.
