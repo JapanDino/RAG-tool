@@ -1,76 +1,202 @@
+/* ============================================================
+   Bloom RAG Studio — Design System (Dark Theme)
+   ============================================================ */
+
+/* Google Fonts: Inter */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 :root {
-  --paper: #fbf7ef;
-  --paper-2: #f3efe6;
-  --ink: #121015;
-  --muted: rgba(18, 16, 21, 0.62);
-  --faint: rgba(18, 16, 21, 0.12);
-  --faint-2: rgba(18, 16, 21, 0.08);
+  /* === Background layers === */
+  --bg-base:    #0f1117;
+  --bg-surface: #161b27;
+  --bg-card:    #1c2235;
+  --bg-card-2:  #202840;
+  --bg-hover:   #232b42;
+  --bg-overlay: rgba(28, 34, 53, 0.85);
 
-  --accent: #1f6c8f;
-  --accent-2: #c35b2d;
-  --good: #1d7a3b;
-  --bad: #b23a3a;
+  /* === Borders === */
+  --border:       rgba(255, 255, 255, 0.07);
+  --border-2:     rgba(255, 255, 255, 0.12);
+  --border-focus: rgba(99, 102, 241, 0.6);
 
-  --shadow: 0 18px 55px rgba(18, 16, 21, 0.12);
-  --shadow-tight: 0 10px 30px rgba(18, 16, 21, 0.12);
+  /* === Text === */
+  --text-primary:   #e8eaf0;
+  --text-secondary: #8b92a8;
+  --text-muted:     #5a6175;
+  --text-accent:    #818cf8;
 
-  --r-lg: 18px;
-  --r-md: 12px;
-  --r-sm: 10px;
+  /* === Accent (Indigo/Violet) === */
+  --accent:          #6366f1;
+  --accent-hover:    #4f52d9;
+  --accent-light:    rgba(99, 102, 241, 0.15);
+  --accent-border:   rgba(99, 102, 241, 0.35);
+  --accent-glow:     0 0 20px rgba(99, 102, 241, 0.25);
 
-  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, serif;
-  --font-sans: "Segoe UI Variable Text", "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+  /* === Semantic === */
+  --success:       #10b981;
+  --success-light: rgba(16, 185, 129, 0.15);
+  --warning:       #f59e0b;
+  --warning-light: rgba(245, 158, 11, 0.15);
+  --error:         #ef4444;
+  --error-light:   rgba(239, 68, 68, 0.12);
+  --info:          #06b6d4;
+  --info-light:    rgba(6, 182, 212, 0.12);
+
+  /* === Bloom Level Colors (vivid on dark) === */
+  --bloom-remember:    #60a5fa;   /* blue-400 */
+  --bloom-understand:  #34d399;   /* emerald-400 */
+  --bloom-apply:       #fb923c;   /* orange-400 */
+  --bloom-analyze:     #c084fc;   /* purple-400 */
+  --bloom-evaluate:    #f87171;   /* red-400 */
+  --bloom-create:      #2dd4bf;   /* teal-400 */
+
+  --bloom-remember-bg:    rgba(96, 165, 250, 0.14);
+  --bloom-understand-bg:  rgba(52, 211, 153, 0.14);
+  --bloom-apply-bg:       rgba(251, 146, 60, 0.14);
+  --bloom-analyze-bg:     rgba(192, 132, 252, 0.14);
+  --bloom-evaluate-bg:    rgba(248, 113, 113, 0.14);
+  --bloom-create-bg:      rgba(45, 212, 191, 0.14);
+
+  /* === Shadows === */
+  --shadow-sm:  0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-md:  0 4px 20px rgba(0, 0, 0, 0.4);
+  --shadow-lg:  0 8px 40px rgba(0, 0, 0, 0.5);
+  --shadow-xl:  0 16px 64px rgba(0, 0, 0, 0.6);
+
+  /* === Radii === */
+  --r-xs:  6px;
+  --r-sm:  8px;
+  --r-md:  12px;
+  --r-lg:  16px;
+  --r-xl:  20px;
+  --r-2xl: 24px;
+  --r-pill: 999px;
+
+  /* === Typography === */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+
+  /* === Transitions === */
+  --transition-fast:   all 0.12s ease;
+  --transition-base:   all 0.2s ease;
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* === Spacing === */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
 }
 
-* { box-sizing: border-box; }
+/* === Reset === */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 html, body {
   height: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
-  margin: 0;
-  color: var(--ink);
   font-family: var(--font-sans);
-  background:
-    radial-gradient(1200px 700px at 15% 10%, rgba(31, 108, 143, 0.18), transparent 55%),
-    radial-gradient(900px 600px at 85% 5%, rgba(195, 91, 45, 0.12), transparent 50%),
-    radial-gradient(900px 700px at 70% 85%, rgba(31, 108, 143, 0.08), transparent 55%),
-    linear-gradient(180deg, var(--paper), var(--paper-2));
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background-color: var(--bg-base);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(99, 102, 241, 0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 110%, rgba(6, 182, 212, 0.08) 0%, transparent 55%);
   background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Subtle grid/noise without images */
+/* Subtle grid overlay */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background:
-    linear-gradient(to right, rgba(18, 16, 21, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(18, 16, 21, 0.03) 1px, transparent 1px);
-  background-size: 56px 56px;
-  opacity: 0.35;
-  mix-blend-mode: multiply;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+  background-size: 40px 40px;
+  z-index: 0;
 }
 
 a {
-  color: inherit;
+  color: var(--text-accent);
   text-decoration: none;
+  transition: var(--transition-fast);
+}
+
+a:hover {
+  color: var(--accent);
 }
 
 button, input, textarea, select {
   font: inherit;
+  color: inherit;
 }
 
+/* Scrollbar — dark thin style */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--r-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Selection */
 ::selection {
-  background: rgba(31, 108, 143, 0.22);
+  background: rgba(99, 102, 241, 0.3);
+  color: #fff;
 }
 
+/* Focus ring */
 :focus-visible {
-  outline: 3px solid rgba(31, 108, 143, 0.35);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
 }
 
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.7; transform: scale(0.85); }
+}
+
+@keyframes shimmer {
+  from { background-position: -200% center; }
+  to   { background-position: 200% center; }
+}

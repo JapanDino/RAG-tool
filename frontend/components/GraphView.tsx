@@ -7,30 +7,31 @@ type BloomLevel = "remember" | "understand" | "apply" | "analyze" | "evaluate" |
 const BLOOM_LEVELS: BloomLevel[] = ["remember", "understand", "apply", "analyze", "evaluate", "create"];
 
 const LEVEL_LABELS: Record<BloomLevel, string> = {
-  remember: "Знать",
+  remember:   "Знать",
   understand: "Понимать",
-  apply: "Применять",
-  analyze: "Анализировать",
-  evaluate: "Оценивать",
-  create: "Создавать",
+  apply:      "Применять",
+  analyze:    "Анализировать",
+  evaluate:   "Оценивать",
+  create:     "Создавать",
 };
 
+// Vivid palette matching the dark design system
 const LEVEL_COLORS: Record<BloomLevel, string> = {
-  remember: "#4e79a7",
-  understand: "#59a14f",
-  apply: "#f28e2b",
-  analyze: "#af7aa1",
-  evaluate: "#e15759",
-  create: "#76b7b2",
+  remember:   "#60a5fa",
+  understand: "#34d399",
+  apply:      "#fb923c",
+  analyze:    "#c084fc",
+  evaluate:   "#f87171",
+  create:     "#2dd4bf",
 };
 
 const LEVEL_SHAPES: Record<BloomLevel, cytoscape.Css.NodeShape> = {
-  remember: "ellipse",
+  remember:   "ellipse",
   understand: "round-rectangle",
-  apply: "rectangle",
-  analyze: "diamond",
-  evaluate: "hexagon",
-  create: "triangle",
+  apply:      "rectangle",
+  analyze:    "diamond",
+  evaluate:   "hexagon",
+  create:     "triangle",
 };
 
 export type AnalyzeNode = {
@@ -54,11 +55,13 @@ type Props = {
 };
 
 const getSortedLevels = (probs: number[]) =>
-  BLOOM_LEVELS.map((lvl, idx) => ({ lvl, prob: Number(probs?.[idx] ?? 0) })).sort((a, b) => b.prob - a.prob);
+  BLOOM_LEVELS.map((lvl, idx) => ({ lvl, prob: Number(probs?.[idx] ?? 0) })).sort(
+    (a, b) => b.prob - a.prob
+  );
 
 function computeSize(freq: number | null | undefined) {
   const f = Math.max(1, Number(freq ?? 1));
-  return 28 + 8 * Math.log(1 + f);
+  return 24 + 8 * Math.log(1 + f);
 }
 
 export default function GraphView({ nodes, edges, filters, threshold, onHover }: Props) {
@@ -117,31 +120,52 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover }:
             selector: "node",
             style: {
               label: "data(label)",
+              color: "#c9d1e8",
               "font-size": 9,
+              "font-family": "Inter, -apple-system, sans-serif",
               "text-wrap": "wrap",
-              "text-max-width": 90,
+              "text-max-width": 80,
               "text-valign": "bottom",
-              "text-margin-y": 6,
+              "text-margin-y": 7,
+              "text-outline-width": 2,
+              "text-outline-color": "#161b27",
               "background-color": (ele) => LEVEL_COLORS[ele.data("primary") as BloomLevel],
               shape: (ele) => LEVEL_SHAPES[ele.data("primary") as BloomLevel],
               width: "data(size)",
               height: "data(size)",
-              "border-width": (ele) => (ele.data("secondary") ? 4 : 1),
+              "border-width": (ele) => (ele.data("secondary") ? 3 : 0),
               "border-color": (ele) =>
                 ele.data("secondary")
                   ? LEVEL_COLORS[ele.data("secondary") as BloomLevel]
-                  : "#ffffff",
+                  : "transparent",
+              "border-opacity": 0.9,
             },
           },
           {
             selector: "edge",
             style: {
-              width: 1,
-              "line-color": "#bdbdbd",
-              opacity: (ele) => Math.max(0.15, Math.min(0.9, Number(ele.data("weight") ?? 0.2))),
+              width: 1.5,
+              "line-color": "rgba(139, 146, 168, 0.25)",
+              "curve-style": "bezier",
+              opacity: (ele) => Math.max(0.12, Math.min(0.75, Number(ele.data("weight") ?? 0.2))),
             },
           },
-          { selector: ":selected", style: { "border-color": "#111", "border-width": 6 } },
+          {
+            selector: ":selected",
+            style: {
+              "border-color": "#818cf8",
+              "border-width": 4,
+              "border-opacity": 1,
+            },
+          },
+          {
+            selector: "node:active",
+            style: {
+              "overlay-color": "#6366f1",
+              "overlay-padding": 8,
+              "overlay-opacity": 0.2,
+            },
+          },
         ],
         layout: { name: "cose", animate: true, fit: true },
       });
@@ -168,7 +192,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover }:
   const exportPng = () => {
     const cy = cyRef.current;
     if (!cy) return;
-    const png = cy.png({ bg: "#ffffff", full: true, scale: 2 });
+    const png = cy.png({ bg: "#161b27", full: true, scale: 2 });
     const a = document.createElement("a");
     a.href = png;
     a.download = "knowledge_graph.png";
@@ -178,24 +202,25 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover }:
   return (
     <div className={styles.wrap}>
       <div className={styles.toolbar}>
-        <button className={styles.btn} onClick={exportPng} disabled={!filteredNodes.length}>
+        <button
+          className={styles.btn}
+          onClick={exportPng}
+          disabled={!filteredNodes.length}
+        >
           Export PNG
         </button>
-        <div className={styles.summary}>
-          Узлов: {filteredNodes.length}, Рёбер: {edges.length}
-        </div>
+        <span className={styles.summary}>
+          {filteredNodes.length} узлов · {edges.length} рёбер
+        </span>
       </div>
-      <div
-        ref={containerRef}
-        className={styles.canvas}
-      />
+
+      <div ref={containerRef} className={styles.canvas} />
+
       <div className={styles.legend}>
+        <div className={styles.legendTitle}>Уровни Блума</div>
         {BLOOM_LEVELS.map((lvl) => (
           <div key={lvl} className={styles.legendItem}>
-            <span
-              className={styles.swatch}
-              style={{ background: LEVEL_COLORS[lvl] }}
-            />
+            <span className={styles.swatch} style={{ background: LEVEL_COLORS[lvl] }} />
             <span>{LEVEL_LABELS[lvl]}</span>
           </div>
         ))}
