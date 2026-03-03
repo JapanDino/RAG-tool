@@ -3,7 +3,6 @@ import os
 
 import requests
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE = os.getenv("OPENAI_BASE", "https://api.openai.com/v1")
 OPENAI_TIMEOUT = float(os.getenv("OPENAI_TIMEOUT", "30"))
 
@@ -32,11 +31,12 @@ def extract_json_block(text: str) -> str:
     raise ValueError("No JSON payload found in LLM response")
 
 def chat_completion_json(model: str, prompt: str, max_tokens: int = 400) -> str:
-    if not OPENAI_API_KEY:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
         raise RuntimeError("OPENAI_API_KEY is empty")
     url = f"{OPENAI_BASE}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -49,3 +49,24 @@ def chat_completion_json(model: str, prompt: str, max_tokens: int = 400) -> str:
     resp.raise_for_status()
     content = resp.json()["choices"][0]["message"]["content"]
     return extract_json_block(content)
+
+
+def embeddings(model: str, inputs: list[str]) -> list[list[float]]:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is empty")
+    url = f"{OPENAI_BASE}/embeddings"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "input": inputs,
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=OPENAI_TIMEOUT)
+    resp.raise_for_status()
+    data = resp.json()["data"]
+    # Preserve input order.
+    data_sorted = sorted(data, key=lambda x: x["index"])
+    return [item["embedding"] for item in data_sorted]

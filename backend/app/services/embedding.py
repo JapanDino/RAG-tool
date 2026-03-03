@@ -1,7 +1,14 @@
-# Placeholder embeddings; replace with real model later.
-import numpy as np
-def embed_texts(texts, dim=1536):
-    rng = np.random.default_rng(42)
-    vecs = rng.normal(size=(len(texts), dim)).astype(np.float32)
-    norms = np.linalg.norm(vecs, axis=1, keepdims=True)+1e-9
-    return (vecs / norms).tolist()
+from __future__ import annotations
+
+from .embedding_provider import STORAGE_DIM, get_embedding_provider
+
+
+def embed_texts(texts: list[str], dim: int = STORAGE_DIM) -> list[list[float]]:
+    """
+    Returns embeddings as Python lists.
+    Storage is fixed to 1536 dims (pgvector column vector(1536)).
+    """
+    if dim != STORAGE_DIM:
+        raise ValueError(f"dim must be {STORAGE_DIM} for current storage")
+    provider = get_embedding_provider()
+    return provider.embed(texts)
