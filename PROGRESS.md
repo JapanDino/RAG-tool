@@ -3,7 +3,7 @@
 > **TZ Source**: `docs/DEVELOPMENT_PLAN_TZ_BLOOM.md` (+ `docs/PRODUCT_PLAN.md`)
 > **Last Updated**: 2026-03-03
 > **Overall Progress**: 100% (13/13 core steps done -- MVP complete)
-> **Audit**: 2026-03-03 -- full source audit performed; all bugs fixed
+> **Audit**: 2026-03-03 -- full source audit + smoke test; all bugs fixed; 34/34 endpoints green
 
 ---
 
@@ -14,7 +14,7 @@
 | In Progress | 0 |
 | Pending | 0 |
 | Blocked | 0 |
-| Bugs (critical) | 0 (3 found, 3 fixed) |
+| Bugs (critical) | 0 (5 found, 5 fixed) |
 | Bugs (non-critical) | 0 (4 found, 4 fixed) |
 | Enhancements | 3 remaining |
 
@@ -118,6 +118,17 @@
 - **Fixed**: Key value removed from `PROGRESS.md`, commit amended before push.
 - `backend/.env` is in `.gitignore` -- key itself was never committed to git.
 
+### ✅ BUG-8 -- `POST /analyze/extract` → 500 NameError
+- **Found**: Full smoke test (2026-03-03). `/extract` endpoint still called `extract_nodes_from_text`
+  after import was removed (only `/content` was updated to use `get_node_extractor()`).
+- **Fixed**: `analyze.py` `/extract` handler updated to use `get_node_extractor().extract()`.
+
+### ✅ BUG-9 -- `GET /rubrics` → 500 Pydantic enum coercion
+- **Found**: Full smoke test (2026-03-03). SQLAlchemy returns `BloomLevel` enum objects;
+  Pydantic v2 fails to match them against `Literal[str]` in `RubricOut`.
+- **Fixed**: Added `field_validator("level", mode="before")` with `_enum_to_str()` helper
+  to `RubricOut`, `AnnotationOut`, `AnnotationWithChunkOut` in `schemas.py`.
+
 ---
 
 ## Blocked
@@ -144,6 +155,13 @@ None.
 ---
 
 ## Work Log
+
+### 2026-03-03 -- Full smoke test (34/34 green)
+- Ran comprehensive smoke test covering all 34 registered endpoints.
+- Found BUG-8: `POST /analyze/extract` → 500 NameError (`extract_nodes_from_text` not imported).
+- Found BUG-9: `GET /rubrics` → 500 Pydantic v2 enum coercion failure.
+- Fixed both bugs; restarted containers; re-ran smoke test: 34/34 passed.
+- Committed and pushed to `origin/main` (c7d2613).
 
 ### 2026-03-03 -- Bug fix session
 - Fixed all 7 bugs found during full source audit.
