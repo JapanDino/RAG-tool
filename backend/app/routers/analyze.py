@@ -78,10 +78,10 @@ def analyze(payload: AnalyzeIn):
 
 @router.post("/extract", response_model=ExtractNodesOut)
 def extract_nodes(payload: ExtractNodesIn):
-    nodes = extract_nodes_from_text(
+    nodes = get_node_extractor().extract(
         payload.text,
-        max_nodes=payload.max_nodes,
-        min_freq=payload.min_freq,
+        max_nodes=payload.max_nodes or 30,
+        min_freq=payload.min_freq or 1,
     )
     return {"nodes": nodes}
 

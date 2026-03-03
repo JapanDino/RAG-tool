@@ -1,6 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, Literal, List, Union
 from datetime import datetime
+
+
+def _enum_to_str(v):
+    """Coerce SQLAlchemy str-enum objects to plain strings for Pydantic Literal validation."""
+    return v.value if hasattr(v, "value") else v
 
 BloomLevel = Literal["remember","understand","apply","analyze","evaluate","create"]
 NodeType = Literal["proper_noun","concept","skill","keyword","formula","other"]
@@ -25,6 +30,10 @@ class AnnotationOut(BaseModel):
     id:int; chunk_id:int; level:BloomLevel; label:str; rationale:str; score:float; version:int
     class Config: from_attributes=True
 
+    @field_validator("level", mode="before")
+    @classmethod
+    def coerce_level(cls, v): return _enum_to_str(v)
+
 class AnnotationUpdateIn(BaseModel):
     label: Optional[str] = None
     rationale: Optional[str] = None
@@ -43,6 +52,10 @@ class AnnotationWithChunkOut(BaseModel):
     document_id:int
     document_title:str
     class Config: from_attributes=True
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def coerce_level(cls, v): return _enum_to_str(v)
 
 class AnnotationListOut(BaseModel):
     total:int
@@ -65,6 +78,10 @@ class RubricOut(BaseModel):
     version:int
     is_active:bool
     class Config: from_attributes=True
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def coerce_level(cls, v): return _enum_to_str(v)
 
 class RubricListOut(BaseModel):
     total:int
