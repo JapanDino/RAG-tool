@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import JobStatus from "../components/JobStatus";
 import styles from "../styles/home.module.css";
@@ -517,7 +517,7 @@ export default function Home() {
     });
   };
 
-  const saveLabels = useCallback(async () => {
+  const saveLabels = async () => {
     const node = labelQueue[0];
     if (!ds || !node) return;
     const labels = BLOOM_LEVELS.filter((lvl) => currentLabels[lvl]);
@@ -534,16 +534,14 @@ export default function Home() {
       analyze: false, evaluate: false, create: false,
     });
     setLabelProgress((p) => (p ? { ...p, labeled: p.labeled + 1 } : p));
-  }, [ds, labelQueue, currentLabels, annotator, apiFetchJson]);
+  };
 
-  // Ref keeps the latest saveLabels without re-registering the keydown handler on every state change.
-  const saveLabelsRef = useRef(saveLabels);
-  useEffect(() => { saveLabelsRef.current = saveLabels; });
+  // Ref to the save button — clicking the real button guarantees React has the latest state.
+  const saveBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (activeTab !== "labeling") return;
     const handler = (e: KeyboardEvent) => {
-      // Don't fire when typing in an input/textarea
       if ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "TEXTAREA") return;
       const map: Record<string, BloomLevel> = {
         "1": "remember", "2": "understand", "3": "apply",
@@ -556,7 +554,7 @@ export default function Home() {
       }
       if (e.key === "Enter") {
         e.preventDefault();
-        saveLabelsRef.current();
+        saveBtnRef.current?.click();
       }
     };
     window.addEventListener("keydown", handler);
@@ -1131,6 +1129,7 @@ export default function Home() {
                   {/* Actions */}
                   <div className={styles.labelActions}>
                     <button
+                      ref={saveBtnRef}
                       className={[styles.btn, styles.btnPrimaryLg, styles.btnSuccess].join(" ")}
                       onClick={saveLabels}
                       disabled={!BLOOM_LEVELS.some((lvl) => currentLabels[lvl])}
