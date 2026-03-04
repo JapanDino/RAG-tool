@@ -242,6 +242,9 @@ export default function Home() {
   const [nodes, setNodes] = useState<AnalyzeNode[]>([]);
   const [nodesStatus, setNodesStatus] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState(0);
+  const [analyzeStatusMsg, setAnalyzeStatusMsg] = useState("");
+  const analyzeProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [maxNodes, setMaxNodes] = useState(100);
   const [maxNodesAuto, setMaxNodesAuto] = useState(false);
 
@@ -398,6 +401,13 @@ export default function Home() {
     window.open(`${apiBase}/export/datasets/${ds}?format=jsonl`, "_blank");
   };
 
+  const ANALYZE_MSGS = [
+    "Извлекаем ключевые понятия…",
+    "Классифицируем по уровням Блума…",
+    "Генерируем векторные эмбеддинги…",
+    "Сохраняем узлы знаний в БД…",
+  ];
+
   const analyzeText = async () => {
     if (!textInput.trim()) return;
 
@@ -419,11 +429,26 @@ export default function Home() {
     setIsAnalyzing(true);
     setNodes([]);
     setNodesStatus(null);
+    setAnalyzeProgress(4);
+    setAnalyzeStatusMsg(ANALYZE_MSGS[0]);
+    let msgIdx = 0;
+    analyzeProgressRef.current = setInterval(() => {
+      setAnalyzeProgress((p) => (p >= 84 ? 84 : p + Math.random() * 7 + 2));
+      msgIdx = (msgIdx + 1) % ANALYZE_MSGS.length;
+      setAnalyzeStatusMsg(ANALYZE_MSGS[msgIdx]);
+    }, 900);
+
     const json = await apiFetchJson(`/analyze/content`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: textInput, dataset_id: datasetId, max_nodes: maxNodes }),
     });
+
+    if (analyzeProgressRef.current) { clearInterval(analyzeProgressRef.current); analyzeProgressRef.current = null; }
+    setAnalyzeProgress(100);
+    setAnalyzeStatusMsg("Готово!");
+    setTimeout(() => { setAnalyzeProgress(0); setAnalyzeStatusMsg(""); }, 700);
+
     setIsAnalyzing(false);
     if (!json) {
       setNodesStatus("Ошибка анализа (см. сообщение выше).");
@@ -681,7 +706,10 @@ export default function Home() {
             >
               <span className={styles.navIcon}><IconBrain /></span>
               <span className={styles.navLabel}>Анализ</span>
-              <span className={styles.navHint}>content</span>
+              {nodes.length > 0
+                ? <span className={styles.navCount}>{nodes.length}</span>
+                : <span className={styles.navHint}>content</span>
+              }
             </button>
 
             <button
@@ -869,6 +897,24 @@ export default function Home() {
                   </button>
                 </div>
 
+                {/* Progress bar */}
+                {analyzeProgress > 0 && (
+                  <div className={styles.analyzeProgressWrap}>
+                    <div className={styles.analyzeProgressHeader}>
+                      <span className={styles.analyzeProgressMsg}>{analyzeStatusMsg}</span>
+                      <span className={styles.analyzeProgressPct}>
+                        {analyzeProgress < 100 ? `${Math.round(analyzeProgress)}%` : "✓"}
+                      </span>
+                    </div>
+                    <div className={styles.analyzeProgressTrack}>
+                      <div
+                        className={[styles.analyzeProgressFill, analyzeProgress < 100 ? styles.analyzeProgressFillAnim : ""].join(" ")}
+                        style={{ width: `${analyzeProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Status */}
                 {nodesStatus && !isAnalyzing && (
                   <div className={styles.statusLine}>
@@ -882,20 +928,67 @@ export default function Home() {
                     {nodesStatus}
                   </div>
                 )}
-                {isAnalyzing && (
-                  <div className={styles.statusLine}>
-                    <span className={styles.statusLineIcon} />
-                    Анализируем текст, извлекаем узлы знаний...
-                  </div>
-                )}
+
+                {/* Bloom distribution widget */}
+                {nodes.length > 0 && (() => {
+                  const dist = BLOOM_LEVELS
+                    .map(lvl => ({ lvl, count: nodes.filter(n => n.top_levels.includes(lvl)).length }))
+                    .filter(d => d.count > 0);
+                  const maxCount = Math.max(...dist.map(d => d.count));
+                  const topLevel = dist.sort((a, b) => b.count - a.count)[0]?.lvl;
+                  return (
+                    <div className={styles.bloomDistWidget}>
+                      <div className={styles.bloomDistMeta}>
+                        <span className={styles.bloomDistTitle}>Распределение по таксономии Блума</span>
+                        <div className={styles.bloomDistStats}>
+                          <span className={styles.bloomDistStat}>
+                            <span className={styles.bloomDistStatVal}>{nodes.length}</span> узлов
+                          </span>
+                          <span className={styles.bloomDistStat}>
+                            <span className={styles.bloomDistStatVal}>{dist.length}</span> уровней
+                          </span>
+                          {topLevel && (
+                            <span className={styles.bloomDistStat}>
+                              доминирует{" "}
+                              <span style={{ color: LEVEL_COLORS[topLevel], fontWeight: 600 }}>
+                                {LEVEL_LABELS[topLevel]}
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className={styles.bloomDistBars}>
+                        {BLOOM_LEVELS.map(lvl => {
+                          const count = nodes.filter(n => n.top_levels.includes(lvl)).length;
+                          if (!count) return null;
+                          return (
+                            <div key={lvl} className={styles.bloomDistRow}>
+                              <span className={styles.bloomDistLabel} style={{ color: LEVEL_COLORS[lvl] }}>
+                                {LEVEL_LABELS[lvl]}
+                              </span>
+                              <div className={styles.bloomDistTrack}>
+                                <div
+                                  className={styles.bloomDistFill}
+                                  style={{ width: `${(count / maxCount) * 100}%`, background: LEVEL_COLORS[lvl] }}
+                                />
+                              </div>
+                              <span className={styles.bloomDistCount}>{count}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Node cards grid */}
                 {nodes.length > 0 && (
                   <div className={styles.nodesGrid}>
                     {nodes.map((n) => {
                       const sorted = getSortedLevels(n.prob_vector);
+                      const accentColor = n.top_levels[0] ? LEVEL_COLORS[n.top_levels[0]] : "var(--border)";
                       return (
-                        <div key={n.id} className={styles.nodeCard}>
+                        <div key={n.id} className={styles.nodeCard} style={{ borderLeft: `3px solid ${accentColor}` }}>
                           {/* Head */}
                           <div className={styles.nodeCardHead}>
                             <div className={styles.nodeTitle}>{n.title}</div>

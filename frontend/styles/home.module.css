@@ -243,6 +243,21 @@
   color: var(--text-accent);
 }
 
+/* nav count badge */
+.navCount {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  min-width: 20px;
+  text-align: center;
+  box-shadow: 0 0 8px rgba(99,102,241,0.5);
+  animation: fadeIn 0.2s ease-out;
+}
+
 /* ── Main content ────────────────────────────────────────── */
 
 .main {
@@ -1290,6 +1305,150 @@
   font-size: 12.5px;
   line-height: 1.5;
   max-width: 280px;
+}
+
+/* ── Analyze progress bar ───────────────────────────────── */
+
+.analyzeProgressWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--bg-card-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.analyzeProgressHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.analyzeProgressMsg {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.analyzeProgressPct {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-accent);
+  font-weight: 600;
+}
+
+.analyzeProgressTrack {
+  height: 4px;
+  background: var(--bg-base);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+
+.analyzeProgressFill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--accent), #8b5cf6, #2dd4bf);
+  transition: width 0.7s ease;
+}
+
+.analyzeProgressFillAnim {
+  background-size: 200% 100%;
+  animation: progressShimmer 1.8s linear infinite;
+}
+
+@keyframes progressShimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* ── Bloom distribution widget ──────────────────────────── */
+
+.bloomDistWidget {
+  background: var(--bg-card-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.bloomDistMeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bloomDistTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.1px;
+}
+
+.bloomDistStats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bloomDistStat {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.bloomDistStatVal {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.bloomDistBars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.bloomDistRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bloomDistLabel {
+  font-size: 11.5px;
+  font-weight: 500;
+  width: 90px;
+  flex-shrink: 0;
+}
+
+.bloomDistTrack {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-base);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+
+.bloomDistFill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  transition: width 0.6s ease;
+  opacity: 0.85;
+}
+
+.bloomDistCount {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  width: 18px;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 /* ── Responsive ──────────────────────────────────────────── */
