@@ -245,6 +245,7 @@ export default function Home() {
   const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const [analyzeStatusMsg, setAnalyzeStatusMsg] = useState("");
   const analyzeProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
   const [maxNodes, setMaxNodes] = useState(100);
   const [maxNodesAuto, setMaxNodesAuto] = useState(false);
 
@@ -688,6 +689,15 @@ export default function Home() {
                 <span className={styles.kbd}>{lastJob}</span>
               </div>
             )}
+
+            {/* Help button */}
+            <button
+              className={styles.helpBtn}
+              onClick={() => setShowGuide(true)}
+              title="Инструкция по использованию"
+            >
+              ?
+            </button>
           </div>
         </div>
       </header>
@@ -928,6 +938,41 @@ export default function Home() {
                     {nodesStatus}
                   </div>
                 )}
+
+                {/* Stats chips */}
+                {nodes.length > 0 && !isAnalyzing && (() => {
+                  const activeLevels = BLOOM_LEVELS.filter(lvl => nodes.some(n => n.top_levels.includes(lvl)));
+                  const topLvl = BLOOM_LEVELS
+                    .map(lvl => ({ lvl, count: nodes.filter(n => n.top_levels.includes(lvl)).length }))
+                    .sort((a, b) => b.count - a.count)[0];
+                  const avgProb = nodes.reduce((acc, n) => acc + (n.prob_vector[BLOOM_LEVELS.indexOf(n.top_levels[0])] ?? 0), 0) / nodes.length;
+                  return (
+                    <div className={styles.statChips}>
+                      <div className={styles.statChip}>
+                        <span className={styles.statChipVal}>{nodes.length}</span>
+                        <span className={styles.statChipLabel}>узлов</span>
+                      </div>
+                      <div className={styles.statChip}>
+                        <span className={styles.statChipVal}>{activeLevels.length}</span>
+                        <span className={styles.statChipLabel}>уровней Блума</span>
+                      </div>
+                      {topLvl && (
+                        <div className={styles.statChip}>
+                          <span className={styles.statChipVal} style={{ fontSize: 14, color: LEVEL_COLORS[topLvl.lvl] }}>
+                            {LEVEL_LABELS[topLvl.lvl]}
+                          </span>
+                          <span className={styles.statChipLabel}>топ-уровень</span>
+                        </div>
+                      )}
+                      <div className={styles.statChip}>
+                        <span className={styles.statChipVal} style={{ fontSize: 18 }}>
+                          {(avgProb * 100).toFixed(0)}%
+                        </span>
+                        <span className={styles.statChipLabel}>ср. уверенность</span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Bloom distribution widget */}
                 {nodes.length > 0 && (() => {
@@ -1579,6 +1624,113 @@ export default function Home() {
 
         </aside>
       </div>
+
+      {/* ── Guide modal ────────────────────────────────── */}
+      {showGuide && (
+        <div className={styles.guideOverlay} onClick={() => setShowGuide(false)}>
+          <div className={styles.guidePanel} onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className={styles.guideHeader}>
+              <div className={styles.guideHeaderIcon}>📖</div>
+              <div style={{ flex: 1 }}>
+                <div className={styles.guideTitle}>Как пользоваться</div>
+                <div className={styles.guideSubtitle}>Bloom RAG Studio — краткое руководство</div>
+              </div>
+              <button className={styles.guideClose} onClick={() => setShowGuide(false)}>×</button>
+            </div>
+
+            <div className={styles.guideBody}>
+              {/* Steps */}
+              <div className={styles.guideSectionTitle}>Быстрый старт</div>
+
+              <div className={styles.guideStep}>
+                <div className={styles.guideStepNum}>1</div>
+                <div className={styles.guideStepContent}>
+                  <div className={styles.guideStepTitle}>
+                    Подключение и датасет
+                    <span className={styles.guideStepTag}>правая панель</span>
+                  </div>
+                  <div className={styles.guideStepText}>
+                    Убедись, что API работает (зелёная точка в хедере). Создай датасет через поле «Имя» + кнопку <strong>Create</strong>, или введи ID существующего вручную.
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.guideStep}>
+                <div className={styles.guideStepNum}>2</div>
+                <div className={styles.guideStepContent}>
+                  <div className={styles.guideStepTitle}>
+                    Анализ контента
+                    <span className={styles.guideStepTag}>вкладка Анализ</span>
+                  </div>
+                  <div className={styles.guideStepText}>
+                    Вставь текст в поле или загрузи файл <span className={styles.guideStepKbd}>.txt .pdf .md</span>.
+                    Нажми <strong>Анализировать</strong> — получишь узлы знаний с multi-label классификацией по Блуму.
+                    Экспортируй результат через <span className={styles.guideStepKbd}>JSON</span> или <span className={styles.guideStepKbd}>CSV</span>.
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.guideStep}>
+                <div className={styles.guideStepNum}>3</div>
+                <div className={styles.guideStepContent}>
+                  <div className={styles.guideStepTitle}>
+                    Граф знаний
+                    <span className={styles.guideStepTag}>вкладка Граф</span>
+                  </div>
+                  <div className={styles.guideStepText}>
+                    Нажми <strong>Загрузить граф</strong> для визуализации узлов из БД.
+                    Фильтруй по уровням Блума через чипсы. Hover на узел — увидишь детали.
+                    Для перестройки рёбер используй <strong>Rebuild edges</strong>.
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.guideStep}>
+                <div className={styles.guideStepNum}>4</div>
+                <div className={styles.guideStepContent}>
+                  <div className={styles.guideStepTitle}>
+                    Ручная разметка
+                    <span className={styles.guideStepTag}>вкладка Разметка</span>
+                  </div>
+                  <div className={styles.guideStepText}>
+                    Нажми <strong>Загрузить очередь</strong>. Выбирай уровни кнопками или клавишами{" "}
+                    <span className={styles.guideStepKbd}>1</span>–<span className={styles.guideStepKbd}>6</span>.
+                    Нажми <span className={styles.guideStepKbd}>Enter</span> — сохранить и перейти к следующему.
+                    Экспорт разметки через <strong>Export JSONL</strong>.
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.guideTip}>
+                <span style={{ fontSize: 14, flexShrink: 0 }}>💡</span>
+                <span>Анализ автоматически создаёт датасет, если он не выбран. Достаточно просто нажать «Анализировать».</span>
+              </div>
+
+              {/* Bloom taxonomy reference */}
+              <div className={styles.guideSectionTitle} style={{ marginTop: 4 }}>Таксономия Блума</div>
+
+              <div className={styles.bloomRef}>
+                {([
+                  ["remember",   "🔵", "Знать",         "Вспомнить и воспроизвести факты"],
+                  ["understand", "🟢", "Понимать",       "Объяснить концепцию своими словами"],
+                  ["apply",      "🟠", "Применять",      "Использовать знания в новой ситуации"],
+                  ["analyze",    "🟣", "Анализировать",  "Разобрать структуру и связи"],
+                  ["evaluate",   "🔴", "Оценивать",      "Критически оценить и обосновать"],
+                  ["create",     "🩵", "Создавать",      "Синтезировать новое из имеющегося"],
+                ] as const).map(([lvl, emoji, name, desc], i) => (
+                  <div key={lvl} className={styles.bloomRefRow}>
+                    <span className={styles.bloomRefDot} style={{ background: LEVEL_COLORS[lvl as BloomLevel] }} />
+                    <span className={styles.bloomRefNum}>{i + 1}</span>
+                    <span className={styles.bloomRefName} style={{ color: LEVEL_COLORS[lvl as BloomLevel] }}>{name}</span>
+                    <span className={styles.bloomRefDesc}>{desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Footer ─────────────────────────────────────── */}
       <footer style={{
