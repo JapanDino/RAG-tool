@@ -61,6 +61,16 @@ type AnalyzeNode = {
   rationale?: string | null;
 };
 
+type SearchResult = {
+  chunk_id: number;
+  text: string;
+  document_id: number;
+  document_title: string;
+  score: number;
+};
+
+type Toast = { id: number; msg: string; type: "success" | "error" | "info" };
+
 type GraphEdge = {
   from_id: number;
   to_id: number;
@@ -235,7 +245,7 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [lastJob, setLastJob] = useState<number | undefined>();
-  const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling">("analysis");
+  const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling" | "search">("analysis");
   const [textInput, setTextInput] = useState("");
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [analyzeFileName, setAnalyzeFileName] = useState<string | null>(null);
@@ -289,18 +299,63 @@ export default function Home() {
   const [apiStatus, setApiStatus] = useState<"unknown" | "ok" | "down">("unknown");
   const [error, setError] = useState<string | null>(null);
 
+  // ── Toast system ────────────────────────────────────────────
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastCounter = useRef(0);
+  const addToast = (msg: string, type: Toast["type"] = "info") => {
+    const id = ++toastCounter.current;
+    setToasts(p => [...p, { id, msg, type }]);
+    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3800);
+  };
+
+  // ── Search tab ───────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchTopK, setSearchTopK] = useState(5);
+  const [searchDone, setSearchDone] = useState(false);
+
+  // ── Node filter/sort ─────────────────────────────────────────
+  const [nodeSearch, setNodeSearch] = useState("");
+  const [nodeSort, setNodeSort] = useState<"default" | "confidence" | "alpha" | "level">("default");
+
+  // ── Text history ─────────────────────────────────────────────
+  const [textHistory, setTextHistory] = useState<string[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
   const GraphView = useMemo(
     () => dynamic(() => import("../components/GraphView"), { ssr: false }),
     []
   );
 
+  // Restore persisted values on mount
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (apiBase.includes("://backend:") && window.location.hostname === "localhost") {
-      setApiBase("http://localhost:8000");
-    }
+    const savedApi = localStorage.getItem("bloom_api");
+    const resolvedApi = savedApi
+      ? (savedApi.includes("://backend:") && window.location.hostname === "localhost" ? "http://localhost:8000" : savedApi)
+      : (DEFAULT_API.includes("://backend:") && window.location.hostname === "localhost" ? "http://localhost:8000" : DEFAULT_API);
+    setApiBase(resolvedApi);
+
+    const savedDs = localStorage.getItem("bloom_ds");
+    if (savedDs) setDs(Number(savedDs));
+
+    const savedHistory = localStorage.getItem("bloom_history");
+    if (savedHistory) { try { setTextHistory(JSON.parse(savedHistory)); } catch {} }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Persist ds and apiBase
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (ds) localStorage.setItem("bloom_ds", String(ds));
+    else localStorage.removeItem("bloom_ds");
+  }, [ds]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("bloom_api", apiBase);
+  }, [apiBase]);
 
   useEffect(() => {
     let cancelled = false;
@@ -366,6 +421,7 @@ export default function Home() {
     });
     if (!j) return;
     setDs(j.id);
+    addToast(`✓ Dataset #${j.id} создан`, "success");
   };
 
   const upload = async () => {
@@ -458,6 +514,19 @@ export default function Home() {
     const items: AnalyzeNode[] = json.nodes || [];
     setNodes(items);
     setNodesStatus(items.length ? `Найдено узлов: ${items.length}` : "Узлы не найдены");
+    if (items.length) {
+      addToast(`✓ Найдено ${items.length} узлов`, "success");
+      // Save to history
+      if (textInput.trim().length > 20) {
+        setTextHistory(h => {
+          const next = [textInput.trim(), ...h.filter(x => x !== textInput.trim())].slice(0, 5);
+          localStorage.setItem("bloom_history", JSON.stringify(next));
+          return next;
+        });
+      }
+    } else {
+      addToast("Узлы не найдены — попробуй другой текст", "info");
+    }
   };
 
   const loadTextFile = async (f: File | null) => {
@@ -537,6 +606,43 @@ export default function Home() {
     setNodesStatus(items.length ? `Загружено узлов: ${items.length}` : "В БД нет узлов");
   };
 
+  const searchNodes = async () => {
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    setSearchResults([]);
+    setSearchDone(false);
+    const params = new URLSearchParams({ q: searchQuery, top_k: String(searchTopK) });
+    if (ds) params.set("dataset_id", String(ds));
+    const json = await apiFetchJson(`/search?${params.toString()}`);
+    setIsSearching(false);
+    setSearchDone(true);
+    if (!json) return;
+    setSearchResults(Array.isArray(json) ? json : []);
+  };
+
+  const copyNode = (n: AnalyzeNode) => {
+    const text = `## ${n.title}\n\n${n.context_text}\n\nBloom: ${n.top_levels.join(", ")}`;
+    navigator.clipboard.writeText(text).then(() => addToast("Скопировано в буфер", "success"));
+  };
+
+  const filteredNodes = useMemo(() => {
+    let result = [...nodes];
+    if (nodeSearch.trim()) {
+      const q = nodeSearch.toLowerCase();
+      result = result.filter(n =>
+        n.title.toLowerCase().includes(q) || (n.context_text || "").toLowerCase().includes(q)
+      );
+    }
+    if (nodeSort === "confidence") {
+      result.sort((a, b) => Math.max(...b.prob_vector) - Math.max(...a.prob_vector));
+    } else if (nodeSort === "alpha") {
+      result.sort((a, b) => a.title.localeCompare(b.title, "ru"));
+    } else if (nodeSort === "level") {
+      result.sort((a, b) => BLOOM_LEVELS.indexOf(a.top_levels[0]) - BLOOM_LEVELS.indexOf(b.top_levels[0]));
+    }
+    return result;
+  }, [nodes, nodeSearch, nodeSort]);
+
   const loadGraph = async () => {
     if (!ds) return;
     const params = new URLSearchParams({
@@ -602,6 +708,7 @@ export default function Home() {
       body: JSON.stringify({ labels, annotator }),
     });
     if (!ok) return;
+    addToast("✓ Разметка сохранена", "success");
     setLabelQueue((q) => q.slice(1));
     setCurrentLabels({
       remember: false, understand: false, apply: false,
@@ -739,6 +846,19 @@ export default function Home() {
               <span className={styles.navLabel}>Разметка</span>
               <span className={styles.navHint}>100+</span>
             </button>
+
+            <button
+              className={[styles.navBtn, activeTab === "search" ? styles.navBtnActive : ""].join(" ")}
+              onClick={() => setActiveTab("search")}
+            >
+              <span className={styles.navIcon}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </span>
+              <span className={styles.navLabel}>Поиск</span>
+              <span className={styles.navHint}>RAG</span>
+            </button>
           </div>
         </nav>
 
@@ -836,20 +956,66 @@ export default function Home() {
                 {/* Textarea */}
                 <label className={styles.fieldLabel}>
                   Текст для анализа
-                  <textarea
-                    className={styles.textarea}
-                    placeholder="Вставьте текст вручную или загрузите файл выше…"
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    onPaste={(e) => {
-                      const pasted = e.clipboardData.getData("text");
-                      if (pasted.length > 200) {
-                        setMaxNodes(suggestMaxNodes(pasted));
-                        setMaxNodesAuto(true);
-                      }
-                    }}
-                  />
+                  <div style={{ position: "relative" }}>
+                    <textarea
+                      className={styles.textarea}
+                      placeholder="Вставьте текст вручную или загрузите файл выше…"
+                      value={textInput}
+                      onChange={(e) => setTextInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                          e.preventDefault();
+                          if (textInput.trim() && !isAnalyzing && !isTranscribing) analyzeText();
+                        }
+                      }}
+                      onPaste={(e) => {
+                        const pasted = e.clipboardData.getData("text");
+                        if (pasted.length > 200) {
+                          setMaxNodes(suggestMaxNodes(pasted));
+                          setMaxNodesAuto(true);
+                        }
+                      }}
+                      onFocus={() => setShowHistory(false)}
+                    />
+                    {/* History dropdown */}
+                    {showHistory && textHistory.length > 0 && (
+                      <div className={styles.historyDropdown}>
+                        {textHistory.map((h, i) => (
+                          <div
+                            key={i}
+                            className={styles.historyItem}
+                            onClick={() => { setTextInput(h); setShowHistory(false); setMaxNodes(suggestMaxNodes(h)); setMaxNodesAuto(true); }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5 }}>
+                              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.09"/>
+                            </svg>
+                            <span className={styles.historyItemText}>{h.slice(0, 100)}{h.length > 100 ? "…" : ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </label>
+                {/* Char counter + history button */}
+                {(textInput.length > 0 || textHistory.length > 0) && (
+                  <div className={styles.textMeta}>
+                    <span className={styles.charCount}>
+                      {textInput.length > 0 ? `${textInput.length.toLocaleString("ru")} симв · ${textInput.trim().split(/\s+/).filter(Boolean).length.toLocaleString("ru")} слов · ~${suggestMaxNodes(textInput)} узлов` : ""}
+                    </span>
+                    {textHistory.length > 0 && (
+                      <button
+                        className={styles.historyBtn}
+                        onClick={() => setShowHistory(v => !v)}
+                        title="История запросов"
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.09"/>
+                        </svg>
+                        История ({textHistory.length})
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {/* Actions row */}
                 <div className={styles.btnRow}>
@@ -857,9 +1023,13 @@ export default function Home() {
                     className={[styles.btn, styles.btnPrimaryLg].join(" ")}
                     onClick={analyzeText}
                     disabled={!textInput.trim() || isAnalyzing || isTranscribing}
+                    title="Анализировать (Ctrl+Enter)"
                   >
                     {isAnalyzing ? <span className={styles.spinner} /> : <IconSparkle />}
                     {isAnalyzing ? "Анализируем..." : "Анализировать"}
+                    {!isAnalyzing && textInput.trim() && (
+                      <span style={{ fontSize: 10, opacity: 0.6, marginLeft: 4, fontFamily: "var(--font-mono)" }}>⌘↵</span>
+                    )}
                   </button>
 
                   <div className={styles.paramField} style={{ margin: 0, minWidth: 180 }}>
@@ -1026,14 +1196,66 @@ export default function Home() {
                   );
                 })()}
 
-                {/* Node cards grid */}
-                {nodes.length > 0 && (
+                {/* Node controls: search + sort */}
+                {nodes.length > 0 && !isAnalyzing && (
+                  <div className={styles.nodeControls}>
+                    <input
+                      className={styles.nodeSearchInput}
+                      placeholder="Поиск по узлам…"
+                      value={nodeSearch}
+                      onChange={e => setNodeSearch(e.target.value)}
+                    />
+                    <select
+                      className={styles.nodeSortSelect}
+                      value={nodeSort}
+                      onChange={e => setNodeSort(e.target.value as typeof nodeSort)}
+                    >
+                      <option value="default">Порядок по умолчанию</option>
+                      <option value="confidence">По уверенности ↓</option>
+                      <option value="alpha">По алфавиту</option>
+                      <option value="level">По уровню Блума</option>
+                    </select>
+                    <span className={styles.nodeControlsCount}>
+                      {filteredNodes.length !== nodes.length
+                        ? `${filteredNodes.length} / ${nodes.length}`
+                        : nodes.length}
+                    </span>
+                  </div>
+                )}
+
+                {/* Skeleton while analyzing */}
+                {isAnalyzing && (
                   <div className={styles.nodesGrid}>
-                    {nodes.map((n) => {
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className={styles.skeletonCard}>
+                        <div className={styles.skeletonLine} style={{ width: "60%", height: 14 }} />
+                        <div className={styles.skeletonLine} style={{ width: "90%" }} />
+                        <div className={styles.skeletonLine} style={{ width: "75%" }} />
+                        <div className={styles.skeletonLine} style={{ width: "40%", height: 8 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Node cards grid */}
+                {filteredNodes.length > 0 && !isAnalyzing && (
+                  <div className={styles.nodesGrid}>
+                    {filteredNodes.map((n) => {
                       const sorted = getSortedLevels(n.prob_vector);
                       const accentColor = n.top_levels[0] ? LEVEL_COLORS[n.top_levels[0]] : "var(--border)";
                       return (
                         <div key={n.id} className={styles.nodeCard} style={{ borderLeft: `3px solid ${accentColor}` }}>
+                          {/* Copy button */}
+                          <button
+                            className={styles.copyBtn}
+                            onClick={() => copyNode(n)}
+                            title="Копировать в буфер"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                            </svg>
+                          </button>
+
                           {/* Head */}
                           <div className={styles.nodeCardHead}>
                             <div className={styles.nodeTitle}>{n.title}</div>
@@ -1053,7 +1275,22 @@ export default function Home() {
                             )}
                           </div>
 
-                          {/* Probability bars */}
+                          {/* Mini prob chart (all 6 levels) */}
+                          <div className={styles.probMiniChart} title="Вектор вероятностей по 6 уровням Блума">
+                            {BLOOM_LEVELS.map((lvl, i) => {
+                              const p = n.prob_vector[i] ?? 0;
+                              return (
+                                <div
+                                  key={lvl}
+                                  className={styles.probMiniSeg}
+                                  style={{ width: `${Math.max(4, Math.round(p * 100))}%`, background: LEVEL_COLORS[lvl], opacity: p > 0.05 ? 1 : 0.2 }}
+                                  title={`${LEVEL_LABELS[lvl]}: ${(p * 100).toFixed(0)}%`}
+                                />
+                              );
+                            })}
+                          </div>
+
+                          {/* Probability bars (top 3) */}
                           <div className={styles.nodeProbs}>
                             {sorted.slice(0, 3).map(({ lvl, prob }) => (
                               <div key={lvl} className={styles.probRow}>
@@ -1092,6 +1329,112 @@ export default function Home() {
                     <div className={styles.emptyText}>
                       Вставь текст выше и нажми "Анализировать" (нужен активный dataset).
                     </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Search Tab ───────────────────────────── */}
+          {activeTab === "search" && (
+            <div className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <div className={styles.cardTitle}>Семантический поиск</div>
+                  <div className={styles.cardNote}>
+                    RAG-поиск по индексированным документам — находит релевантные чанки по смыслу запроса.
+                  </div>
+                </div>
+              </div>
+              <div className={styles.grid}>
+                {/* Search box */}
+                <div className={styles.searchBox}>
+                  <input
+                    className={styles.searchInput}
+                    placeholder="Введи поисковый запрос…"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") searchNodes(); }}
+                  />
+                  <div className={styles.paramField} style={{ margin: 0, flexShrink: 0 }}>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Top-K</span>
+                    <input
+                      className={styles.paramInput}
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={searchTopK}
+                      onChange={e => setSearchTopK(Number(e.target.value))}
+                      style={{ width: 52 }}
+                    />
+                  </div>
+                  <button
+                    className={[styles.btn, styles.btnPrimary].join(" ")}
+                    onClick={searchNodes}
+                    disabled={!searchQuery.trim() || isSearching}
+                    style={{ flexShrink: 0 }}
+                  >
+                    {isSearching ? <span className={styles.spinner} /> : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                      </svg>
+                    )}
+                    {isSearching ? "Ищем…" : "Найти"}
+                  </button>
+                </div>
+
+                {/* Skeleton while searching */}
+                {isSearching && (
+                  <div className={styles.searchResults}>
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className={styles.skeletonCard}>
+                        <div className={styles.skeletonLine} style={{ width: "40%", height: 10 }} />
+                        <div className={styles.skeletonLine} style={{ width: "90%" }} />
+                        <div className={styles.skeletonLine} style={{ width: "70%" }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Results */}
+                {!isSearching && searchResults.length > 0 && (
+                  <div className={styles.searchResults}>
+                    {searchResults.map((r, i) => (
+                      <div key={r.chunk_id} className={styles.searchResultCard}>
+                        <div className={styles.searchResultHead}>
+                          <span className={styles.searchScoreBadge}>{(r.score * 100).toFixed(1)}%</span>
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>#{i + 1}</span>
+                          <span className={styles.searchDocBadge}>📄 {r.document_title || `doc #${r.document_id}`}</span>
+                        </div>
+                        <div className={styles.searchChunkText}>{r.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Empty state */}
+                {!isSearching && searchDone && searchResults.length === 0 && (
+                  <div className={styles.emptyState}>
+                    <span className={styles.emptyIcon}>
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                      </svg>
+                    </span>
+                    <div className={styles.emptyTitle}>Ничего не найдено</div>
+                    <div className={styles.emptyText}>Попробуй другой запрос или проверь, что документы проиндексированы.</div>
+                  </div>
+                )}
+
+                {/* Hint when empty */}
+                {!isSearching && !searchDone && (
+                  <div className={styles.emptyState}>
+                    <span className={styles.emptyIcon}>
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                      </svg>
+                    </span>
+                    <div className={styles.emptyTitle}>Семантический RAG-поиск</div>
+                    <div className={styles.emptyText}>Введи запрос на естественном языке — система найдёт смыслово похожие фрагменты документов. Не забудь сначала загрузить и проиндексировать документ.</div>
                   </div>
                 )}
               </div>
@@ -1729,6 +2072,24 @@ export default function Home() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Toast container ──────────────────────────────── */}
+      {toasts.length > 0 && (
+        <div className={styles.toastContainer}>
+          {toasts.map(t => (
+            <div
+              key={t.id}
+              className={[styles.toast, t.type === "success" ? styles.toastSuccess : t.type === "error" ? styles.toastError : styles.toastInfo].join(" ")}
+              onClick={() => setToasts(p => p.filter(x => x.id !== t.id))}
+            >
+              <span style={{ fontSize: 14, flexShrink: 0 }}>
+                {t.type === "success" ? "✓" : t.type === "error" ? "✕" : "ℹ"}
+              </span>
+              {t.msg}
+            </div>
+          ))}
         </div>
       )}
 

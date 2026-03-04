@@ -705,6 +705,7 @@
 }
 
 .nodeCard {
+  position: relative;
   background: var(--bg-card-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -1861,4 +1862,279 @@
   .labelLevelToggles {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* ============================================================
+   New features: Toast · Skeleton · Copy · Search · History
+   ============================================================ */
+
+/* ── Toast System ─────────────────────────────────────────── */
+.toastContainer {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--bg-card-2);
+  border: 1px solid var(--border-2);
+  border-left: 3px solid var(--border-2);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  color: var(--text-primary);
+  animation: fadeIn 0.18s ease;
+  min-width: 200px;
+  max-width: 340px;
+  cursor: pointer;
+}
+.toastSuccess { border-left-color: var(--success); }
+.toastError   { border-left-color: var(--error); }
+.toastInfo    { border-left-color: var(--accent); }
+
+/* ── Skeleton Loading ─────────────────────────────────────── */
+.skeletonCard {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-2);
+  border-radius: var(--r-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.skeletonLine {
+  height: 12px;
+  border-radius: var(--r-sm);
+  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-hover) 50%, var(--bg-card) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+
+/* ── Node Controls (search + sort) ───────────────────────── */
+.nodeControls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.nodeSearchInput {
+  flex: 1;
+  min-width: 160px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 13px;
+  transition: var(--transition-fast);
+}
+.nodeSearchInput:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  background: var(--bg-card-2);
+}
+.nodeSearchInput::placeholder { color: var(--text-muted); }
+.nodeSortSelect {
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  appearance: none;
+}
+.nodeSortSelect:focus { outline: none; border-color: var(--border-focus); }
+.nodeControlsCount {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── Mini Prob Chart (all 6 levels) ──────────────────────── */
+.probMiniChart {
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  gap: 1px;
+  margin-top: 4px;
+}
+.probMiniSeg {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+  min-width: 2px;
+}
+
+/* ── Copy Button ─────────────────────────────────────────── */
+.copyBtn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card-2);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: var(--transition-fast);
+  z-index: 2;
+}
+.nodeCard:hover .copyBtn { opacity: 1; }
+.copyBtn:hover {
+  color: var(--text-accent);
+  border-color: var(--accent-border);
+  background: var(--accent-light);
+}
+
+/* ── Char counter & History ──────────────────────────────── */
+.textMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.charCount {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.historyBtn {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  transition: var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.historyBtn:hover { color: var(--text-accent); background: var(--accent-light); }
+.historyDropdown {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: var(--bg-card-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: fadeIn 0.15s ease;
+}
+.historyItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.historyItem:last-child { border-bottom: none; }
+.historyItem:hover { background: var(--bg-hover); color: var(--text-primary); }
+.historyItemText {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Search Tab ──────────────────────────────────────────── */
+.searchBox {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.searchInput {
+  flex: 1;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-2);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 14px;
+  transition: var(--transition-fast);
+}
+.searchInput:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+}
+.searchInput::placeholder { color: var(--text-muted); }
+.searchResults {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.searchResultCard {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: var(--transition-base);
+  animation: fadeIn 0.18s ease;
+}
+.searchResultCard:hover {
+  border-color: var(--border-2);
+  background: var(--bg-card-2);
+}
+.searchResultHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.searchScoreBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  background: var(--accent-light);
+  color: var(--text-accent);
+  border: 1px solid var(--accent-border);
+}
+.searchDocBadge {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  background: var(--bg-card-2);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+}
+.searchChunkText {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.65;
 }
