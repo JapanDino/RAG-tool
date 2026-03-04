@@ -52,6 +52,7 @@ type Props = {
   filters: Record<BloomLevel, boolean>;
   threshold: number;
   onHover?: (node: AnalyzeNode | null) => void;
+  searchQuery?: string;
 };
 
 const getSortedLevels = (probs: number[]) =>
@@ -64,7 +65,7 @@ function computeSize(freq: number | null | undefined) {
   return 24 + 8 * Math.log(1 + f);
 }
 
-export default function GraphView({ nodes, edges, filters, threshold, onHover }: Props) {
+export default function GraphView({ nodes, edges, filters, threshold, onHover, searchQuery }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
 
@@ -151,6 +152,14 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover }:
             },
           },
           {
+            selector: ".dim",
+            style: { opacity: 0.1 },
+          },
+          {
+            selector: ".hl",
+            style: { "border-width": 4, "border-color": "#6366f1", "border-opacity": 1, opacity: 1 },
+          },
+          {
             selector: ":selected",
             style: {
               "border-color": "#818cf8",
@@ -188,6 +197,19 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover }:
       cy.layout({ name: "cose", animate: true, fit: true }).run();
     }
   }, [elements, filteredNodes, onHover]);
+
+  // Highlight nodes matching searchQuery
+  useEffect(() => {
+    if (!cyRef.current) return;
+    cyRef.current.elements().removeClass("dim hl");
+    if (!searchQuery?.trim()) return;
+    const q = searchQuery.toLowerCase();
+    cyRef.current.nodes().forEach((node) => {
+      const label = (node.data("label") || "").toLowerCase();
+      if (label.includes(q)) node.addClass("hl");
+      else node.addClass("dim");
+    });
+  }, [searchQuery]);
 
   const exportPng = () => {
     const cy = cyRef.current;

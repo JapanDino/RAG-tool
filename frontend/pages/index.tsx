@@ -245,7 +245,7 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [lastJob, setLastJob] = useState<number | undefined>();
-  const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling" | "search">("analysis");
+  const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling" | "search" | "dashboard">("analysis");
   const [textInput, setTextInput] = useState("");
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [analyzeFileName, setAnalyzeFileName] = useState<string | null>(null);
@@ -299,6 +299,45 @@ export default function Home() {
   const [apiStatus, setApiStatus] = useState<"unknown" | "ok" | "down">("unknown");
   const [error, setError] = useState<string | null>(null);
 
+  // ── Dashboard ────────────────────────────────────────────────
+  const [dashDatasets, setDashDatasets] = useState<any[]>([]);
+  const [dashNodeCount, setDashNodeCount] = useState<number | null>(null);
+  const [isDashLoading, setIsDashLoading] = useState(false);
+
+  // ── Settings ─────────────────────────────────────────────────
+  const [showSettings, setShowSettings] = useState(false);
+  const [minProb, setMinProb] = useState(0.2);
+  const [maxLevels, setMaxLevels] = useState(2);
+  const [embeddingModel, setEmbeddingModel] = useState("text-embedding-3-small");
+
+  // ── Node detail modal ─────────────────────────────────────────
+  const [detailNode, setDetailNode] = useState<AnalyzeNode | null>(null);
+
+  // ── Inline editing ────────────────────────────────────────────
+  const [editingNodeId, setEditingNodeId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContext, setEditContext] = useState("");
+
+  // ── Graph search ──────────────────────────────────────────────
+  const [graphSearch, setGraphSearch] = useState("");
+
+  // ── Search mode: chunks vs knowledge nodes ────────────────────
+  const [searchMode, setSearchMode] = useState<"chunks" | "nodes">("chunks");
+  const [nodeSearchResults, setNodeSearchResults] = useState<AnalyzeNode[]>([]);
+  const [nodeSearchQuery, setNodeSearchQuery] = useState("");
+
+  // ── Onboarding ────────────────────────────────────────────────
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // ── Export dropdown ───────────────────────────────────────────
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
+  // ── Batch upload ──────────────────────────────────────────────
+  const [batchFiles, setBatchFiles] = useState<{ name: string; file: File; status: "pending"|"uploading"|"done"|"error" }[]>([]);
+
+  // ── Undo labeling ─────────────────────────────────────────────
+  const [undoStack, setUndoStack] = useState<{ node: AnalyzeNode; labels: Record<BloomLevel, boolean> }[]>([]);
+
   // ── Toast system ────────────────────────────────────────────
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastCounter = useRef(0);
@@ -342,6 +381,21 @@ export default function Home() {
 
     const savedHistory = localStorage.getItem("bloom_history");
     if (savedHistory) { try { setTextHistory(JSON.parse(savedHistory)); } catch {} }
+
+    // Settings
+    const savedMinProb = localStorage.getItem("bloom_min_prob");
+    if (savedMinProb) setMinProb(Number(savedMinProb));
+    const savedMaxLevels = localStorage.getItem("bloom_max_levels");
+    if (savedMaxLevels) setMaxLevels(Number(savedMaxLevels));
+    const savedModel = localStorage.getItem("bloom_embedding_model");
+    if (savedModel) setEmbeddingModel(savedModel);
+    const savedAnnotator = localStorage.getItem("bloom_annotator");
+    if (savedAnnotator) setAnnotator(savedAnnotator);
+
+    // Onboarding
+    if (!localStorage.getItem("bloom_visited")) {
+      setShowOnboarding(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -351,6 +405,11 @@ export default function Home() {
     if (ds) localStorage.setItem("bloom_ds", String(ds));
     else localStorage.removeItem("bloom_ds");
   }, [ds]);
+
+  useEffect(() => { localStorage.setItem("bloom_min_prob", String(minProb)); }, [minProb]);
+  useEffect(() => { localStorage.setItem("bloom_max_levels", String(maxLevels)); }, [maxLevels]);
+  useEffect(() => { localStorage.setItem("bloom_embedding_model", embeddingModel); }, [embeddingModel]);
+  useEffect(() => { localStorage.setItem("bloom_annotator", annotator); }, [annotator]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -498,7 +557,7 @@ export default function Home() {
     const json = await apiFetchJson(`/analyze/content`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: textInput, dataset_id: datasetId, max_nodes: maxNodes }),
+      body: JSON.stringify({ text: textInput, dataset_id: datasetId, max_nodes: maxNodes, min_prob: minProb, max_levels: maxLevels, embedding_model: embeddingModel }),
     });
 
     if (analyzeProgressRef.current) { clearInterval(analyzeProgressRef.current); analyzeProgressRef.current = null; }
@@ -606,6 +665,78 @@ export default function Home() {
     setNodesStatus(items.length ? `Загружено узлов: ${items.length}` : "В БД нет узлов");
   };
 
+  const loadDashboard = async () => {
+    setIsDashLoading(true);
+    const datasets = await apiFetchJson("/datasets");
+    if (datasets) setDashDatasets(Array.isArray(datasets) ? datasets : datasets.items || []);
+    if (ds) {
+      const params = new URLSearchParams({ dataset_id: String(ds), limit: "1", offset: "0" });
+      const res = await apiFetchJson(`/nodes?${params.toString()}`);
+      if (res) setDashNodeCount(res.total ?? null);
+    }
+    setIsDashLoading(false);
+  };
+
+  const saveInlineEdit = async (nodeId: number) => {
+    const ok = await apiFetchJson(`/nodes/${nodeId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: editTitle, context_text: editContext }),
+    });
+    if (ok !== null) {
+      setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, title: editTitle, context_text: editContext } : n));
+      addToast("✓ Узел обновлён", "success");
+    }
+    setEditingNodeId(null);
+  };
+
+  const searchByNodes = async () => {
+    if (!nodeSearchQuery.trim()) return;
+    setIsSearching(true);
+    setNodeSearchResults([]);
+    setSearchDone(false);
+    const params = new URLSearchParams({ limit: "200", offset: "0" });
+    if (ds) params.set("dataset_id", String(ds));
+    const json = await apiFetchJson(`/nodes?${params.toString()}`);
+    setIsSearching(false);
+    setSearchDone(true);
+    if (!json) return;
+    const all: AnalyzeNode[] = json.items || [];
+    const q = nodeSearchQuery.toLowerCase();
+    setNodeSearchResults(all.filter(n =>
+      n.title.toLowerCase().includes(q) || (n.context_text || "").toLowerCase().includes(q)
+    ));
+  };
+
+  const batchUploadAll = async () => {
+    if (!ds) { addToast("Выбери dataset перед загрузкой", "error"); return; }
+    for (let i = 0; i < batchFiles.length; i++) {
+      const item = batchFiles[i];
+      if (item.status === "done") continue;
+      setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: "uploading" } : x));
+      const fd = new FormData();
+      fd.append("file", item.file);
+      try {
+        const r = await fetch(`${apiBase}/datasets/${ds}/documents`, { method: "POST", body: fd });
+        const ok = r.ok;
+        setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: ok ? "done" : "error" } : x));
+        if (ok) { const j = await r.json(); if (j.job_id) setLastJob(j.job_id); }
+      } catch {
+        setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: "error" } : x));
+      }
+    }
+    addToast("✓ Batch загрузка завершена", "success");
+  };
+
+  const undoLabel = () => {
+    const last = undoStack[undoStack.length - 1];
+    if (!last) return;
+    setUndoStack(s => s.slice(0, -1));
+    setLabelQueue(q => [last.node, ...q]);
+    setCurrentLabels(last.labels);
+    addToast("↩ Отменено", "info");
+  };
+
   const searchNodes = async () => {
     if (!searchQuery.trim()) return;
     setIsSearching(true);
@@ -709,6 +840,7 @@ export default function Home() {
     });
     if (!ok) return;
     addToast("✓ Разметка сохранена", "success");
+    setUndoStack(s => [...s.slice(-9), { node, labels: { ...currentLabels } }]);
     setLabelQueue((q) => q.slice(1));
     setCurrentLabels({
       remember: false, understand: false, apply: false,
@@ -722,6 +854,27 @@ export default function Home() {
   // Refs for hidden file inputs
   const analyzeFileRef = useRef<HTMLInputElement>(null);
   const sidebarFileRef = useRef<HTMLInputElement>(null);
+
+  // Global hotkeys: Alt+1-4 for tabs, Ctrl+Z for undo labeling
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "TEXTAREA") return;
+      if (e.altKey) {
+        if (e.key === "1") { e.preventDefault(); setActiveTab("analysis"); }
+        if (e.key === "2") { e.preventDefault(); setActiveTab("graph"); }
+        if (e.key === "3") { e.preventDefault(); setActiveTab("labeling"); }
+        if (e.key === "4") { e.preventDefault(); setActiveTab("search"); }
+        if (e.key === "5") { e.preventDefault(); setActiveTab("dashboard"); }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && activeTab === "labeling") {
+        e.preventDefault();
+        undoLabel();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, undoStack]);
 
   useEffect(() => {
     if (activeTab !== "labeling") return;
@@ -797,6 +950,17 @@ export default function Home() {
               </div>
             )}
 
+            {/* Settings gear */}
+            <button
+              className={styles.gearBtn}
+              onClick={() => setShowSettings(true)}
+              title="Настройки (Settings)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </button>
+
             {/* Help button */}
             <button
               className={styles.helpBtn}
@@ -844,7 +1008,29 @@ export default function Home() {
             >
               <span className={styles.navIcon}><IconTag /></span>
               <span className={styles.navLabel}>Разметка</span>
-              <span className={styles.navHint}>100+</span>
+              {labelProgress && labelProgress.total > 0 ? (
+                <div className={styles.navProgressChip}>
+                  <span className={styles.navProgressText}>{labelProgress.labeled}/{labelProgress.total}</span>
+                  <div className={styles.navProgressMini}>
+                    <div className={styles.navProgressMiniFill} style={{ width: `${progressPct}%` }} />
+                  </div>
+                </div>
+              ) : (
+                <span className={styles.navHint}>queue</span>
+              )}
+            </button>
+
+            <button
+              className={[styles.navBtn, activeTab === "dashboard" ? styles.navBtnActive : ""].join(" ")}
+              onClick={() => { setActiveTab("dashboard"); loadDashboard(); }}
+            >
+              <span className={styles.navIcon}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                </svg>
+              </span>
+              <span className={styles.navLabel}>Дашборд</span>
+              <span className={styles.navHint}>stats</span>
             </button>
 
             <button
@@ -894,20 +1080,29 @@ export default function Home() {
                 </div>
                 {nodes.length > 0 && (
                   <div className={styles.cardActions}>
-                    <button
-                      className={[styles.btn, styles.btnGhost].join(" ")}
-                      onClick={exportNodesJson}
-                      title="Экспорт JSON"
-                    >
-                      <IconDownload /> JSON
-                    </button>
-                    <button
-                      className={[styles.btn, styles.btnGhost].join(" ")}
-                      onClick={exportNodesCsv}
-                      title="Экспорт CSV"
-                    >
-                      <IconDownload /> CSV
-                    </button>
+                    <div className={styles.exportMenuWrap}>
+                      <button
+                        className={[styles.btn, styles.btnGhost].join(" ")}
+                        onClick={() => setShowExportMenu(v => !v)}
+                      >
+                        <IconDownload /> Экспорт ▾
+                      </button>
+                      {showExportMenu && (
+                        <div className={styles.exportDropdown}>
+                          <div className={styles.exportItem} onClick={() => { exportNodesJson(); setShowExportMenu(false); }}>
+                            <IconDownload /> JSON
+                          </div>
+                          <div className={styles.exportItem} onClick={() => { exportNodesCsv(); setShowExportMenu(false); }}>
+                            <IconDownload /> CSV
+                          </div>
+                          {ds && (
+                            <div className={styles.exportItem} onClick={() => { exportJsonl(); setShowExportMenu(false); }}>
+                              <IconDownload /> JSONL (датасет)
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1244,11 +1439,16 @@ export default function Home() {
                       const sorted = getSortedLevels(n.prob_vector);
                       const accentColor = n.top_levels[0] ? LEVEL_COLORS[n.top_levels[0]] : "var(--border)";
                       return (
-                        <div key={n.id} className={styles.nodeCard} style={{ borderLeft: `3px solid ${accentColor}` }}>
+                        <div
+                          key={n.id}
+                          className={styles.nodeCard}
+                          style={{ borderLeft: `3px solid ${accentColor}`, cursor: "pointer" }}
+                          onClick={() => setDetailNode(n)}
+                        >
                           {/* Copy button */}
                           <button
                             className={styles.copyBtn}
-                            onClick={() => copyNode(n)}
+                            onClick={e => { e.stopPropagation(); copyNode(n); }}
                             title="Копировать в буфер"
                           >
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1347,95 +1547,169 @@ export default function Home() {
                 </div>
               </div>
               <div className={styles.grid}>
-                {/* Search box */}
-                <div className={styles.searchBox}>
-                  <input
-                    className={styles.searchInput}
-                    placeholder="Введи поисковый запрос…"
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") searchNodes(); }}
-                  />
-                  <div className={styles.paramField} style={{ margin: 0, flexShrink: 0 }}>
-                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Top-K</span>
-                    <input
-                      className={styles.paramInput}
-                      type="number"
-                      min="1"
-                      max="20"
-                      value={searchTopK}
-                      onChange={e => setSearchTopK(Number(e.target.value))}
-                      style={{ width: 52 }}
-                    />
-                  </div>
+                {/* Search mode toggle */}
+                <div className={styles.searchModeToggle}>
                   <button
-                    className={[styles.btn, styles.btnPrimary].join(" ")}
-                    onClick={searchNodes}
-                    disabled={!searchQuery.trim() || isSearching}
-                    style={{ flexShrink: 0 }}
+                    className={[styles.searchModeBtn, searchMode === "chunks" ? styles.searchModeBtnActive : ""].join(" ")}
+                    onClick={() => setSearchMode("chunks")}
                   >
-                    {isSearching ? <span className={styles.spinner} /> : (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                      </svg>
-                    )}
-                    {isSearching ? "Ищем…" : "Найти"}
+                    Чанки документов
+                  </button>
+                  <button
+                    className={[styles.searchModeBtn, searchMode === "nodes" ? styles.searchModeBtnActive : ""].join(" ")}
+                    onClick={() => setSearchMode("nodes")}
+                  >
+                    Узлы знаний
                   </button>
                 </div>
 
-                {/* Skeleton while searching */}
-                {isSearching && (
-                  <div className={styles.searchResults}>
-                    {Array.from({ length: 3 }).map((_, i) => (
-                      <div key={i} className={styles.skeletonCard}>
-                        <div className={styles.skeletonLine} style={{ width: "40%", height: 10 }} />
-                        <div className={styles.skeletonLine} style={{ width: "90%" }} />
-                        <div className={styles.skeletonLine} style={{ width: "70%" }} />
-                      </div>
-                    ))}
+                {/* Chunk search mode */}
+                {searchMode === "chunks" && (
+                <div style={{ display: "contents" }}>
+                  <div className={styles.searchBox}>
+                    <input
+                      className={styles.searchInput}
+                      placeholder="Введи поисковый запрос…"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") searchNodes(); }}
+                    />
+                    <div className={styles.paramField} style={{ margin: 0, flexShrink: 0 }}>
+                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Top-K</span>
+                      <input
+                        className={styles.paramInput}
+                        type="number"
+                        min="1"
+                        max="20"
+                        value={searchTopK}
+                        onChange={e => setSearchTopK(Number(e.target.value))}
+                        style={{ width: 52 }}
+                      />
+                    </div>
+                    <button
+                      className={[styles.btn, styles.btnPrimary].join(" ")}
+                      onClick={searchNodes}
+                      disabled={!searchQuery.trim() || isSearching}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {isSearching ? <span className={styles.spinner} /> : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                      )}
+                      {isSearching ? "Ищем…" : "Найти"}
+                    </button>
                   </div>
-                )}
 
-                {/* Results */}
-                {!isSearching && searchResults.length > 0 && (
-                  <div className={styles.searchResults}>
-                    {searchResults.map((r, i) => (
-                      <div key={r.chunk_id} className={styles.searchResultCard}>
-                        <div className={styles.searchResultHead}>
-                          <span className={styles.searchScoreBadge}>{(Math.max(0, r.score) * 100).toFixed(1)}%</span>
-                          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>#{i + 1}</span>
-                          <span className={styles.searchDocBadge}>📄 {r.document_title || `doc #${r.document_id}`}</span>
+                  {/* Skeleton while searching */}
+                  {isSearching && (
+                    <div className={styles.searchResults}>
+                      {Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className={styles.skeletonCard}>
+                          <div className={styles.skeletonLine} style={{ width: "40%", height: 10 }} />
+                          <div className={styles.skeletonLine} style={{ width: "90%" }} />
+                          <div className={styles.skeletonLine} style={{ width: "70%" }} />
                         </div>
-                        <div className={styles.searchChunkText}>{r.text}</div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Results */}
+                  {!isSearching && searchResults.length > 0 && (
+                    <div className={styles.searchResults}>
+                      {searchResults.map((r, i) => (
+                        <div key={r.chunk_id} className={styles.searchResultCard}>
+                          <div className={styles.searchResultHead}>
+                            <span className={styles.searchScoreBadge}>{(Math.max(0, r.score) * 100).toFixed(1)}%</span>
+                            <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>#{i + 1}</span>
+                            <span className={styles.searchDocBadge}>📄 {r.document_title || `doc #${r.document_id}`}</span>
+                          </div>
+                          <div className={styles.searchChunkText}>{r.text}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Empty state */}
+                  {!isSearching && searchDone && searchResults.length === 0 && (
+                    <div className={styles.emptyState}>
+                      <span className={styles.emptyIcon}>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                      </span>
+                      <div className={styles.emptyTitle}>Ничего не найдено</div>
+                      <div className={styles.emptyText}>Попробуй другой запрос или проверь, что документы проиндексированы.</div>
+                    </div>
+                  )}
+
+                  {/* Hint when empty */}
+                  {!isSearching && !searchDone && (
+                    <div className={styles.emptyState}>
+                      <span className={styles.emptyIcon}>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                      </span>
+                      <div className={styles.emptyTitle}>Семантический RAG-поиск</div>
+                      <div className={styles.emptyText}>Введи запрос на естественном языке — система найдёт смыслово похожие фрагменты документов. Не забудь сначала загрузить и проиндексировать документ.</div>
+                    </div>
+                  )}
+                </div>
                 )}
 
-                {/* Empty state */}
-                {!isSearching && searchDone && searchResults.length === 0 && (
-                  <div className={styles.emptyState}>
-                    <span className={styles.emptyIcon}>
-                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                      </svg>
-                    </span>
-                    <div className={styles.emptyTitle}>Ничего не найдено</div>
-                    <div className={styles.emptyText}>Попробуй другой запрос или проверь, что документы проиндексированы.</div>
+                {/* Nodes search mode */}
+                {searchMode === "nodes" && (
+                <div>
+                  <div className={styles.searchBox}>
+                    <input
+                      className={styles.searchInput}
+                      placeholder="Поиск по узлам знаний…"
+                      value={nodeSearchQuery}
+                      onChange={e => setNodeSearchQuery(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") searchByNodes(); }}
+                    />
+                    <button
+                      className={[styles.btn, styles.btnPrimary].join(" ")}
+                      onClick={searchByNodes}
+                      disabled={!nodeSearchQuery.trim() || isSearching}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {isSearching ? <span className={styles.spinner} /> : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                      )}
+                      {isSearching ? "Ищем…" : "Найти"}
+                    </button>
                   </div>
-                )}
-
-                {/* Hint when empty */}
-                {!isSearching && !searchDone && (
-                  <div className={styles.emptyState}>
-                    <span className={styles.emptyIcon}>
-                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                      </svg>
-                    </span>
-                    <div className={styles.emptyTitle}>Семантический RAG-поиск</div>
-                    <div className={styles.emptyText}>Введи запрос на естественном языке — система найдёт смыслово похожие фрагменты документов. Не забудь сначала загрузить и проиндексировать документ.</div>
-                  </div>
+                  {nodeSearchResults.length > 0 && (
+                    <div className={styles.searchResults} style={{ marginTop: 12 }}>
+                      {nodeSearchResults.map(n => (
+                        <div key={n.id} className={styles.searchResultCard} style={{ cursor: "pointer" }} onClick={() => setDetailNode(n)}>
+                          <div className={styles.searchResultHead}>
+                            {n.top_levels.map(lvl => <BloomBadge key={lvl} level={lvl} />)}
+                            <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginLeft: "auto" }}>#{n.id}</span>
+                          </div>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)", marginBottom: 4 }}>{n.title}</div>
+                          <div className={styles.searchChunkText}>{n.context_text}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {!isSearching && searchDone && nodeSearchResults.length === 0 && (
+                    <div className={styles.emptyState}>
+                      <div className={styles.emptyTitle}>Ничего не найдено</div>
+                      <div className={styles.emptyText}>Попробуй другой запрос.</div>
+                    </div>
+                  )}
+                  {!searchDone && !isSearching && (
+                    <div className={styles.emptyState}>
+                      <div className={styles.emptyTitle}>Поиск по узлам знаний</div>
+                      <div className={styles.emptyText}>Ищет по названию и контексту узлов в текущем датасете. Узлы должны быть загружены в БД.</div>
+                    </div>
+                  )}
+                </div>
                 )}
               </div>
             </div>
@@ -1557,6 +1831,16 @@ export default function Home() {
                     <IconRefresh />
                     Rebuild edges (job)
                   </button>
+                  <input
+                    className={styles.graphSearchInput}
+                    placeholder="Поиск по графу…"
+                    value={graphSearch}
+                    onChange={e => setGraphSearch(e.target.value)}
+                    title="Подсветить узлы по тексту"
+                  />
+                  {graphSearch && (
+                    <button className={[styles.btn, styles.btnGhost].join(" ")} onClick={() => setGraphSearch("")}>✕</button>
+                  )}
                 </div>
               </div>
 
@@ -1566,6 +1850,7 @@ export default function Home() {
                 edges={graphEdgesData}
                 filters={filters}
                 threshold={threshold}
+                searchQuery={graphSearch}
                 onHover={(n: AnalyzeNode | null) => {
                   setHoveredNode(n);
                   if (n) setSelectedNode(n);
@@ -1756,6 +2041,15 @@ export default function Home() {
                     >
                       Пропустить
                     </button>
+                    {undoStack.length > 0 && (
+                      <button
+                        className={[styles.btn, styles.btnGhost].join(" ")}
+                        onClick={undoLabel}
+                        title="Отменить последнее действие (Ctrl+Z)"
+                      >
+                        ↩ Отмена
+                      </button>
+                    )}
                     <span className={styles.labelHint}>
                       Осталось в очереди: <span className={styles.kbd}>{labelQueue.length}</span>
                     </span>
@@ -1774,6 +2068,121 @@ export default function Home() {
               )}
             </div>
           )}
+          {/* ── Dashboard Tab ──────────────────────────── */}
+          {activeTab === "dashboard" && (
+            <div className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <div className={styles.cardTitle}>Дашборд</div>
+                  <div className={styles.cardNote}>
+                    Статистика по всем датасетам, узлам знаний и прогрессу разметки.
+                  </div>
+                </div>
+                <button
+                  className={[styles.btn, styles.btnPrimary].join(" ")}
+                  onClick={loadDashboard}
+                  disabled={isDashLoading}
+                >
+                  {isDashLoading ? <span className={styles.spinner} /> : <IconRefresh />}
+                  Обновить
+                </button>
+              </div>
+
+              {isDashLoading ? (
+                <div className={styles.dashGrid}>
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className={styles.skeletonCard} style={{ height: 80 }} />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {/* KPI chips */}
+                  <div className={styles.dashGrid}>
+                    <div className={styles.dashCard}>
+                      <div className={styles.dashCardVal}>{dashDatasets.length}</div>
+                      <div className={styles.dashCardLabel}>Датасетов</div>
+                    </div>
+                    <div className={styles.dashCard}>
+                      <div className={styles.dashCardVal}>{dashNodeCount ?? "—"}</div>
+                      <div className={styles.dashCardLabel}>Узлов (текущий DS)</div>
+                    </div>
+                    <div className={styles.dashCard}>
+                      <div className={styles.dashCardVal}>{labelProgress?.labeled ?? 0}</div>
+                      <div className={styles.dashCardLabel}>Размечено</div>
+                    </div>
+                    <div className={styles.dashCard}>
+                      <div className={styles.dashCardVal} style={{ color: "var(--success)" }}>
+                        {apiStatus === "ok" ? "Online" : "Offline"}
+                      </div>
+                      <div className={styles.dashCardLabel}>API статус</div>
+                    </div>
+                  </div>
+
+                  {/* Datasets table */}
+                  {dashDatasets.length > 0 && (
+                    <div className={styles.dashSection}>
+                      <div className={styles.cardTitle} style={{ fontSize: 13, marginBottom: 10 }}>
+                        Все датасеты
+                      </div>
+                      {dashDatasets.map((d: any) => (
+                        <div key={d.id} className={styles.dashDatasetRow}>
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)" }}>
+                            #{d.id}
+                          </span>
+                          <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
+                            {d.name}
+                          </span>
+                          <button
+                            className={[styles.btnCompact].join(" ")}
+                            onClick={() => { setDs(d.id); setActiveTab("analysis"); addToast(`Переключён на dataset #${d.id}`, "info"); }}
+                          >
+                            Выбрать
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Bloom distribution (from current nodes) */}
+                  {nodes.length > 0 && (
+                    <div className={styles.dashSection}>
+                      <div className={styles.cardTitle} style={{ fontSize: 13, marginBottom: 10 }}>
+                        Bloom-распределение (текущий анализ)
+                      </div>
+                      {BLOOM_LEVELS.map(lvl => {
+                        const count = nodes.filter(n => n.top_levels.includes(lvl)).length;
+                        if (!count) return null;
+                        const pct = (count / nodes.length) * 100;
+                        return (
+                          <div key={lvl} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                            <span style={{ width: 90, fontSize: 12, color: LEVEL_COLORS[lvl] }}>{LEVEL_LABELS[lvl]}</span>
+                            <div style={{ flex: 1, height: 6, background: "var(--bg-hover)", borderRadius: 3, overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${pct}%`, background: LEVEL_COLORS[lvl], borderRadius: 3 }} />
+                            </div>
+                            <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-muted)", width: 28, textAlign: "right" }}>{count}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {!dashDatasets.length && !isDashLoading && (
+                    <div className={styles.emptyState}>
+                      <span className={styles.emptyIcon}>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                        </svg>
+                      </span>
+                      <div className={styles.emptyTitle}>Нет данных</div>
+                      <div className={styles.emptyText}>Нажми «Обновить» или создай датасет в боковой панели.</div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
         </main>
 
         {/* ── Aside (right sidebar) ────────────────────── */}
@@ -1935,6 +2344,67 @@ export default function Home() {
 
               <div className={styles.divider} />
 
+              {/* Batch upload */}
+              <div className={styles.fieldLabel} style={{ color: "var(--text-muted)", fontSize: 11 }}>
+                Пакетная загрузка
+              </div>
+              <label style={{
+                display: "block", padding: "7px 10px",
+                borderRadius: 7, border: "1px dashed var(--border-2)",
+                cursor: "pointer", fontSize: 12, color: "var(--text-secondary)",
+                textAlign: "center",
+              }}>
+                <input
+                  type="file"
+                  multiple
+                  accept=".txt,.pdf,.md"
+                  style={{ display: "none" }}
+                  onChange={e => {
+                    const files = Array.from(e.target.files || []);
+                    setBatchFiles(files.map(f => ({ name: f.name, file: f, status: "pending" as const })));
+                    e.target.value = "";
+                  }}
+                />
+                + Выбрать файлы
+              </label>
+              {batchFiles.length > 0 && (
+                <>
+                  <div className={styles.batchList}>
+                    {batchFiles.map((item, i) => (
+                      <div key={i} className={styles.batchItem}>
+                        <span className={styles.batchItemName}>{item.name}</span>
+                        <span className={[
+                          styles.batchItemStatus,
+                          item.status === "done" ? styles.batchDone :
+                          item.status === "error" ? styles.batchError :
+                          item.status === "uploading" ? styles.batchRunning :
+                          styles.batchPending,
+                        ].join(" ")}>
+                          {item.status === "done" ? "✓" : item.status === "error" ? "✕" : item.status === "uploading" ? "…" : "·"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className={styles.row}>
+                    <button
+                      className={[styles.btnCompact, styles.btnCompactPrimary].join(" ")}
+                      onClick={batchUploadAll}
+                      disabled={!ds}
+                    >
+                      <IconUpload /> Загрузить все
+                    </button>
+                    <button
+                      className={styles.btnCompact}
+                      onClick={() => setBatchFiles([])}
+                    >
+                      Очистить
+                    </button>
+                  </div>
+                </>
+              )}
+
+              <div className={styles.divider} />
+
               {/* Annotate shortcuts */}
               <div className={styles.fieldLabel} style={{ color: "var(--text-muted)", fontSize: 11 }}>
                 Автоаннотация
@@ -1967,6 +2437,170 @@ export default function Home() {
 
         </aside>
       </div>
+
+      {/* ── Node detail modal ──────────────────────────── */}
+      {detailNode && (
+        <div className={styles.detailOverlay} onClick={() => setDetailNode(null)}>
+          <div className={styles.detailModal} onClick={e => e.stopPropagation()}>
+            <div className={styles.detailHeader}>
+              <div className={styles.detailTitle}>{detailNode.title}</div>
+              <button className={styles.detailClose} onClick={() => setDetailNode(null)}>×</button>
+            </div>
+            <div className={styles.detailBody}>
+              <div className={styles.detailSection}>
+                <div className={styles.detailSectionLabel}>Уровни Блума</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {detailNode.top_levels.map(lvl => <BloomBadge key={lvl} level={lvl} />)}
+                </div>
+              </div>
+              <div className={styles.detailSection}>
+                <div className={styles.detailSectionLabel}>Контекст</div>
+                <div className={styles.detailText}>{detailNode.context_text}</div>
+              </div>
+              {detailNode.rationale && (
+                <div className={styles.detailSection}>
+                  <div className={styles.detailSectionLabel}>Обоснование</div>
+                  <div className={styles.detailText} style={{ fontStyle: "italic", color: "var(--text-muted)" }}>{detailNode.rationale}</div>
+                </div>
+              )}
+              <div className={styles.detailSection}>
+                <div className={styles.detailSectionLabel}>Вектор вероятностей</div>
+                <div className={styles.detailProbFull}>
+                  {getSortedLevels(detailNode.prob_vector).map(({ lvl, prob }) => (
+                    <div key={lvl} className={styles.detailProbRow}>
+                      <span className={styles.detailProbLabel} style={{ color: LEVEL_COLORS[lvl] }}>{LEVEL_LABELS[lvl]}</span>
+                      <div className={styles.detailProbBar}>
+                        <div className={styles.detailProbFill} style={{ width: `${Math.round(prob * 100)}%`, background: LEVEL_COLORS[lvl] }} />
+                      </div>
+                      <span className={styles.detailProbVal}>{(prob * 100).toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <button className={[styles.btn, styles.btnPrimary].join(" ")} onClick={() => copyNode(detailNode)}>
+                  Копировать
+                </button>
+                <button className={[styles.btn, styles.btnGhost].join(" ")} onClick={() => setDetailNode(null)}>
+                  Закрыть
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Settings drawer ─────────────────────────────── */}
+      {showSettings && (
+        <div className={styles.settingsOverlay} onClick={() => setShowSettings(false)}>
+          <div className={styles.settingsPanel} onClick={e => e.stopPropagation()}>
+            <div className={styles.settingsHeader}>
+              <div className={styles.settingsTitle}>Настройки</div>
+              <button className={styles.settingsClose} onClick={() => setShowSettings(false)}>×</button>
+            </div>
+            <div className={styles.settingsBody}>
+              <div className={styles.settingsSectionTitle}>Анализ</div>
+
+              <div className={styles.settingsRow}>
+                <label className={styles.settingsLabel}>
+                  Min prob (порог уверенности)
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{minProb.toFixed(2)}</span>
+                </label>
+                <input
+                  type="range" min="0.05" max="0.5" step="0.05"
+                  value={minProb}
+                  onChange={e => setMinProb(Number(e.target.value))}
+                  className={styles.settingsInput}
+                />
+              </div>
+
+              <div className={styles.settingsRow}>
+                <label className={styles.settingsLabel}>
+                  Макс. уровней на узел
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{maxLevels}</span>
+                </label>
+                <input
+                  type="range" min="1" max="6" step="1"
+                  value={maxLevels}
+                  onChange={e => setMaxLevels(Number(e.target.value))}
+                  className={styles.settingsInput}
+                />
+              </div>
+
+              <div className={styles.settingsSectionTitle} style={{ marginTop: 16 }}>Эмбеддинги</div>
+
+              <div className={styles.settingsRow}>
+                <label className={styles.settingsLabel}>Модель</label>
+                <select
+                  className={styles.nodeSortSelect}
+                  value={embeddingModel}
+                  onChange={e => setEmbeddingModel(e.target.value)}
+                  style={{ width: "100%" }}
+                >
+                  <option value="text-embedding-3-small">text-embedding-3-small (дефолт)</option>
+                  <option value="text-embedding-3-large">text-embedding-3-large</option>
+                  <option value="text-embedding-ada-002">text-embedding-ada-002</option>
+                </select>
+              </div>
+
+              <div className={styles.settingsSectionTitle} style={{ marginTop: 16 }}>Разметка</div>
+              <div className={styles.settingsRow}>
+                <label className={styles.settingsLabel}>Аннотатор по умолчанию</label>
+                <input
+                  className={styles.dsInput}
+                  value={annotator}
+                  onChange={e => setAnnotator(e.target.value)}
+                  placeholder="default"
+                />
+              </div>
+
+              <button
+                className={[styles.btn, styles.btnPrimary].join(" ")}
+                onClick={() => { setShowSettings(false); addToast("✓ Настройки сохранены", "success"); }}
+                style={{ marginTop: 20, width: "100%" }}
+              >
+                Сохранить и закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Onboarding overlay ──────────────────────────── */}
+      {showOnboarding && (
+        <div className={styles.onboardOverlay}>
+          <div className={styles.onboardCard}>
+            <div className={styles.onboardIcon}>🌸</div>
+            <div className={styles.onboardTitle}>Добро пожаловать в Bloom RAG Studio</div>
+            <div className={styles.onboardSubtitle}>
+              Инструмент для автоматической классификации знаний по таксономии Блума с RAG-индексацией.
+            </div>
+            <div className={styles.onboardSteps}>
+              {[
+                { n: "1", text: "Создай датасет в правой панели или введи ID существующего" },
+                { n: "2", text: "Вставь текст на вкладке «Анализ» и нажми Анализировать" },
+                { n: "3", text: "Загрузи документ и проиндексируй для семантического поиска" },
+                { n: "4", text: "Перейди на вкладку «Разметка» для ручной аннотации (1–6 + Enter)" },
+              ].map(({ n, text }) => (
+                <div key={n} className={styles.onboardStep}>
+                  <div className={styles.onboardStepNum}>{n}</div>
+                  <div className={styles.onboardStepText}>{text}</div>
+                </div>
+              ))}
+            </div>
+            <button
+              className={[styles.btn, styles.btnPrimaryLg].join(" ")}
+              onClick={() => {
+                setShowOnboarding(false);
+                localStorage.setItem("bloom_visited", "1");
+              }}
+              style={{ marginTop: 8 }}
+            >
+              Начать работу →
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Guide modal ────────────────────────────────── */}
       {showGuide && (

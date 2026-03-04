@@ -11,6 +11,11 @@ import os
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 
+@router.get("", response_model=list[DatasetOut])
+def list_datasets(db: Session = Depends(get_db)):
+    return db.query(Dataset).order_by(Dataset.id).all()
+
+
 @router.post("", response_model=DatasetOut)
 def create_dataset(data: DatasetIn, db: Session = Depends(get_db)):
     existing = db.query(Dataset).filter(Dataset.name == data.name).first()
