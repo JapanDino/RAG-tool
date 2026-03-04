@@ -126,23 +126,46 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
         cls = classify_bloom_multilabel(text_for_cls, min_prob=min_prob, max_levels=max_levels)
         rationale = cls.get("rationale")
         node_rationales.append(rationale)
-        kn = KnowledgeNode(
-            dataset_id=payload.dataset_id,
-            document_id=payload.document_id,
-            title=node["title"],
-            context_text=node["context_snippet"],
-            prob_vector=cls["prob_vector"],
-            top_levels=cls["top_levels"],
-            embedding_dim=embedding_dim,
-            embedding_model=embedding_model,
-            model_info={
+
+        # Upsert: if a node with the same title already exists in this dataset, update it
+        existing = (
+            db.query(KnowledgeNode)
+            .filter(
+                KnowledgeNode.dataset_id == payload.dataset_id,
+                KnowledgeNode.title == node["title"],
+            )
+            .first()
+        )
+        if existing:
+            existing.context_text = node["context_snippet"]
+            existing.prob_vector = cls["prob_vector"]
+            existing.top_levels = cls["top_levels"]
+            existing.embedding_model = embedding_model
+            existing.model_info = {
                 "extractor": payload.extractor or "heuristic-v1",
                 "classifier": payload.classifier or "keyword-v1",
                 "node_type": node.get("node_type"),
                 "rationale": rationale,
-            },
-        )
-        db.add(kn)
+            }
+            kn = existing
+        else:
+            kn = KnowledgeNode(
+                dataset_id=payload.dataset_id,
+                document_id=payload.document_id,
+                title=node["title"],
+                context_text=node["context_snippet"],
+                prob_vector=cls["prob_vector"],
+                top_levels=cls["top_levels"],
+                embedding_dim=embedding_dim,
+                embedding_model=embedding_model,
+                model_info={
+                    "extractor": payload.extractor or "heuristic-v1",
+                    "classifier": payload.classifier or "keyword-v1",
+                    "node_type": node.get("node_type"),
+                    "rationale": rationale,
+                },
+            )
+            db.add(kn)
         stored_nodes.append(kn)
 
     db.commit()

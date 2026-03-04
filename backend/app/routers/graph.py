@@ -108,10 +108,10 @@ def get_graph(
         sql = f"""
             WITH q AS (SELECT vec FROM knowledge_nodes WHERE id = :id)
             SELECT kn2.id as node_id,
-                   1.0 - (kn2.vec <-> (SELECT vec FROM q)) as score
+                   1.0 - (kn2.vec <=> (SELECT vec FROM q)) as score
             FROM knowledge_nodes kn2
             WHERE {where_clause}
-            ORDER BY kn2.vec <-> (SELECT vec FROM q)
+            ORDER BY kn2.vec <=> (SELECT vec FROM q)
             LIMIT :k
         """
 
