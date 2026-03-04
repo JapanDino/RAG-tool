@@ -406,7 +406,7 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
 }
 
 .btn {
@@ -699,6 +699,7 @@
   gap: 10px;
   transition: var(--transition-fast);
   cursor: default;
+  animation: fadeIn 0.18s ease-out both;
 }
 
 .nodeCard:hover {
@@ -887,6 +888,45 @@
   outline: none;
   border-color: var(--border-focus);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.paramSlider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-2);
+  outline: none;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.paramSlider:hover {
+  background: rgba(99, 102, 241, 0.25);
+}
+.paramSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid rgba(255,255,255,0.2);
+  cursor: pointer;
+  transition: var(--transition-fast);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
+}
+.paramSlider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 5px rgba(99,102,241,0.3);
+  transform: scale(1.1);
+}
+.paramSlider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
 }
 
 .paramCheckbox {
@@ -1145,23 +1185,21 @@
   padding: 20px 14px;
   border: 1.5px dashed var(--border-2);
   border-radius: var(--r-md);
-  cursor: pointer;
   transition: var(--transition-fast);
   text-align: center;
-  position: relative;
 }
+
+.dropZone:has(:focus-visible) {
+  border-color: var(--accent-border);
+}
+
 
 .dropZone:hover {
   border-color: var(--accent-border);
   background: var(--accent-light);
-}
-
-.dropZone input[type="file"] {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
   cursor: pointer;
 }
+
 
 .dropZoneIcon {
   width: 28px;

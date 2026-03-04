@@ -237,9 +237,18 @@ export default function Home() {
   const [lastJob, setLastJob] = useState<number | undefined>();
   const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling">("analysis");
   const [textInput, setTextInput] = useState("");
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [analyzeFileName, setAnalyzeFileName] = useState<string | null>(null);
   const [nodes, setNodes] = useState<AnalyzeNode[]>([]);
   const [nodesStatus, setNodesStatus] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [maxNodes, setMaxNodes] = useState(100);
+  const [maxNodesAuto, setMaxNodesAuto] = useState(false);
+
+  const suggestMaxNodes = (text: string): number => {
+    const chars = text.replace(/\s/g, "").length;
+    return Math.min(500, Math.max(10, Math.round(chars / 3000) * 10));
+  };
   const [graphNodesData, setGraphNodesData] = useState<AnalyzeNode[]>([]);
   const [graphEdgesData, setGraphEdgesData] = useState<GraphEdge[]>([]);
   const [threshold, setThreshold] = useState(0.3);
@@ -271,7 +280,7 @@ export default function Home() {
     create: false,
   });
 
-  const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+  const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
   const [apiBase, setApiBase] = useState(DEFAULT_API);
   const [apiStatus, setApiStatus] = useState<"unknown" | "ok" | "down">("unknown");
   const [error, setError] = useState<string | null>(null);
@@ -363,6 +372,8 @@ export default function Home() {
       setError(null);
       const r = await fetch(`${apiBase}/datasets/${ds}/documents`, { method: "POST", body: fd });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+      const j = await r.json();
+      if (j.job_id) setLastJob(j.job_id);
     } catch (e: any) {
       setError(`Не удалось загрузить документ: ${String(e?.message || e)}`);
     }
@@ -388,13 +399,30 @@ export default function Home() {
   };
 
   const analyzeText = async () => {
-    if (!textInput.trim() || !ds) return;
+    if (!textInput.trim()) return;
+
+    // Auto-create dataset if none is selected yet
+    let datasetId = ds;
+    if (!datasetId) {
+      const dsName = name.trim() || "dataset";
+      const j = await apiFetchJson(`/datasets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: dsName }),
+      });
+      if (!j) return;
+      setDs(j.id);
+      setName(dsName);
+      datasetId = j.id;
+    }
+
     setIsAnalyzing(true);
-    setNodesStatus("Анализируем текст...");
+    setNodes([]);
+    setNodesStatus(null);
     const json = await apiFetchJson(`/analyze/content`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: textInput, dataset_id: ds }),
+      body: JSON.stringify({ text: textInput, dataset_id: datasetId, max_nodes: maxNodes }),
     });
     setIsAnalyzing(false);
     if (!json) {
@@ -408,8 +436,28 @@ export default function Home() {
 
   const loadTextFile = async (f: File | null) => {
     if (!f) return;
-    const text = await f.text();
-    setTextInput(text);
+    setIsTranscribing(true);
+    setAnalyzeFileName(f.name);
+    setName(f.name.replace(/\.[^.]+$/, ""));
+    try {
+      if (f.name.toLowerCase().endsWith(".pdf")) {
+        const fd = new FormData();
+        fd.append("file", f);
+        const r = await fetch(`${apiBase}/datasets/extract-text`, { method: "POST", body: fd });
+        if (!r.ok) { setError("Не удалось извлечь текст из PDF"); setAnalyzeFileName(null); return; }
+        const { text } = await r.json();
+        setTextInput(text);
+        setMaxNodes(suggestMaxNodes(text));
+        setMaxNodesAuto(true);
+      } else {
+        const text = await f.text();
+        setTextInput(text);
+        setMaxNodes(suggestMaxNodes(text));
+        setMaxNodesAuto(true);
+      }
+    } finally {
+      setIsTranscribing(false);
+    }
   };
 
   const exportNodesJson = () => {
@@ -538,6 +586,9 @@ export default function Home() {
 
   // Ref to the save button — clicking the real button guarantees React has the latest state.
   const saveBtnRef = useRef<HTMLButtonElement>(null);
+  // Refs for hidden file inputs
+  const analyzeFileRef = useRef<HTMLInputElement>(null);
+  const sidebarFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (activeTab !== "labeling") return;
@@ -660,7 +711,16 @@ export default function Home() {
           {error && (
             <div className={styles.error}>
               <span className={styles.errorIcon}><IconAlert /></span>
-              <span>{error}</span>
+              <span style={{ flex: 1 }}>{error}</span>
+              <button
+                onClick={() => setError(null)}
+                style={{
+                  flexShrink: 0, background: "none", border: "none", cursor: "pointer",
+                  color: "#fca5a5", fontSize: 18, lineHeight: 1, padding: "0 2px",
+                  opacity: 0.7, marginLeft: 4,
+                }}
+                title="Закрыть"
+              >×</button>
             </div>
           )}
 
@@ -695,14 +755,61 @@ export default function Home() {
               </div>
 
               <div className={styles.grid}>
+                {/* File drop zone */}
+                <div
+                  style={{
+                    padding: "13px 16px", borderRadius: 8,
+                    border: `1.5px dashed ${isTranscribing ? "var(--text-accent)" : analyzeFileName ? "var(--success)" : "var(--border-2)"}`,
+                    background: analyzeFileName && !isTranscribing ? "rgba(16,185,129,0.04)" : "var(--bg-card)",
+                    transition: "border-color 0.15s, background 0.15s",
+                    cursor: isTranscribing ? "default" : "pointer",
+                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) loadTextFile(f); }}
+                  onClick={() => !isTranscribing && analyzeFileRef.current?.click()}
+                >
+                  {/* Hidden native file input */}
+                  <input
+                    ref={analyzeFileRef}
+                    type="file"
+                    accept=".txt,.pdf,.md"
+                    style={{ display: "none" }}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) loadTextFile(f); e.target.value = ""; }}
+                  />
+                  {isTranscribing ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className={styles.spinner} />
+                      <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Извлекаем текст из PDF…</span>
+                    </div>
+                  ) : analyzeFileName ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--success)", fontWeight: 500 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--success)", flexShrink: 0, boxShadow: "0 0 6px rgba(16,185,129,0.5)" }} />
+                      {analyzeFileName}
+                      <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>нажми, чтобы заменить</span>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 500 }}>Выбрать файл</span>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>или перетащи сюда (.txt, .pdf, .md)</span>
+                    </div>
+                  )}
+                </div>
+
                 {/* Textarea */}
                 <label className={styles.fieldLabel}>
                   Текст для анализа
                   <textarea
                     className={styles.textarea}
-                    placeholder="Вставьте текст на русском языке — например: «Нейронные сети — это вычислительные модели, вдохновлённые строением мозга...»"
+                    placeholder="Вставьте текст вручную или загрузите файл выше…"
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData.getData("text");
+                      if (pasted.length > 200) {
+                        setMaxNodes(suggestMaxNodes(pasted));
+                        setMaxNodesAuto(true);
+                      }
+                    }}
                   />
                 </label>
 
@@ -711,11 +818,46 @@ export default function Home() {
                   <button
                     className={[styles.btn, styles.btnPrimaryLg].join(" ")}
                     onClick={analyzeText}
-                    disabled={!ds || !textInput.trim() || isAnalyzing}
+                    disabled={!textInput.trim() || isAnalyzing || isTranscribing}
                   >
                     {isAnalyzing ? <span className={styles.spinner} /> : <IconSparkle />}
                     {isAnalyzing ? "Анализируем..." : "Анализировать"}
                   </button>
+
+                  <div className={styles.paramField} style={{ margin: 0, minWidth: 180 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      Макс. узлов
+                      {maxNodesAuto && (
+                        <span style={{
+                          fontSize: 10, padding: "1px 5px", borderRadius: 4,
+                          background: "rgba(99,102,241,0.15)", color: "var(--text-accent)",
+                          fontWeight: 600, letterSpacing: "0.03em",
+                        }}>авто</span>
+                      )}
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        className={styles.paramSlider}
+                        type="range"
+                        min="10"
+                        max="500"
+                        step="10"
+                        value={maxNodes}
+                        onChange={(e) => { setMaxNodes(Number(e.target.value)); setMaxNodesAuto(false); }}
+                        style={{ flex: 1 }}
+                      />
+                      <input
+                        className={styles.paramInput}
+                        type="number"
+                        min="10"
+                        max="500"
+                        step="10"
+                        value={maxNodes}
+                        onChange={(e) => { setMaxNodes(Math.min(500, Math.max(10, Number(e.target.value) || 10))); setMaxNodesAuto(false); }}
+                        style={{ width: 56, flexShrink: 0 }}
+                      />
+                    </div>
+                  </div>
 
                   <button
                     className={[styles.btn].join(" ")}
@@ -725,17 +867,6 @@ export default function Home() {
                     <IconNodes />
                     Узлы из БД
                   </button>
-
-                  <label className={styles.btn} style={{ cursor: "pointer" }}>
-                    <input
-                      type="file"
-                      accept=".txt"
-                      style={{ display: "none" }}
-                      onChange={(e) => loadTextFile(e.target.files?.[0] || null)}
-                    />
-                    <IconUpload />
-                    .txt в поле
-                  </label>
                 </div>
 
                 {/* Status */}
@@ -907,7 +1038,7 @@ export default function Home() {
                     />
                   </label>
                   <label className={styles.paramField}>
-                    Limit nodes
+                    Лимит узлов
                     <input
                       className={styles.paramInput}
                       type="number"
@@ -1241,43 +1372,47 @@ export default function Home() {
               {/* Set ID */}
               <label className={styles.fieldLabel}>
                 Dataset ID (ввести вручную)
-                <div className={styles.dsRow}>
-                  <input
-                    className={styles.dsInput}
-                    type="number"
-                    placeholder="1"
-                    value={ds ?? ""}
-                    onChange={(e) => setDs(e.target.value ? Number(e.target.value) : undefined)}
-                  />
-                  <button
-                    className={styles.btnCompact}
-                    onClick={() => {
-                      const v = prompt("Укажи dataset id");
-                      if (!v) return;
-                      const id = Number(v);
-                      if (!Number.isFinite(id)) return;
-                      setDs(id);
-                    }}
-                  >
-                    Set
-                  </button>
-                </div>
+                <input
+                  className={styles.dsInput}
+                  type="number"
+                  placeholder="1"
+                  value={ds ?? ""}
+                  onChange={(e) => setDs(e.target.value ? Number(e.target.value) : undefined)}
+                />
               </label>
 
               <div className={styles.divider} />
 
               {/* File upload drag zone */}
-              <label className={styles.fieldLabel}>
+              <div className={styles.fieldLabel}>
                 Документ для индексации
-                <div className={styles.dropZone}>
-                  <input
-                    type="file"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] || null;
-                      setFile(f);
-                      setFileName(f?.name ?? "");
-                    }}
-                  />
+                {/* Hidden native file input */}
+                <input
+                  ref={sidebarFileRef}
+                  type="file"
+                  accept=".txt,.pdf,.md"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setFile(f);
+                    setFileName(f?.name ?? "");
+                    if (f) setName(f.name.replace(/\.[^.]+$/, ""));
+                    e.target.value = "";
+                  }}
+                />
+                <div
+                  className={styles.dropZone}
+                  style={{ cursor: "pointer" }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const f = e.dataTransfer.files?.[0] || null;
+                    setFile(f);
+                    setFileName(f?.name ?? "");
+                    if (f) setName(f.name.replace(/\.[^.]+$/, ""));
+                  }}
+                  onClick={() => sidebarFileRef.current?.click()}
+                >
                   <span className={styles.dropZoneIcon}><IconFile /></span>
                   {fileName ? (
                     <span className={styles.dropZoneText} style={{ color: "var(--text-accent)" }}>
@@ -1285,12 +1420,12 @@ export default function Home() {
                     </span>
                   ) : (
                     <>
-                      <span className={styles.dropZoneText}>Кликни или перетащи файл</span>
+                      <span className={styles.dropZoneText}>Перетащи файл сюда</span>
                       <span className={styles.dropZoneHint}>.txt, .pdf, .md — любой текст</span>
                     </>
                   )}
                 </div>
-              </label>
+              </div>
 
               {/* Upload / Index */}
               <div className={styles.row}>
@@ -1351,6 +1486,61 @@ export default function Home() {
 
         </aside>
       </div>
+
+      {/* ── Footer ─────────────────────────────────────── */}
+      <footer style={{
+        position: "relative",
+        padding: "20px 24px 24px",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+      }}>
+        {/* gradient divider */}
+        <div style={{
+          position: "absolute",
+          top: 0, left: "10%", right: "10%",
+          height: 1,
+          background: "linear-gradient(90deg, transparent, var(--border-2) 30%, var(--border-2) 70%, transparent)",
+        }} />
+
+        <a
+          href="https://t.me/JapanDino"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "7px 14px",
+            borderRadius: 999,
+            border: "1px solid var(--border)",
+            background: "var(--bg-card)",
+            textDecoration: "none",
+            color: "var(--text-muted)",
+            fontSize: 12,
+            transition: "all 0.18s ease",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = "rgba(99,102,241,0.45)";
+            e.currentTarget.style.background = "rgba(99,102,241,0.08)";
+            e.currentTarget.style.color = "var(--text-accent)";
+            e.currentTarget.style.boxShadow = "0 0 16px rgba(99,102,241,0.15)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "var(--border)";
+            e.currentTarget.style.background = "var(--bg-card)";
+            e.currentTarget.style.color = "var(--text-muted)";
+            e.currentTarget.style.boxShadow = "none";
+          }}
+        >
+          {/* Telegram icon */}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ opacity: 0.8, flexShrink: 0 }}>
+            <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.19 13.67l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.958.889z"/>
+          </svg>
+          <span style={{ letterSpacing: "0.1px" }}>разработчик</span>
+          <span style={{ fontWeight: 600, color: "inherit" }}>JapanDino</span>
+        </a>
+      </footer>
     </div>
   );
 }
