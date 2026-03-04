@@ -149,8 +149,8 @@ class NatashaNerExtractor(NodeExtractor):
         items.sort(key=lambda x: int(x.get("frequency") or 1), reverse=True)
         items = items[:max_nodes]
 
+        # Only fill remaining slots with proper nouns from heuristics, not generic keywords
         if len(items) < max_nodes:
-            # Fill remaining slots with heuristic keywords (concepts, skills, etc.)
             extra = HeuristicExtractor().extract(
                 text,
                 max_nodes=max_nodes,
@@ -158,6 +158,8 @@ class NatashaNerExtractor(NodeExtractor):
             )
             seen = {str(x["title"]).lower() for x in items}
             for e in extra:
+                if e.get("node_type") != "proper_noun":
+                    continue
                 key = str(e.get("title", "")).lower()
                 if not key or key in seen:
                     continue

@@ -47,7 +47,10 @@ def extract_nodes_from_text(text: str, max_nodes: int = 30, min_freq: int = 1):
     for tok, _cnt in token_counts.most_common():
         if tok in seen:
             continue
-        if _cnt < min_freq:
+        # Keywords (non-proper-nouns) require at least 2 occurrences to avoid noise
+        if _cnt < max(min_freq, 2):
+            continue
+        if len(tok) < 4:
             continue
         seen.add(tok)
         candidates.append((tok, "keyword"))

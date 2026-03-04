@@ -256,7 +256,7 @@ export default function Home() {
   const [analyzeStatusMsg, setAnalyzeStatusMsg] = useState("");
   const analyzeProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showGuide, setShowGuide] = useState(false);
-  const [maxNodes, setMaxNodes] = useState(100);
+  const [maxNodes, setMaxNodes] = useState(30);
   const [maxNodesAuto, setMaxNodesAuto] = useState(false);
 
   const suggestMaxNodes = (text: string): number => {
