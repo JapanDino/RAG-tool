@@ -2,7 +2,7 @@ import os
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from .celery_app import celery_app
-from .tasks import index_dataset, annotate_dataset, rebuild_graph_edges
+from .tasks import index_dataset, annotate_dataset, rebuild_graph_edges, parse_document
 from ..models.models import Job, JobStatus, JobType
 
 ENABLE_CELERY = os.getenv("ENABLE_CELERY", "1") not in ("0", "false", "False")
@@ -36,6 +36,20 @@ def enqueue_or_mark(db: Session, job: Job):
                 db.commit()
             else:
                 pass
+        elif job.type == JobType.parse:
+            if ENABLE_CELERY:
+                async_result = parse_document.delay(
+                    job.payload["document_id"],
+                    job.payload["file_path"],
+                    job.payload["filename"],
+                    job.payload["content_type"],
+                    job.id,
+                )
+                db.execute(
+                    text("UPDATE jobs SET status=:st, task_id=:tid WHERE id=:id"),
+                    dict(st=JobStatus.queued.value, tid=async_result.id, id=job.id),
+                )
+                db.commit()
         elif job.type == JobType.export:
             pass
         elif job.type == JobType.graph:

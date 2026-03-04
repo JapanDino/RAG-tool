@@ -53,8 +53,7 @@ services:
   frontend:
     build: ./frontend
     environment:
-      # Prefer IPv4 loopback; on some Windows/WSL setups `localhost` may resolve to IPv6 first.
-      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-http://127.0.0.1:8000}
+      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
     depends_on: [ backend ]
     ports:
       - "${FRONTEND_PORT:-3000}:3000"

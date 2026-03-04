@@ -78,7 +78,7 @@ def analyze(payload: AnalyzeIn):
 def extract_nodes(payload: ExtractNodesIn):
     nodes = get_node_extractor().extract(
         payload.text,
-        max_nodes=payload.max_nodes or 30,
+        max_nodes=payload.max_nodes or 100,
         min_freq=payload.min_freq or 1,
     )
     return {"nodes": nodes}
@@ -106,7 +106,7 @@ def classify_nodes(payload: ClassifyNodesIn):
 def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     nodes = get_node_extractor().extract(
         payload.text,
-        max_nodes=payload.max_nodes or 30,
+        max_nodes=payload.max_nodes or 100,
         min_freq=payload.min_freq or 1,
     )
     if not nodes:

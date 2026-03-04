@@ -45,7 +45,11 @@ def classify_bloom_multilabel(text: str, min_prob: float = 0.2, max_levels: int 
         return keyword_classify(text, min_prob=min_prob, max_levels=max_levels)
 
     prompt = build_bloom_multilabel_prompt(text)
-    js = chat_completion_json(model, prompt, max_tokens=450)
+    try:
+        js = chat_completion_json(model, prompt, max_tokens=450)
+    except Exception:
+        # Network timeout, rate-limit, etc. — degrade gracefully to keyword classifier
+        return keyword_classify(text, min_prob=min_prob, max_levels=max_levels)
     try:
         data = json.loads(js)
         obj = LLMClassifyOut(**data)

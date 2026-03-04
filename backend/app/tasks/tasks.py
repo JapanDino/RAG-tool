@@ -1,9 +1,11 @@
 import logging
+import os
 
 from .celery_app import celery_app
 from ..db.session import SessionLocal
-from ..models.models import Chunk
+from ..models.models import Chunk, Document
 from ..services.embedding import embed_texts
+from ..services.text_extract import extract_text as _extract_text
 from ..services.embedding_provider import current_embedding_model
 from ..services.validation import validate_annotation
 from ..utils.bloom import annotate_bloom
@@ -285,6 +287,68 @@ def rebuild_graph_edges(
                 {"err": str(e), "id": job_id},
             )
             db.commit()
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task
+def parse_document(document_id: int, file_path: str, filename: str,
+                   content_type: str, job_id: int | None = None):
+    """Read a saved file, run text extraction (full OCR if needed), create Chunks,
+    mark Document as ready, delete the temp file, and mark the job done."""
+    db = SessionLocal()
+    try:
+        if job_id is not None:
+            db.execute(
+                text("UPDATE jobs SET status='running' WHERE id=:id"),
+                {"id": job_id},
+            )
+            db.commit()
+
+        with open(file_path, "rb") as f:
+            data = f.read()
+
+        text_str = _extract_text(filename, content_type, data)
+        parts = [text_str[i:i+800] for i in range(0, len(text_str), 800)]
+
+        db.execute(
+            text("DELETE FROM chunks WHERE document_id=:did"),
+            {"did": document_id},
+        )
+        for i, p in enumerate(parts):
+            db.add(Chunk(document_id=document_id, idx=i, text=p, meta={}))
+
+        db.execute(
+            text("UPDATE documents SET status='ready' WHERE id=:id"),
+            {"id": document_id},
+        )
+        db.commit()
+
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            logger.warning("Could not delete temp file %s: %s", file_path, e)
+
+        if job_id is not None:
+            db.execute(
+                text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"),
+                {"id": job_id},
+            )
+            db.commit()
+
+        return {"ok": True, "document_id": document_id, "chunks": len(parts)}
+    except Exception as e:
+        db.execute(
+            text("UPDATE documents SET status='failed' WHERE id=:id"),
+            {"id": document_id},
+        )
+        if job_id is not None:
+            db.execute(
+                text("UPDATE jobs SET status='failed', error=:err, finished_at=now() WHERE id=:id"),
+                {"err": str(e), "id": job_id},
+            )
+        db.commit()
         raise
     finally:
         db.close()

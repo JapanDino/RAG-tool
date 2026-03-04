@@ -4,7 +4,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 import enum
 
-class JobType(str, enum.Enum): index="index"; annotate="annotate"; export="export"; graph="graph"
+class JobType(str, enum.Enum): index="index"; annotate="annotate"; export="export"; graph="graph"; parse="parse"
 class JobStatus(str, enum.Enum): queued="queued"; running="running"; done="done"; failed="failed"
 class BloomLevel(str, enum.Enum): remember="remember"; understand="understand"; apply="apply"; analyze="analyze"; evaluate="evaluate"; create="create"
 
