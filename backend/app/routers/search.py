@@ -26,12 +26,12 @@ def search(
         WITH q AS (SELECT CAST(:qvec AS vector) AS v)
         SELECT c.id as chunk_id, c.text,
                d.id as document_id, d.title as document_title,
-               1.0 - (e.vec <-> (SELECT v FROM q)) as score
+               1.0 - (e.vec <=> (SELECT v FROM q)) as score
         FROM embeddings e
         JOIN chunks c ON c.id = e.chunk_id
         JOIN documents d ON d.id = c.document_id
         {where_clause}
-        ORDER BY e.vec <-> (SELECT v FROM q)
+        ORDER BY e.vec <=> (SELECT v FROM q)
         LIMIT :k
     """
     filters = ["e.vec IS NOT NULL", "e.model = :em"]

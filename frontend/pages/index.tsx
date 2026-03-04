@@ -1402,7 +1402,7 @@ export default function Home() {
                     {searchResults.map((r, i) => (
                       <div key={r.chunk_id} className={styles.searchResultCard}>
                         <div className={styles.searchResultHead}>
-                          <span className={styles.searchScoreBadge}>{(r.score * 100).toFixed(1)}%</span>
+                          <span className={styles.searchScoreBadge}>{(Math.max(0, r.score) * 100).toFixed(1)}%</span>
                           <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>#{i + 1}</span>
                           <span className={styles.searchDocBadge}>📄 {r.document_title || `doc #${r.document_id}`}</span>
                         </div>
