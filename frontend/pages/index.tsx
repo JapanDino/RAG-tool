@@ -1735,56 +1735,126 @@ export default function Home() {
       {/* ── Footer ─────────────────────────────────────── */}
       <footer style={{
         position: "relative",
-        padding: "20px 24px 24px",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
+        padding: "32px 32px 28px",
+        marginTop: 8,
       }}>
         {/* gradient divider */}
         <div style={{
           position: "absolute",
-          top: 0, left: "10%", right: "10%",
+          top: 0, left: "5%", right: "5%",
           height: 1,
-          background: "linear-gradient(90deg, transparent, var(--border-2) 30%, var(--border-2) 70%, transparent)",
+          background: "linear-gradient(90deg, transparent, var(--border-2) 25%, var(--border-2) 75%, transparent)",
         }} />
 
-        <a
-          href="https://t.me/JapanDino"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "7px 14px",
-            borderRadius: 999,
-            border: "1px solid var(--border)",
-            background: "var(--bg-card)",
-            textDecoration: "none",
-            color: "var(--text-muted)",
-            fontSize: 12,
-            transition: "all 0.18s ease",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "rgba(99,102,241,0.45)";
-            e.currentTarget.style.background = "rgba(99,102,241,0.08)";
-            e.currentTarget.style.color = "var(--text-accent)";
-            e.currentTarget.style.boxShadow = "0 0 16px rgba(99,102,241,0.15)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "var(--border)";
-            e.currentTarget.style.background = "var(--bg-card)";
-            e.currentTarget.style.color = "var(--text-muted)";
-            e.currentTarget.style.boxShadow = "none";
-          }}
-        >
-          {/* Telegram icon */}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ opacity: 0.8, flexShrink: 0 }}>
-            <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.19 13.67l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.958.889z"/>
-          </svg>
-          <span style={{ letterSpacing: "0.1px" }}>разработчик</span>
-          <span style={{ fontWeight: 600, color: "inherit" }}>JapanDino</span>
-        </a>
+        <div style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 32,
+          flexWrap: "wrap",
+        }}>
+
+          {/* ── Brand column ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 200 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 8,
+                background: "linear-gradient(135deg, #6366f1 0%, #06b6d4 100%)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 16, boxShadow: "0 0 12px rgba(99,102,241,0.3)",
+              }}>🌸</div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)", letterSpacing: "-0.2px" }}>
+                  Bloom RAG Studio
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
+                  Knowledge Taxonomy Engine
+                </div>
+              </div>
+            </div>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, maxWidth: 260 }}>
+              Инструмент для автоматической классификации учебных материалов по таксономии Блума с RAG-индексацией и визуализацией графа знаний.
+            </p>
+            {/* tech badges */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+              {[["Next.js", "#fff"], ["FastAPI", "#009688"], ["PostgreSQL", "#336791"], ["pgvector", "#c084fc"], ["OpenAI", "#10a37f"]].map(([label, color]) => (
+                <span key={label} style={{
+                  fontSize: 10, fontWeight: 600, letterSpacing: "0.3px",
+                  padding: "2px 7px", borderRadius: 4,
+                  border: `1px solid ${color}33`,
+                  background: `${color}11`,
+                  color: color === "#fff" ? "var(--text-secondary)" : color,
+                }}>{label}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Center: quick links ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.6px", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>
+              Ресурсы
+            </div>
+            {[
+              { label: "API Docs", href: "http://localhost:8000/docs", icon: "📄" },
+              { label: "Health Check", href: "http://localhost:8000/health", icon: "🟢" },
+              { label: "OpenAPI JSON", href: "http://localhost:8000/openapi.json", icon: "⚙️" },
+            ].map(({ label, href, icon }) => (
+              <a key={label} href={href} target="_blank" rel="noopener noreferrer" style={{
+                display: "flex", alignItems: "center", gap: 7,
+                fontSize: 12, color: "var(--text-muted)", textDecoration: "none",
+                transition: "color 0.15s",
+              }}
+                onMouseEnter={e => { e.currentTarget.style.color = "var(--text-accent)"; }}
+                onMouseLeave={e => { e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                <span style={{ fontSize: 11 }}>{icon}</span>
+                {label}
+              </a>
+            ))}
+          </div>
+
+          {/* ── Developer column ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.6px", color: "var(--text-muted)", textTransform: "uppercase" }}>
+              Разработчик
+            </div>
+            <a
+              href="https://t.me/JapanDino"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 9,
+                padding: "9px 16px", borderRadius: 12,
+                border: "1px solid var(--border-2)",
+                background: "var(--bg-card)",
+                textDecoration: "none", color: "var(--text-secondary)",
+                fontSize: 13, fontWeight: 500,
+                transition: "all 0.18s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "rgba(99,102,241,0.45)";
+                e.currentTarget.style.background = "rgba(99,102,241,0.08)";
+                e.currentTarget.style.color = "var(--text-accent)";
+                e.currentTarget.style.boxShadow = "0 0 20px rgba(99,102,241,0.18)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "var(--border-2)";
+                e.currentTarget.style.background = "var(--bg-card)";
+                e.currentTarget.style.color = "var(--text-secondary)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0, opacity: 0.85 }}>
+                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.19 13.67l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.958.889z"/>
+              </svg>
+              <span>JapanDino</span>
+            </a>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "right", lineHeight: 1.5 }}>
+              Bloom RAG Studio © {new Date().getFullYear()}<br/>
+              <span style={{ opacity: 0.6 }}>MIT License</span>
+            </div>
+          </div>
+        </div>
       </footer>
     </div>
   );
