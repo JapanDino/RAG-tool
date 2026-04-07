@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 import re
 
 logger = logging.getLogger(__name__)
@@ -49,17 +50,32 @@ def extract_pdf(data: bytes) -> str:
     return text
 
 
+OCR_PAGE_TIMEOUT = int(os.getenv("OCR_PAGE_TIMEOUT_S", "30"))  # seconds per page
+
+
+def _ocr_page(data: bytes, page_num: int, total_pages: int) -> str:
+    """OCR a single PDF page. Runs in a thread so it can be cancelled on timeout."""
+    import pytesseract
+    from pdf2image import convert_from_bytes
+
+    images = convert_from_bytes(data, dpi=150, first_page=page_num, last_page=page_num)
+    if not images:
+        return ""
+    page_text = pytesseract.image_to_string(images[0], lang="rus+eng")
+    logger.info("OCR page %d/%s done", page_num, total_pages or "?")
+    return page_text.strip()
+
+
 def ocr_pdf(data: bytes) -> str:
     """Convert each PDF page to an image and run Tesseract OCR.
 
-    Processes one page at a time to avoid loading all pages into RAM at once
-    (a 300-page scan at 250 DPI would consume ~5 GB otherwise).
-    DPI 150 is sufficient for OCR and is 4x lighter than 250.
-    No page limit — intended to be called from a Celery worker.
+    Processes one page at a time to avoid loading all pages into RAM at once.
+    Each page is OCR-ed in a separate thread with a timeout of OCR_PAGE_TIMEOUT_S
+    seconds (default 30) so a bad page never hangs the Celery worker indefinitely.
     """
+    import concurrent.futures
+
     try:
-        import pytesseract
-        from pdf2image import convert_from_bytes
         from pypdf import PdfReader as _R
 
         try:
@@ -71,13 +87,16 @@ def ocr_pdf(data: bytes) -> str:
         page_range = range(1, total_pages + 1) if total_pages else [1]
         for page_num in page_range:
             try:
-                images = convert_from_bytes(
-                    data, dpi=150, first_page=page_num, last_page=page_num
-                )
-                if images:
-                    page_text = pytesseract.image_to_string(images[0], lang="rus+eng")
-                    pages_text.append(page_text.strip())
-                    logger.info("OCR page %d/%s done", page_num, total_pages or "?")
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    future = ex.submit(_ocr_page, data, page_num, total_pages)
+                    try:
+                        page_text = future.result(timeout=OCR_PAGE_TIMEOUT)
+                        pages_text.append(page_text)
+                    except concurrent.futures.TimeoutError:
+                        logger.warning(
+                            "OCR page %d timed out after %ds, skipping",
+                            page_num, OCR_PAGE_TIMEOUT,
+                        )
             except Exception as e:
                 logger.warning("OCR failed on page %d: %s", page_num, e)
 

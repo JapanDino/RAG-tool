@@ -1,14 +1,25 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
-from sqlalchemy.orm import Session
-from ..db.session import get_db
-from ..models.models import Dataset, Document, Job, JobType, JobStatus
-from ..tasks.queue import enqueue_or_mark
-from ..schemas.schemas import DatasetIn, DatasetOut
-from ..services.text_extract import extract_text
+import logging
 import uuid
 import os
 
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+
+from ..db.session import get_db
+from ..models.models import Dataset, Document, Job, JobType, JobStatus, KnowledgeNode
+from ..tasks.queue import enqueue_or_mark
+from ..schemas.schemas import DatasetIn, DatasetOut
+from ..services.text_extract import extract_text
+from ..services.embedding import embed_texts
+from ..services.embedding_provider import current_embedding_model
+from ..utils.vector import vector_literal
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/datasets", tags=["datasets"])
+
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/app/uploads")
 
 
 @router.get("", response_model=list[DatasetOut])
@@ -43,8 +54,8 @@ def upload_document(dataset_id: int, file: UploadFile = File(...), db: Session =
     ext = os.path.splitext(filename)[1] if "." in filename else ""
     file_uuid = str(uuid.uuid4())
 
-    os.makedirs("/app/uploads", exist_ok=True)
-    file_path = f"/app/uploads/{file_uuid}{ext}"
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    file_path = f"{UPLOAD_DIR}/{file_uuid}{ext}"
     data = file.file.read()
     with open(file_path, "wb") as f:
         f.write(data)
@@ -90,3 +101,38 @@ def start_annotate(dataset_id: int, level: str = Query(..., pattern="^(remember|
     db.add(job); db.commit(); db.refresh(job)
     enqueue_or_mark(db, job)
     return {"job_id": job.id}
+
+
+@router.post("/{dataset_id}/reindex-nodes")
+def reindex_nodes(dataset_id: int, db: Session = Depends(get_db)):
+    """Re-embed all KnowledgeNodes in the dataset using the current EMBEDDING_PROVIDER.
+    Useful after switching from hash to local (sentence-transformers) embeddings.
+    Runs synchronously — may take a while for large datasets.
+    """
+    ds = db.get(Dataset, dataset_id)
+    if not ds:
+        raise HTTPException(404, "dataset not found")
+
+    nodes = (
+        db.query(KnowledgeNode)
+        .filter(KnowledgeNode.dataset_id == dataset_id)
+        .order_by(KnowledgeNode.id)
+        .all()
+    )
+    if not nodes:
+        return {"ok": True, "reindexed": 0}
+
+    model_name = current_embedding_model()
+    texts = [f"{n.title}. {n.context_text}".strip() for n in nodes]
+    vecs = embed_texts(texts, dim=1536)
+
+    for node, vec in zip(nodes, vecs):
+        db.execute(
+            text(
+                "UPDATE knowledge_nodes SET vec = CAST(:v AS vector), embedding_model = :m WHERE id = :id"
+            ),
+            {"v": vector_literal(vec), "m": model_name, "id": node.id},
+        )
+    db.commit()
+    logger.info("Reindexed %d nodes for dataset %d with model %s", len(nodes), dataset_id, model_name)
+    return {"ok": True, "reindexed": len(nodes), "model": model_name}

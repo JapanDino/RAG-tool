@@ -1,6 +1,9 @@
+import logging
 import os
 import time
 from typing import Any, Dict
+
+logger = logging.getLogger(__name__)
 
 from ..utils.bloom import annotate_bloom
 from .llm_provider import HeuristicProvider, get_provider
@@ -27,6 +30,8 @@ def llm_annotate(
     for i in range(retries + 1):
         try:
             return provider.annotate(chunk, level, rubric)
-        except Exception:
+        except Exception as e:
+            logger.warning("LLM annotate attempt %d/%d failed: %s", i + 1, retries + 1, e)
             time.sleep(backoff * (i + 1))
+    logger.warning("All LLM retries exhausted for level=%s, falling back to heuristic", level)
     return annotate_bloom(chunk, level, rubric)
