@@ -81,6 +81,63 @@ const getSortedLevels = (probs: number[]) =>
   BLOOM_LEVELS.map((lvl, idx) => ({ lvl, prob: Number(probs?.[idx] ?? 0) }))
     .sort((a, b) => b.prob - a.prob);
 
+type ConfidenceBand = "high" | "medium" | "low";
+
+function getConfidenceMeta(node: Pick<AnalyzeNode, "prob_vector" | "top_levels">) {
+  const sorted = getSortedLevels(node.prob_vector || []);
+  const primary = sorted[0] || { lvl: node.top_levels?.[0] || "remember", prob: 0 };
+  const runnerUp = sorted[1] || null;
+  const gap = runnerUp ? primary.prob - runnerUp.prob : primary.prob;
+
+  let band: ConfidenceBand = "low";
+  if (primary.prob >= 0.72 && gap >= 0.18) {
+    band = "high";
+  } else if (primary.prob >= 0.52 && gap >= 0.08) {
+    band = "medium";
+  }
+
+  const label =
+    band === "high"
+      ? "Высокая уверенность"
+      : band === "medium"
+        ? "Средняя уверенность"
+        : "Низкая уверенность";
+
+  const shortLabel =
+    band === "high" ? "Высокая" : band === "medium" ? "Средняя" : "Низкая";
+
+  const guidance =
+    band === "high"
+      ? "Распределение устойчивое, ручная проверка обычно не требуется."
+      : band === "medium"
+        ? "Решение выглядит правдоподобно, но есть близкие альтернативы."
+        : "Уровни расположены близко друг к другу — лучше проверить вручную.";
+
+  return {
+    band,
+    label,
+    shortLabel,
+    guidance,
+    primary,
+    runnerUp,
+    gap,
+  };
+}
+
+function getExplainabilityLines(node: AnalyzeNode) {
+  const meta = getConfidenceMeta(node);
+  const lines = [
+    `Основной уровень: ${LEVEL_LABELS[meta.primary.lvl]} (${(meta.primary.prob * 100).toFixed(0)}%)`,
+  ];
+  if (meta.runnerUp) {
+    lines.push(
+      `Ближайшая альтернатива: ${LEVEL_LABELS[meta.runnerUp.lvl]} (${(meta.runnerUp.prob * 100).toFixed(0)}%)`
+    );
+  }
+  lines.push(`Разрыв между 1-м и 2-м уровнем: ${(meta.gap * 100).toFixed(0)} п.п.`);
+  return lines;
+}
+
 // ── SVG Icons (inline, no deps) ───────────────────────────────
 
 function IconBrain() {
@@ -239,7 +296,91 @@ function BloomBadge({ level }: { level: BloomLevel }) {
 
 // ── Main component ────────────────────────────────────────────
 
+
+type HeroStatTone = "neutral" | "accent" | "success" | "warning" | "info";
+
+function SectionHero({
+  eyebrow,
+  title,
+  description,
+  stats = [],
+  actions,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  stats?: { label: string; value: React.ReactNode; tone?: HeroStatTone }[];
+  actions?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  const toneClass: Record<HeroStatTone, string> = {
+    neutral: styles.heroStat,
+    accent: [styles.heroStat, styles.heroStatAccent].join(" "),
+    success: [styles.heroStat, styles.heroStatSuccess].join(" "),
+    warning: [styles.heroStat, styles.heroStatWarning].join(" "),
+    info: [styles.heroStat, styles.heroStatInfo].join(" "),
+  };
+
+  return (
+    <div className={styles.sectionHero}>
+      <div className={styles.sectionHeroTop}>
+        <div className={styles.sectionHeroMain}>
+          <div className={styles.sectionEyebrow}>{eyebrow}</div>
+          <div className={styles.sectionHeroTitle}>{title}</div>
+          <div className={styles.sectionHeroText}>{description}</div>
+        </div>
+        {actions ? <div className={styles.sectionHeroActions}>{actions}</div> : null}
+      </div>
+      {stats.length > 0 && (
+        <div className={styles.sectionHeroStats}>
+          {stats.map((stat) => (
+            <div
+              key={`${stat.label}-${String(stat.value)}`}
+              className={toneClass[stat.tone || "neutral"]}
+            >
+              <span className={styles.heroStatLabel}>{stat.label}</span>
+              <span className={styles.heroStatValue}>{stat.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {children ? <div className={styles.sectionHeroExtra}>{children}</div> : null}
+    </div>
+  );
+}
+
+function FlowStep({
+  step,
+  title,
+  text,
+  state,
+}: {
+  step: string;
+  title: string;
+  text: string;
+  state: "pending" | "current" | "done";
+}) {
+  const stateClass =
+    state === "done"
+      ? styles.flowStepDone
+      : state === "current"
+        ? styles.flowStepCurrent
+        : styles.flowStepPending;
+
+  return (
+    <div className={[styles.flowStep, stateClass].join(" ")}>
+      <div className={styles.flowStepIndex}>{step}</div>
+      <div className={styles.flowStepBody}>
+        <div className={styles.flowStepTitle}>{title}</div>
+        <div className={styles.flowStepText}>{text}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
+
   const [name, setName] = useState("");
   const [ds, setDs] = useState<number | undefined>();
   const [file, setFile] = useState<File | null>(null);
@@ -306,9 +447,10 @@ export default function Home() {
 
   // ── Settings ─────────────────────────────────────────────────
   const [showSettings, setShowSettings] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [minProb, setMinProb] = useState(0.2);
   const [maxLevels, setMaxLevels] = useState(2);
-  const [embeddingModel, setEmbeddingModel] = useState("text-embedding-3-small");
+  const [embeddingModel, setEmbeddingModel] = useState("");
 
   // ── Node detail modal ─────────────────────────────────────────
   const [detailNode, setDetailNode] = useState<AnalyzeNode | null>(null);
@@ -392,6 +534,14 @@ export default function Home() {
     const savedAnnotator = localStorage.getItem("bloom_annotator");
     if (savedAnnotator) setAnnotator(savedAnnotator);
 
+    const savedTheme = localStorage.getItem("bloom_theme");
+    if (savedTheme === "dark" || savedTheme === "light") {
+      setTheme(savedTheme);
+      document.documentElement.setAttribute("data-theme", savedTheme);
+    } else {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+
     // Onboarding
     if (!localStorage.getItem("bloom_visited")) {
       setShowOnboarding(true);
@@ -409,6 +559,11 @@ export default function Home() {
   useEffect(() => { localStorage.setItem("bloom_min_prob", String(minProb)); }, [minProb]);
   useEffect(() => { localStorage.setItem("bloom_max_levels", String(maxLevels)); }, [maxLevels]);
   useEffect(() => { localStorage.setItem("bloom_embedding_model", embeddingModel); }, [embeddingModel]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("bloom_theme", theme);
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
   useEffect(() => { localStorage.setItem("bloom_annotator", annotator); }, [annotator]);
 
   useEffect(() => {
@@ -554,10 +709,21 @@ export default function Home() {
       setAnalyzeStatusMsg(ANALYZE_MSGS[msgIdx]);
     }, 900);
 
+    const body: Record<string, unknown> = {
+      text: textInput,
+      dataset_id: datasetId,
+      max_nodes: maxNodes,
+      min_prob: minProb,
+      max_levels: maxLevels,
+    };
+    if (embeddingModel) {
+      body.embedding_model = embeddingModel;
+    }
+
     const json = await apiFetchJson(`/analyze/content`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: textInput, dataset_id: datasetId, max_nodes: maxNodes, min_prob: minProb, max_levels: maxLevels, embedding_model: embeddingModel }),
+      body: JSON.stringify(body),
     });
 
     if (analyzeProgressRef.current) { clearInterval(analyzeProgressRef.current); analyzeProgressRef.current = null; }
@@ -904,9 +1070,53 @@ export default function Home() {
     apiStatus === "ok" ? styles.dotOk :
     apiStatus === "down" ? styles.dotBad : "";
 
-  const progressPct = labelProgress && labelProgress.total > 0
-    ? Math.round((labelProgress.labeled / labelProgress.total) * 100)
-    : 0;
+const progressPct = labelProgress && labelProgress.total > 0
+  ? Math.round((labelProgress.labeled / labelProgress.total) * 100)
+  : 0;
+const hasDataset = Boolean(ds);
+const hasAnalysisSource = Boolean(textInput.trim() || analyzeFileName);
+const hasNodes = nodes.length > 0;
+const hasGraph = graphNodesData.length > 0 || graphEdgesData.length > 0;
+const lowConfidenceCount = nodes.filter((n) => getConfidenceMeta(n).band === "low").length;
+const contextLead = !hasDataset
+  ? "Сначала выбери или создай активный датасет."
+  : !hasAnalysisSource
+    ? "Теперь добавь текст или файл, чтобы запустить анализ."
+    : !hasNodes
+      ? "Запусти анализ и получи первые узлы и уровни Блума."
+      : "Узлы уже получены: можно идти к графу, поиску или разметке.";
+const contextActionLabel = hasNodes ? "Перейти к разметке" : "Открыть анализ";
+const contextActionTab = hasNodes ? "labeling" : "analysis";
+const analysisFlowSteps = [
+  {
+    step: "01",
+    title: "Датасет",
+    text: hasDataset ? `Активен dataset #${ds}` : "Выбери или создай рабочий датасет",
+    state: (hasDataset ? "done" : "current") as "pending" | "current" | "done",
+  },
+  {
+    step: "02",
+    title: "Источник",
+    text: hasAnalysisSource ? "Текст или файл уже готов к анализу" : "Добавь текст или загрузи файл",
+    state: (!hasDataset ? "pending" : hasAnalysisSource ? "done" : "current") as "pending" | "current" | "done",
+  },
+  {
+    step: "03",
+    title: "Анализ",
+    text: hasNodes
+      ? `Получено ${nodes.length} узлов`
+      : isAnalyzing
+        ? "Извлекаем понятия и уровни Блума"
+        : "Запусти анализ, чтобы получить узлы",
+    state: !hasAnalysisSource ? "pending" : hasNodes ? "done" : "current",
+  },
+  {
+    step: "04",
+    title: "Следующий шаг",
+    text: hasNodes ? "Открой граф, поиск, очередь разметки или экспорт" : "Подготовь данные и переходи к следующему шагу",
+    state: hasNodes ? "done" : "pending",
+  },
+];
 
   return (
     <div className={styles.page}>
@@ -949,6 +1159,15 @@ export default function Home() {
                 <span className={styles.kbd}>{lastJob}</span>
               </div>
             )}
+
+            <button
+              className={styles.themeToggle}
+              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+              title="Переключить тему"
+              type="button"
+            >
+              {theme === "light" ? "Тёмная" : "Светлая"}
+            </button>
 
             {/* Settings gear */}
             <button
@@ -1071,41 +1290,54 @@ export default function Home() {
           {/* ── Analysis Tab ─────────────────────────── */}
           {activeTab === "analysis" && (
             <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <div className={styles.cardTitle}>Анализ контента</div>
-                  <div className={styles.cardNote}>
-                    Вставь текст — получи узлы знаний с multi-label уровнями Блума. Сохраняется в БД как RAG-элементы.
-                  </div>
-                </div>
-                {nodes.length > 0 && (
-                  <div className={styles.cardActions}>
-                    <div className={styles.exportMenuWrap}>
-                      <button
-                        className={[styles.btn, styles.btnGhost].join(" ")}
-                        onClick={() => setShowExportMenu(v => !v)}
-                      >
-                        <IconDownload /> Экспорт ▾
-                      </button>
-                      {showExportMenu && (
-                        <div className={styles.exportDropdown}>
-                          <div className={styles.exportItem} onClick={() => { exportNodesJson(); setShowExportMenu(false); }}>
-                            <IconDownload /> JSON
-                          </div>
-                          <div className={styles.exportItem} onClick={() => { exportNodesCsv(); setShowExportMenu(false); }}>
-                            <IconDownload /> CSV
-                          </div>
-                          {ds && (
-                            <div className={styles.exportItem} onClick={() => { exportJsonl(); setShowExportMenu(false); }}>
-                              <IconDownload /> JSONL (датасет)
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+
+<SectionHero
+  eyebrow="Главный сценарий"
+  title="От текста к карте знаний"
+  description="Загрузи материал и запусти анализ, чтобы получить узлы знаний с уровнями Блума. Когда основа готова, переходи к графу, поиску и ручной проверке."
+  stats={[
+    { label: "API", value: apiStatus === "ok" ? "online" : "offline", tone: apiStatus === "ok" ? "success" : "warning" },
+    { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
+    { label: "Узлы", value: nodes.length, tone: hasNodes ? "info" : "neutral" },
+    { label: "Нужна проверка", value: lowConfidenceCount, tone: lowConfidenceCount ? "warning" : "success" },
+  ]}
+  actions={nodes.length > 0 ? (
+    <div className={styles.exportMenuWrap}>
+      <button
+        className={[styles.btn, styles.btnGhost].join(" ")}
+        onClick={() => setShowExportMenu(v => !v)}
+        type="button"
+      >
+        <IconDownload /> Экспорт ▾
+      </button>
+      {showExportMenu && (
+        <div className={styles.exportDropdown}>
+          <div className={styles.exportItem} onClick={() => { exportNodesJson(); setShowExportMenu(false); }}>
+            <IconDownload /> JSON
+          </div>
+          <div className={styles.exportItem} onClick={() => { exportNodesCsv(); setShowExportMenu(false); }}>
+            <IconDownload /> CSV
+          </div>
+          {ds && (
+            <div className={styles.exportItem} onClick={() => { exportJsonl(); setShowExportMenu(false); }}>
+              <IconDownload /> JSONL (датасет)
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  ) : (
+    <button className={[styles.btn, styles.btnGhost].join(" ")} onClick={() => setShowGuide(true)} type="button">
+      Показать подсказки
+    </button>
+  )}
+>
+  <div className={styles.flowSteps}>
+    {analysisFlowSteps.map((item) => (
+      <FlowStep key={item.step} step={item.step} title={item.title} text={item.text} state={item.state as "pending" | "current" | "done"} />
+    ))}
+  </div>
+</SectionHero>
 
               <div className={styles.grid}>
                 {/* File drop zone */}
@@ -1437,6 +1669,8 @@ export default function Home() {
                   <div className={styles.nodesGrid}>
                     {filteredNodes.map((n) => {
                       const sorted = getSortedLevels(n.prob_vector);
+                      const confidence = getConfidenceMeta(n);
+                      const explanationLines = getExplainabilityLines(n);
                       const accentColor = n.top_levels[0] ? LEVEL_COLORS[n.top_levels[0]] : "var(--border)";
                       return (
                         <div
@@ -1473,6 +1707,25 @@ export default function Home() {
                             {typeof n.frequency === "number" && (
                               <span className={styles.kbd}>freq: {n.frequency}</span>
                             )}
+                          </div>
+
+                          <div className={styles.confidenceRow}>
+                            <span
+                              className={[
+                                styles.confidenceBadge,
+                                confidence.band === "high"
+                                  ? styles.confidenceHigh
+                                  : confidence.band === "medium"
+                                    ? styles.confidenceMedium
+                                    : styles.confidenceLow,
+                              ].join(" ")}
+                            >
+                              {confidence.label}
+                            </span>
+                            <span className={styles.confidenceMeta}>
+                              {LEVEL_LABELS[confidence.primary.lvl]} {(confidence.primary.prob * 100).toFixed(0)}%
+                              {confidence.runnerUp ? ` · разрыв ${(confidence.gap * 100).toFixed(0)} п.п.` : ""}
+                            </span>
                           </div>
 
                           {/* Mini prob chart (all 6 levels) */}
@@ -1515,6 +1768,19 @@ export default function Home() {
                               {n.rationale}
                             </div>
                           )}
+                          <div className={styles.explainList}>
+                            {explanationLines.map((line) => (
+                              <div key={line} className={styles.explainItem}>
+                                <span className={styles.explainDot} />
+                                <span>{line}</span>
+                              </div>
+                            ))}
+                          </div>
+                          {confidence.band === "low" && (
+                            <div className={styles.reviewHint}>
+                              Лучше проверить вручную: модель видит близкие альтернативы между уровнями.
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1538,17 +1804,20 @@ export default function Home() {
           {/* ── Search Tab ───────────────────────────── */}
           {activeTab === "search" && (
             <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <div className={styles.cardTitle}>Семантический поиск</div>
-                  <div className={styles.cardNote}>
-                    RAG-поиск по индексированным документам — находит релевантные чанки по смыслу запроса.
-                  </div>
-                </div>
-              </div>
-              <div className={styles.grid}>
+
+<SectionHero
+  eyebrow="Навигация по материалам"
+  title="Семантический поиск"
+  description="Ищи фрагменты по содержанию или находи конкретные узлы знаний, чтобы быстро возвращаться к нужному контексту."
+  stats={[
+    { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
+    { label: "Режим", value: searchMode === "chunks" ? "чанки" : "узлы", tone: "info" },
+    { label: "Результаты", value: searchMode === "chunks" ? searchResults.length : nodeSearchResults.length, tone: "neutral" },
+  ]}
+/>
+<div className={styles.grid}>
                 {/* Search mode toggle */}
-                <div className={styles.searchModeToggle}>
+                <div className={[styles.searchModeToggle, styles.sectionBlock].join(" ")}>
                   <button
                     className={[styles.searchModeBtn, searchMode === "chunks" ? styles.searchModeBtnActive : ""].join(" ")}
                     onClick={() => setSearchMode("chunks")}
@@ -1718,16 +1987,19 @@ export default function Home() {
           {/* ── Graph Tab ────────────────────────────── */}
           {activeTab === "graph" && (
             <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <div className={styles.cardTitle}>Граф знаний</div>
-                  <div className={styles.cardNote}>
-                    Узлы окрашены по уровню Блума. Обводка — второй уровень. Рёбра из БД (после rebuild).
-                  </div>
-                </div>
-              </div>
 
-              <div className={styles.graphControls}>
+<SectionHero
+  eyebrow="Связи и структура"
+  title="Граф знаний"
+  description="Смотри, как понятия связаны между собой. Здесь удобно проверять структуру материала, переходить между уровнями и замечать пробелы."
+  stats={[
+    { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
+    { label: "Узлы", value: graphNodesData.length, tone: hasGraph ? "info" : "neutral" },
+    { label: "Связи", value: graphEdgesData.length, tone: hasGraph ? "success" : "neutral" },
+  ]}
+/>
+
+<div className={[styles.sectionBlock, styles.graphControls].join(" ")}>
                 {/* Level filters */}
                 <div className={styles.graphFilters}>
                   {BLOOM_LEVELS.map((lvl) => (
@@ -1861,6 +2133,7 @@ export default function Home() {
               {(selectedNode || hoveredNode) && (() => {
                 const n = (hoveredNode || selectedNode)!;
                 const sorted = getSortedLevels(n.prob_vector);
+                const confidence = getConfidenceMeta(n);
                 return (
                   <div className={styles.cardSm} style={{ marginTop: 12 }}>
                     <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
@@ -1875,6 +2148,23 @@ export default function Home() {
                       </div>
                     </div>
                     <div className={styles.muted}>{n.context_text}</div>
+                    <div className={styles.graphInsightRow}>
+                      <span
+                        className={[
+                          styles.confidenceBadge,
+                          confidence.band === "high"
+                            ? styles.confidenceHigh
+                            : confidence.band === "medium"
+                              ? styles.confidenceMedium
+                              : styles.confidenceLow,
+                        ].join(" ")}
+                      >
+                        {confidence.shortLabel}
+                      </span>
+                      <span className={styles.confidenceMeta}>
+                        {confidence.guidance}
+                      </span>
+                    </div>
                     <div style={{ marginTop: 10, display: "flex", gap: 12, flexWrap: "wrap" }}>
                       {sorted.slice(0, 4).map(({ lvl, prob }) => (
                         <span
@@ -1894,18 +2184,20 @@ export default function Home() {
           {/* ── Labeling Tab ─────────────────────────── */}
           {activeTab === "labeling" && (
             <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <div className={styles.cardTitle}>Ручная разметка</div>
-                  <div className={styles.cardNote}>
-                    Выбирай уровни Блума кнопками или клавишами{" "}
-                    <span className={styles.kbd}>1–6</span>, затем "Сохранить и далее".
-                  </div>
-                </div>
-              </div>
 
-              {/* Labeling controls */}
-              <div className={styles.labelingHeader}>
+<SectionHero
+  eyebrow="Подтверждение качества"
+  title="Ручная разметка"
+  description="Проверяй автоматические уровни, подтверждай выводы модели и улучшай качество данных. Быстрые клавиши 1–6 тоже работают."
+  stats={[
+    { label: "В очереди", value: labelQueue.length, tone: labelQueue.length ? "info" : "neutral" },
+    { label: "Прогресс", value: labelProgress ? `${progressPct}%` : "Не начат", tone: labelProgress ? "success" : "neutral" },
+    { label: "Аннотатор", value: annotator || "default", tone: "accent" },
+  ]}
+/>
+
+{/* Labeling controls */}
+<div className={[styles.sectionBlock, styles.labelingHeader].join(" ")}>
                 <label className={styles.fieldLabel} style={{ maxWidth: 200 }}>
                   Annotator
                   <input
@@ -2071,24 +2363,30 @@ export default function Home() {
           {/* ── Dashboard Tab ──────────────────────────── */}
           {activeTab === "dashboard" && (
             <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <div className={styles.cardTitle}>Дашборд</div>
-                  <div className={styles.cardNote}>
-                    Статистика по всем датасетам, узлам знаний и прогрессу разметки.
-                  </div>
-                </div>
-                <button
-                  className={[styles.btn, styles.btnPrimary].join(" ")}
-                  onClick={loadDashboard}
-                  disabled={isDashLoading}
-                >
-                  {isDashLoading ? <span className={styles.spinner} /> : <IconRefresh />}
-                  Обновить
-                </button>
-              </div>
 
-              {isDashLoading ? (
+<SectionHero
+  eyebrow="Статус по платформе"
+  title="Дашборд"
+  description="Краткая сводка по датасетам, текущему объёму знаний и операционному состоянию платформы."
+  stats={[
+    { label: "Датасеты", value: dashDatasets.length, tone: "accent" },
+    { label: "Узлы в DS", value: dashNodeCount ?? "?", tone: dashNodeCount ? "info" : "neutral" },
+    { label: "API", value: apiStatus === "ok" ? "online" : "offline", tone: apiStatus === "ok" ? "success" : "warning" },
+  ]}
+  actions={
+    <button
+      className={[styles.btn, styles.btnPrimary].join(" ")}
+      onClick={loadDashboard}
+      disabled={isDashLoading}
+      type="button"
+    >
+      {isDashLoading ? <span className={styles.spinner} /> : <IconRefresh />}
+      Обновить
+    </button>
+  }
+/>
+
+{isDashLoading ? (
                 <div className={styles.dashGrid}>
                   {Array.from({ length: 4 }).map((_, i) => (
                     <div key={i} className={styles.skeletonCard} style={{ height: 80 }} />
@@ -2230,7 +2528,7 @@ export default function Home() {
           {/* Dataset card */}
           <div className={styles.asideCard}>
             <div className={styles.asideCardHeader}>
-              <span className={styles.asideCardTitle}>Dataset</span>
+              <span className={styles.asideCardTitle}>Датасет</span>
               {ds && (
                 <div className={styles.dsIdBadge}>
                   <span style={{ color: "var(--text-muted)", fontSize: 11 }}>id</span>
@@ -2254,7 +2552,7 @@ export default function Home() {
                     onClick={createDataset}
                     disabled={!name.trim()}
                   >
-                    <IconPlus /> Create
+                    <IconPlus /> Создать
                   </button>
                 </div>
               </label>
@@ -2324,14 +2622,14 @@ export default function Home() {
                   onClick={upload}
                   disabled={!ds || !file}
                 >
-                  <IconUpload /> Upload
+                  <IconUpload /> Загрузить
                 </button>
                 <button
                   className={styles.btnCompact}
                   onClick={indexDs}
                   disabled={!ds}
                 >
-                  Index (job)
+                  Индексировать
                 </button>
                 <button
                   className={styles.btnCompact}
@@ -2454,6 +2752,34 @@ export default function Home() {
                 </div>
               </div>
               <div className={styles.detailSection}>
+                <div className={styles.detailSectionLabel}>Уверенность модели</div>
+                <div className={styles.detailInsightCard}>
+                  <div className={styles.confidenceRow}>
+                    <span
+                      className={[
+                        styles.confidenceBadge,
+                        getConfidenceMeta(detailNode).band === "high"
+                          ? styles.confidenceHigh
+                          : getConfidenceMeta(detailNode).band === "medium"
+                            ? styles.confidenceMedium
+                            : styles.confidenceLow,
+                      ].join(" ")}
+                    >
+                      {getConfidenceMeta(detailNode).label}
+                    </span>
+                    <span className={styles.confidenceMeta}>{getConfidenceMeta(detailNode).guidance}</span>
+                  </div>
+                  <div className={styles.explainList}>
+                    {getExplainabilityLines(detailNode).map((line) => (
+                      <div key={line} className={styles.explainItem}>
+                        <span className={styles.explainDot} />
+                        <span>{line}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className={styles.detailSection}>
                 <div className={styles.detailSectionLabel}>Контекст</div>
                 <div className={styles.detailText}>{detailNode.context_text}</div>
               </div>
@@ -2527,6 +2853,24 @@ export default function Home() {
                 />
               </div>
 
+              <div className={styles.settingsSectionTitle} style={{ marginTop: 16 }}>Тема</div>
+              <div className={styles.themeSwitchRow}>
+                <button
+                  className={[styles.themeOption, theme === "light" ? styles.themeOptionActive : ""].join(" ")}
+                  onClick={() => setTheme("light")}
+                  type="button"
+                >
+                  Светлая
+                </button>
+                <button
+                  className={[styles.themeOption, theme === "dark" ? styles.themeOptionActive : ""].join(" ")}
+                  onClick={() => setTheme("dark")}
+                  type="button"
+                >
+                  Тёмная
+                </button>
+              </div>
+
               <div className={styles.settingsSectionTitle} style={{ marginTop: 16 }}>Эмбеддинги</div>
 
               <div className={styles.settingsRow}>
@@ -2537,7 +2881,8 @@ export default function Home() {
                   onChange={e => setEmbeddingModel(e.target.value)}
                   style={{ width: "100%" }}
                 >
-                  <option value="text-embedding-3-small">text-embedding-3-small (дефолт)</option>
+                  <option value="">Использовать backend provider (рекомендуется)</option>
+                  <option value="text-embedding-3-small">text-embedding-3-small</option>
                   <option value="text-embedding-3-large">text-embedding-3-large</option>
                   <option value="text-embedding-ada-002">text-embedding-ada-002</option>
                 </select>

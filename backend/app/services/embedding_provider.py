@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import warnings
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import Sequence
@@ -176,7 +177,15 @@ def get_embedding_provider() -> EmbeddingProvider:
         return HashingProvider()
     if name == "local":
         model = os.getenv("EMBEDDING_MODEL_LOCAL", "intfloat/multilingual-e5-small")
-        return LocalProvider(model)
+        try:
+            return LocalProvider(model)
+        except Exception as exc:
+            warnings.warn(
+                f"Falling back to hash embeddings because local model '{model}' is unavailable: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return HashingProvider()
     if name == "openai":
         model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
         return OpenAIProvider(model)

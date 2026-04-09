@@ -123,19 +123,20 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
               label: "data(label)",
               color: "#c9d1e8",
               "font-size": 9,
-              "font-family": "Inter, -apple-system, sans-serif",
+              "font-family": "IBM Plex Sans, Segoe UI, sans-serif",
               "text-wrap": "wrap",
-              "text-max-width": 80,
+              "text-max-width": "80px",
               "text-valign": "bottom",
               "text-margin-y": 7,
               "text-outline-width": 2,
               "text-outline-color": "#161b27",
-              "background-color": (ele) => LEVEL_COLORS[ele.data("primary") as BloomLevel],
-              shape: (ele) => LEVEL_SHAPES[ele.data("primary") as BloomLevel],
+              "background-color": (ele: cytoscape.NodeSingular) =>
+                LEVEL_COLORS[ele.data("primary") as BloomLevel],
+              shape: (ele: cytoscape.NodeSingular) => LEVEL_SHAPES[ele.data("primary") as BloomLevel],
               width: "data(size)",
               height: "data(size)",
-              "border-width": (ele) => (ele.data("secondary") ? 3 : 0),
-              "border-color": (ele) =>
+              "border-width": (ele: cytoscape.NodeSingular) => (ele.data("secondary") ? 3 : 0),
+              "border-color": (ele: cytoscape.NodeSingular) =>
                 ele.data("secondary")
                   ? LEVEL_COLORS[ele.data("secondary") as BloomLevel]
                   : "transparent",
@@ -148,7 +149,8 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
               width: 1.5,
               "line-color": "rgba(139, 146, 168, 0.25)",
               "curve-style": "bezier",
-              opacity: (ele) => Math.max(0.12, Math.min(0.75, Number(ele.data("weight") ?? 0.2))),
+              opacity: (ele: cytoscape.EdgeSingular) =>
+                Math.max(0.12, Math.min(0.75, Number(ele.data("weight") ?? 0.2))),
             },
           },
           {
@@ -179,13 +181,13 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
         layout: { name: "cose", animate: true, fit: true },
       });
 
-      cyRef.current.on("mouseover", "node", (evt) => {
+      cyRef.current.on("mouseover", "node", (evt: cytoscape.EventObject) => {
         const id = Number(evt.target.data("id"));
         const node = filteredNodes.find((n) => n.id === id) || null;
         onHover?.(node);
       });
       cyRef.current.on("mouseout", "node", () => onHover?.(null));
-      cyRef.current.on("tap", "node", (evt) => {
+      cyRef.current.on("tap", "node", (evt: cytoscape.EventObject) => {
         const id = Number(evt.target.data("id"));
         const node = filteredNodes.find((n) => n.id === id) || null;
         onHover?.(node);

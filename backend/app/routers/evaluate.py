@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from ..db.session import get_db
 from ..models.models import KnowledgeNode, NodeLabel
-from ..services.embedding_provider import current_embedding_model
 from ..utils.bloom import LEVEL_ORDER
 from ..services.bloom_multilabel import classify_bloom_multilabel
 
@@ -113,12 +112,19 @@ def evaluate_multilabel(
 
     y_true: list[list[int]] = []
     y_pred: list[list[int]] = []
+    used_stored_predictions = 0
+    used_recomputed_predictions = 0
 
     for nl, kn in rows:
-        text = f"{kn.title}. {kn.context_text}".strip()
-        pred = classify_bloom_multilabel(text, min_prob=min_prob, max_levels=max_levels)
         y_true.append(_vectorize(nl.labels or []))
-        y_pred.append(_vectorize(pred.get("top_levels") or []))
+        if kn.top_levels:
+            y_pred.append(_vectorize(kn.top_levels))
+            used_stored_predictions += 1
+        else:
+            text = f"{kn.title}. {kn.context_text}".strip()
+            pred = classify_bloom_multilabel(text, min_prob=min_prob, max_levels=max_levels)
+            y_pred.append(_vectorize(pred.get("top_levels") or []))
+            used_recomputed_predictions += 1
 
     report: dict[str, Any] = {
         "samples": len(y_true),
@@ -130,5 +136,12 @@ def evaluate_multilabel(
         "max_levels": max_levels,
         "embedding_model": embedding_model or "all",
         "annotator": annotator,
+        "prediction_source": (
+            "stored_top_levels"
+            if used_recomputed_predictions == 0
+            else "mixed"
+        ),
+        "stored_predictions": used_stored_predictions,
+        "recomputed_predictions": used_recomputed_predictions,
     }
     return report

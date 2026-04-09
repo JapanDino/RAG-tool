@@ -10,6 +10,7 @@ RUN printf 'Acquire::https::Verify-Peer "false";\nAcquire::https::Verify-Host "f
   && apt-get update -o Acquire::Retries=5 \
   && apt-get install -y --no-install-recommends \
        postgresql-client \
+       python3-numpy \
        tesseract-ocr \
        tesseract-ocr-rus \
        tesseract-ocr-eng \
@@ -17,7 +18,7 @@ RUN printf 'Acquire::https::Verify-Peer "false";\nAcquire::https::Verify-Host "f
   && rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/99no-ssl-verify
 
 COPY backend/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN pip install --no-cache-dir --default-timeout=120 --retries 10 -r /tmp/requirements.txt
 
 COPY . /app
 

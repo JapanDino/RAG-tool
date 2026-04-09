@@ -3,11 +3,12 @@ from __future__ import annotations
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from ..db.session import get_db
-from ..models.models import KnowledgeNode, Job, JobType, JobStatus
+from ..models.models import KnowledgeNode, KnowledgeEdge, Job, JobType, JobStatus
 from ..schemas.schemas import GraphOut, GraphNodeOut, GraphEdgeOut, GraphRebuildIn, GraphRebuildOut
 from ..tasks.queue import enqueue_or_mark
 
@@ -44,6 +45,64 @@ def _add_edge(edge_map: dict[tuple[int, int, str], float], a: int, b: int, weigh
     current = edge_map.get(key)
     if current is None or weight > current:
         edge_map[key] = weight
+
+
+def _load_persisted_edges(
+    db: Session,
+    *,
+    dataset_id: int | None,
+    node_ids: list[int],
+    node_models: set[str],
+    embedding_model: str | None,
+    include_cooccurrence: bool,
+    min_score: float,
+    max_edges: int,
+) -> list[GraphEdgeOut]:
+    if dataset_id is None or not node_ids:
+        return []
+
+    method_filters = []
+    if embedding_model:
+        method_filters.append(KnowledgeEdge.method == f"similarity|{embedding_model}")
+    elif node_models:
+        for model_name in sorted(node_models):
+            method_filters.append(KnowledgeEdge.method == f"similarity|{model_name}")
+    else:
+        method_filters.append(KnowledgeEdge.method.like("similarity|%"))
+
+    if include_cooccurrence:
+        method_filters.append(KnowledgeEdge.method == "co_occurrence_window")
+
+    if not method_filters:
+        return []
+
+    rows = (
+        db.query(KnowledgeEdge)
+        .filter(
+            KnowledgeEdge.dataset_id == dataset_id,
+            KnowledgeEdge.from_node_id.in_(node_ids),
+            KnowledgeEdge.to_node_id.in_(node_ids),
+            or_(*method_filters),
+        )
+        .order_by(KnowledgeEdge.weight.desc(), KnowledgeEdge.id.asc())
+        .limit(max_edges * 5)
+        .all()
+    )
+
+    edge_items: list[GraphEdgeOut] = []
+    for row in rows:
+        if row.method.startswith("similarity|") and float(row.weight) < min_score:
+            continue
+        edge_items.append(
+            GraphEdgeOut(
+                from_id=int(row.from_node_id),
+                to_id=int(row.to_node_id),
+                weight=float(row.weight),
+            )
+        )
+        if len(edge_items) >= max_edges:
+            break
+    return edge_items
 
 
 @router.get("", response_model=GraphOut)
@@ -88,6 +147,29 @@ def get_graph(
     else:
         nodes = []
     node_index = {n.id: n for n in nodes}
+
+    persisted_edges = _load_persisted_edges(
+        db,
+        dataset_id=dataset_id,
+        node_ids=node_ids,
+        node_models={str(n.embedding_model) for n in nodes if n.embedding_model},
+        embedding_model=embedding_model,
+        include_cooccurrence=include_cooccurrence,
+        min_score=min_score,
+        max_edges=max_edges,
+    )
+    if persisted_edges:
+        node_items = [
+            GraphNodeOut(
+                id=n.id,
+                title=n.title,
+                context_text=n.context_text,
+                prob_vector=n.prob_vector,
+                top_levels=n.top_levels,
+            )
+            for n in nodes
+        ]
+        return GraphOut(nodes=node_items, edges=persisted_edges)
 
     edges: dict[tuple[int, int, str], float] = {}
 

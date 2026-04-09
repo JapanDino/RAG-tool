@@ -1,3 +1,9 @@
+import pytest
+
+
+pytest.importorskip("fastapi")
+pytest.importorskip("sqlalchemy")
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -101,4 +107,3 @@ def test_annotation_management_endpoints():
 
     app.dependency_overrides.clear()
     engine.dispose()
-

@@ -25,6 +25,12 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     env_file: [ ./backend/.env ]
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-rag_db}
+      DB_USER: ${POSTGRES_USER:-rag}
+      DB_PASS: ${POSTGRES_PASSWORD:-rag_pass}
     depends_on:
       db:
         condition: service_healthy
@@ -45,6 +51,12 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     env_file: [ ./backend/.env ]
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-rag_db}
+      DB_USER: ${POSTGRES_USER:-rag}
+      DB_PASS: ${POSTGRES_PASSWORD:-rag_pass}
     depends_on: [ backend, redis ]
     working_dir: /app/backend
     command: bash -lc "celery -A app.celery_app:celery_app worker -l INFO"
