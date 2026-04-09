@@ -2,7 +2,7 @@
 
 > **TZ Source**: `docs/DEVELOPMENT_PLAN_TZ_BLOOM.md` (+ `docs/PRODUCT_PLAN.md`)
 > **Last Updated**: 2026-03-03
-> **Overall Progress**: 100% (13/13 core steps done -- MVP complete)
+> **Overall Progress**: MVP complete; hardening and delivery gaps remain
 > **Audit**: 2026-03-03 -- full source audit + smoke test + UI test; all bugs fixed; 34/34 endpoints green; all 3 UI tabs verified
 
 ---
@@ -16,7 +16,7 @@
 | Blocked | 0 |
 | Bugs (critical) | 0 (6 found, 6 fixed) |
 | Bugs (non-critical) | 0 (4 found, 4 fixed) |
-| Enhancements | 3 remaining |
+| Enhancements | 2 remaining |
 
 ---
 
@@ -62,7 +62,7 @@
 
 **S7 -- Node embeddings**
 - `services/embedding_provider.py` implements 4 providers: hash, local (sentence-transformers), openai, random.
-- Active provider: `EMBEDDING_PROVIDER=hash` per `.env`. HashingProvider uses term-frequency hashing (deterministic, offline, non-semantic).
+- Active provider is selected via env (`EMBEDDING_PROVIDER`); nodes should store the resolved provider/model, not a UI default label.
 - `GET /nodes/search` uses pgvector cosine distance with `vec IS NOT NULL` guard.
 - `services/embedding.py` delegates to `embedding_provider.get_embedding_provider()`.
 
@@ -153,12 +153,6 @@ None.
 **E4 -- Desktop (.exe) packaging with Tauri (Hard)**
 - TZ mentions Windows .exe as preferred delivery. Not done. Docker is the current delivery.
 - Value: teachers run without Docker or CLI setup.
-
-**E5 -- Export JSONL button in UI (Easy)**
-- `GET /datasets/{id}/labeling/export` is implemented and registered in `main.py`.
-- Only missing: a UI button to call it. Backend is ready.
-
----
 
 ## Work Log
 

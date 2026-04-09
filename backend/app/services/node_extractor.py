@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import Any, Sequence
@@ -175,7 +176,15 @@ class NatashaNerExtractor(NodeExtractor):
 def get_node_extractor() -> NodeExtractor:
     name = os.getenv("NODE_EXTRACTOR", "local_ner").strip().lower()
     if name == "local_ner":
-        return NatashaNerExtractor()
+        try:
+            return NatashaNerExtractor()
+        except Exception as exc:
+            warnings.warn(
+                f"Falling back to heuristic extraction because local NER is unavailable: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return HeuristicExtractor()
     if name == "heuristic":
         return HeuristicExtractor()
     # LLM extractor is optional; not enabled by default.
