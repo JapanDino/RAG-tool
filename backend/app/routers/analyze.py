@@ -22,6 +22,7 @@ from ..services.bloom_classifier import bloom_probabilities
 from ..services.chunking import split_into_chunks
 from ..services.embedding import embed_texts
 from ..services.bloom_multilabel import classify_bloom_multilabel
+from ..services.embedding_provider import current_embedding_model
 from ..services.node_extractor import get_node_extractor
 from ..utils.vector import vector_literal
 
@@ -117,7 +118,8 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     embedding_dim = payload.embedding_dim or 1536
     if embedding_dim != 1536:
         raise HTTPException(400, "embedding_dim must be 1536 for current storage")
-    embedding_model = payload.embedding_model or "text-embedding-3-small"
+    actual_embedding_model = current_embedding_model()
+    requested_embedding_model = (payload.embedding_model or "").strip() or None
     min_prob = payload.min_prob or 0.2
     max_levels = payload.max_levels or 2
 
@@ -127,12 +129,14 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
         rationale = cls.get("rationale")
         node_rationales.append(rationale)
 
-        # Upsert: if a node with the same title already exists in this dataset, update it
+        # Avoid collapsing nodes from different documents or contexts into one record.
         existing = (
             db.query(KnowledgeNode)
             .filter(
                 KnowledgeNode.dataset_id == payload.dataset_id,
+                KnowledgeNode.document_id == payload.document_id,
                 KnowledgeNode.title == node["title"],
+                KnowledgeNode.context_text == node["context_snippet"],
             )
             .first()
         )
@@ -140,12 +144,13 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
             existing.context_text = node["context_snippet"]
             existing.prob_vector = cls["prob_vector"]
             existing.top_levels = cls["top_levels"]
-            existing.embedding_model = embedding_model
+            existing.embedding_model = actual_embedding_model
             existing.model_info = {
                 "extractor": payload.extractor or "heuristic-v1",
                 "classifier": payload.classifier or "keyword-v1",
                 "node_type": node.get("node_type"),
                 "rationale": rationale,
+                "requested_embedding_model": requested_embedding_model,
             }
             kn = existing
         else:
@@ -157,12 +162,13 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
                 prob_vector=cls["prob_vector"],
                 top_levels=cls["top_levels"],
                 embedding_dim=embedding_dim,
-                embedding_model=embedding_model,
+                embedding_model=actual_embedding_model,
                 model_info={
                     "extractor": payload.extractor or "heuristic-v1",
                     "classifier": payload.classifier or "keyword-v1",
                     "node_type": node.get("node_type"),
                     "rationale": rationale,
+                    "requested_embedding_model": requested_embedding_model,
                 },
             )
             db.add(kn)

@@ -10,7 +10,6 @@ from sqlalchemy import text
 from ..db.session import get_db
 from ..models.models import Dataset, KnowledgeNode, NodeLabel
 from ..schemas.schemas import LabelQueueOut, LabelQueueItem, NodeLabelsIn, NodeLabelsOut
-from ..services.embedding_provider import current_embedding_model
 
 
 router = APIRouter(prefix="/datasets", tags=["labeling"])
@@ -35,8 +34,6 @@ def labeling_queue(
     ds = db.get(Dataset, dataset_id)
     if not ds:
         raise HTTPException(404, "dataset not found")
-
-    em = embedding_model or current_embedding_model()
 
     # Fetch nodes and (optional) existing labels for annotator.
     # Left join: if include_labeled=false, we filter out labeled in SQL.
@@ -113,18 +110,17 @@ def export_labels(
     fmt: str = Query("jsonl", pattern="^(jsonl)$"),
     db: Session = Depends(get_db),
 ):
-    em = embedding_model or current_embedding_model()
-    rows = (
+    q = (
         db.query(NodeLabel, KnowledgeNode)
         .join(KnowledgeNode, NodeLabel.node_id == KnowledgeNode.id)
         .filter(
             KnowledgeNode.dataset_id == dataset_id,
-            KnowledgeNode.embedding_model == em,
             NodeLabel.annotator == annotator,
         )
-        .order_by(NodeLabel.id.asc())
-        .all()
     )
+    if embedding_model:
+        q = q.filter(KnowledgeNode.embedding_model == embedding_model)
+    rows = q.order_by(NodeLabel.id.asc()).all()
     lines = []
     for nl, kn in rows:
         lines.append(
@@ -136,6 +132,7 @@ def export_labels(
                     "labels": nl.labels,
                     "prob_vector": kn.prob_vector,
                     "top_levels": kn.top_levels,
+                    "embedding_model": kn.embedding_model,
                 },
                 ensure_ascii=False,
             )
@@ -201,4 +198,3 @@ def get_node_labels(
         labels=nl.labels,
         created_at=str(nl.created_at),
     )
-
