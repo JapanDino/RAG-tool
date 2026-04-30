@@ -81,14 +81,20 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
     for (const n of filteredNodes) {
       const sorted = getSortedLevels(n.prob_vector || []);
       const primary = sorted[0]?.lvl ?? "remember";
+      const primaryProb = sorted[0]?.prob ?? 1;
       const secondary = sorted[1];
       const hasSecondary = Boolean(secondary && secondary.prob >= threshold);
+      // pie-1 = primary slice (%), pie-2 = secondary slice (remainder)
+      const pie1Size = hasSecondary ? Math.round(primaryProb * 100) : 100;
+      const pie2Size = hasSecondary ? 100 - pie1Size : 0;
       els.push({
         data: {
           id: String(n.id),
           label: n.title,
           primary,
           secondary: hasSecondary ? secondary!.lvl : "",
+          pie1Size,
+          pie2Size,
           size: computeSize(n.frequency),
         },
       });
@@ -130,17 +136,23 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
               "text-margin-y": 7,
               "text-outline-width": 2,
               "text-outline-color": "#161b27",
-              "background-color": (ele: cytoscape.NodeSingular) =>
+              // Pie-chart fill: primary slice + secondary slice when multi-label
+              "background-color": "#161b27",
+              "pie-size": "100%",
+              "pie-1-background-color": (ele: cytoscape.NodeSingular) =>
                 LEVEL_COLORS[ele.data("primary") as BloomLevel],
+              "pie-1-background-size": "data(pie1Size)",
+              "pie-1-background-opacity": 1,
+              "pie-2-background-color": (ele: cytoscape.NodeSingular) =>
+                ele.data("secondary")
+                  ? LEVEL_COLORS[ele.data("secondary") as BloomLevel]
+                  : "#161b27",
+              "pie-2-background-size": "data(pie2Size)",
+              "pie-2-background-opacity": 0.85,
               shape: (ele: cytoscape.NodeSingular) => LEVEL_SHAPES[ele.data("primary") as BloomLevel],
               width: "data(size)",
               height: "data(size)",
-              "border-width": (ele: cytoscape.NodeSingular) => (ele.data("secondary") ? 3 : 0),
-              "border-color": (ele: cytoscape.NodeSingular) =>
-                ele.data("secondary")
-                  ? LEVEL_COLORS[ele.data("secondary") as BloomLevel]
-                  : "transparent",
-              "border-opacity": 0.9,
+              "border-width": 0,
             },
           },
           {
@@ -248,6 +260,9 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
             <span>{LEVEL_LABELS[lvl]}</span>
           </div>
         ))}
+        <div className={styles.legendHint}>
+          Разделённый узел = несколько уровней
+        </div>
       </div>
     </div>
   );
