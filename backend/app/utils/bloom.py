@@ -38,18 +38,32 @@ def _normalize_text(text: str) -> str:
 
 
 def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
-    # Placeholder deterministic annotator (без LLM): простая эвристика
-    score = min(1.0, 0.5 + len(chunk.strip())/2000.0)
-    label = {
-        "remember":"Факты",
-        "understand":"Понимание",
-        "apply":"Применение",
-        "analyze":"Анализ",
-        "evaluate":"Оценивание",
-        "create":"Создание"
-    }.get(level, "N/A")
-    rationale = f"Эвристика: длина текста={len(chunk)}; уровень={level}"
-    return dict(level=level, label=label, rationale=rationale, score=round(score,3))
+    """
+    Keyword-based annotator. Uses classify_bloom_multilabel to get a real
+    probability score for the requested Bloom level instead of a fake length heuristic.
+    """
+    _LABELS = {
+        "remember":   "Факты",
+        "understand": "Понимание",
+        "apply":      "Применение",
+        "analyze":    "Анализ",
+        "evaluate":   "Оценивание",
+        "create":     "Создание",
+    }
+    result = classify_bloom_multilabel(chunk)
+    idx = LEVEL_ORDER.index(level) if level in LEVEL_ORDER else -1
+    score = result["prob_vector"][idx] if idx >= 0 else round(1.0 / 6.0, 3)
+    triggers = result.get("triggers", {}).get(level, [])
+    if triggers:
+        rationale = f"{level}: {', '.join(sorted(set(triggers))[:5])}"
+    else:
+        rationale = f"keyword-baseline: явных триггеров для «{level}» не найдено"
+    return dict(
+        level=level,
+        label=_LABELS.get(level, "N/A"),
+        rationale=rationale,
+        score=round(score, 3),
+    )
 
 
 def _default_verbs_path() -> Path:

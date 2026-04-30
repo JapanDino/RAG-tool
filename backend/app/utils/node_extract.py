@@ -18,7 +18,7 @@ _STOPWORDS = {
 }
 
 def extract_nodes_from_text(text: str, max_nodes: int = 30, min_freq: int = 1):
-    sentences = [s.strip() for s in re.split(r"[.!?\\n]+", text) if s.strip()]
+    sentences = [s.strip() for s in re.split(r"[.!?\n]+", text) if s.strip()]
     token_counts: Counter[str] = Counter()
     proper_tokens: list[str] = []
     display_names: dict[str, str] = {}

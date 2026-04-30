@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import cytoscape, { Core, ElementDefinition } from "cytoscape";
 import styles from "../styles/graph.module.css";
 
@@ -68,6 +68,13 @@ function computeSize(freq: number | null | undefined) {
 export default function GraphView({ nodes, edges, filters, threshold, onHover, searchQuery }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
+
+  // Stabilise onHover so it doesn't cause full graph re-renders when the parent re-renders
+  const onHoverRef = useRef(onHover);
+  useEffect(() => { onHoverRef.current = onHover; }, [onHover]);
+  const stableOnHover = useCallback((node: Parameters<NonNullable<typeof onHover>>[0]) => {
+    onHoverRef.current?.(node);
+  }, []);
 
   const filteredNodes = useMemo(
     () => nodes.filter((n) => (n.top_levels || []).some((lvl) => filters[lvl])),
@@ -196,13 +203,13 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
       cyRef.current.on("mouseover", "node", (evt: cytoscape.EventObject) => {
         const id = Number(evt.target.data("id"));
         const node = filteredNodes.find((n) => n.id === id) || null;
-        onHover?.(node);
+        stableOnHover(node);
       });
-      cyRef.current.on("mouseout", "node", () => onHover?.(null));
+      cyRef.current.on("mouseout", "node", () => stableOnHover(null));
       cyRef.current.on("tap", "node", (evt: cytoscape.EventObject) => {
         const id = Number(evt.target.data("id"));
         const node = filteredNodes.find((n) => n.id === id) || null;
-        onHover?.(node);
+        stableOnHover(node);
       });
     } else {
       const cy = cyRef.current;
@@ -210,7 +217,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
       cy.add(elements);
       cy.layout({ name: "cose", animate: true, fit: true }).run();
     }
-  }, [elements, filteredNodes, onHover]);
+  }, [elements, filteredNodes, stableOnHover]);
 
   // Highlight nodes matching searchQuery
   useEffect(() => {
