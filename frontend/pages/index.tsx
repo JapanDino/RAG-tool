@@ -437,6 +437,49 @@ export default function Home() {
 
   const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
   const [apiBase, setApiBase] = useState(DEFAULT_API);
+
+  // ── Auth ──────────────────────────────────────────────────────
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("rag_token");
+  });
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const doLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const r = await fetch(`${apiBase}/auth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setLoginError(data?.detail || "Неверный логин или пароль");
+      } else {
+        localStorage.setItem("rag_token", data.access_token);
+        setToken(data.access_token);
+        setLoginUsername("");
+        setLoginPassword("");
+      }
+    } catch {
+      setLoginError("Не удалось подключиться к серверу");
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const doLogout = () => {
+    localStorage.removeItem("rag_token");
+    setToken(null);
+  };
+
+  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
   const [apiStatus, setApiStatus] = useState<"unknown" | "ok" | "down">("unknown");
   const [embeddingSemantic, setEmbeddingSemantic] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -609,7 +652,15 @@ export default function Home() {
   const apiFetchJson = async (path: string, init?: RequestInit): Promise<any | null> => {
     try {
       setError(null);
-      const r = await fetch(`${apiBase}${path}`, init);
+      const merged: RequestInit = {
+        ...init,
+        headers: { ...authHeaders, ...(init?.headers ?? {}) },
+      };
+      const r = await fetch(`${apiBase}${path}`, merged);
+      if (r.status === 401) {
+        doLogout();
+        return null;
+      }
       const text = await r.text();
       let data: any = null;
       try {
@@ -657,7 +708,7 @@ export default function Home() {
     fd.append("file", file);
     try {
       setError(null);
-      const r = await fetch(`${apiBase}/datasets/${ds}/documents`, { method: "POST", body: fd });
+      const r = await fetch(`${apiBase}/datasets/${ds}/documents`, { method: "POST", body: fd, headers: { ...authHeaders } });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       const j = await r.json();
       if (j.job_id) setLastJob(j.job_id);
@@ -776,7 +827,7 @@ export default function Home() {
       if (f.name.toLowerCase().endsWith(".pdf")) {
         const fd = new FormData();
         fd.append("file", f);
-        const r = await fetch(`${apiBase}/datasets/extract-text`, { method: "POST", body: fd });
+        const r = await fetch(`${apiBase}/datasets/extract-text`, { method: "POST", body: fd, headers: { ...authHeaders } });
         if (!r.ok) { setError("Не удалось извлечь текст из PDF"); setAnalyzeFileName(null); return; }
         const { text } = await r.json();
         setTextInput(text);
@@ -896,7 +947,7 @@ export default function Home() {
       const fd = new FormData();
       fd.append("file", item.file);
       try {
-        const r = await fetch(`${apiBase}/datasets/${ds}/documents`, { method: "POST", body: fd });
+        const r = await fetch(`${apiBase}/datasets/${ds}/documents`, { method: "POST", body: fd, headers: { ...authHeaders } });
         const ok = r.ok;
         setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: ok ? "done" : "error" } : x));
         if (ok) { const j = await r.json(); if (j.job_id) setLastJob(j.job_id); }
@@ -1141,6 +1192,76 @@ const analysisFlowSteps = [
   },
 ];
 
+  // ── Login screen ────────────────────────────────────────────
+  if (!token) {
+    return (
+      <div style={{
+        minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+        background: "linear-gradient(135deg,#0f1117 0%,#161b27 60%,#1a2035 100%)",
+        fontFamily: "IBM Plex Sans, Segoe UI, sans-serif",
+      }}>
+        <div style={{
+          background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 16, padding: "40px 48px", width: 360, boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
+        }}>
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>🧠</div>
+            <h1 style={{ margin: 0, color: "#e2e8f0", fontSize: 22, fontWeight: 700 }}>Bloom RAG Studio</h1>
+            <p style={{ margin: "6px 0 0", color: "#8892b0", fontSize: 13 }}>Войдите, чтобы продолжить</p>
+          </div>
+          <form onSubmit={doLogin} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label style={{ display: "block", color: "#8892b0", fontSize: 12, marginBottom: 6 }}>Логин</label>
+              <input
+                value={loginUsername}
+                onChange={e => setLoginUsername(e.target.value)}
+                placeholder="Letovo_teacher_demo!"
+                autoComplete="username"
+                style={{
+                  width: "100%", boxSizing: "border-box", padding: "10px 12px",
+                  background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 8, color: "#e2e8f0", fontSize: 14, outline: "none",
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", color: "#8892b0", fontSize: 12, marginBottom: 6 }}>Пароль</label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={e => setLoginPassword(e.target.value)}
+                placeholder="••••••••••••"
+                autoComplete="current-password"
+                style={{
+                  width: "100%", boxSizing: "border-box", padding: "10px 12px",
+                  background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 8, color: "#e2e8f0", fontSize: 14, outline: "none",
+                }}
+              />
+            </div>
+            {loginError && (
+              <div style={{ color: "#f87171", fontSize: 13, padding: "8px 12px", background: "rgba(248,113,113,0.1)", borderRadius: 8 }}>
+                {loginError}
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={loginLoading}
+              style={{
+                marginTop: 4, padding: "11px 0", borderRadius: 8, border: "none",
+                background: loginLoading ? "rgba(99,102,241,0.5)" : "#6366f1",
+                color: "#fff", fontSize: 15, fontWeight: 600, cursor: loginLoading ? "not-allowed" : "pointer",
+                transition: "background 0.2s",
+              }}
+            >
+              {loginLoading ? "Вход…" : "Войти"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.page}>
 
@@ -1190,6 +1311,17 @@ const analysisFlowSteps = [
               type="button"
             >
               {theme === "light" ? "Тёмная" : "Светлая"}
+            </button>
+
+            {/* Logout */}
+            <button
+              className={styles.themeToggle}
+              onClick={doLogout}
+              title="Выйти из аккаунта"
+              type="button"
+              style={{ color: "#f87171", borderColor: "rgba(248,113,113,0.3)" }}
+            >
+              Выйти
             </button>
 
             {/* Settings gear */}
