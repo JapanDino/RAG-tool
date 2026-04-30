@@ -31,6 +31,8 @@ services:
       DB_NAME: ${POSTGRES_DB:-rag_db}
       DB_USER: ${POSTGRES_USER:-rag}
       DB_PASS: ${POSTGRES_PASSWORD:-rag_pass}
+      # bcrypt hash contains $ which Docker Compose interpolates — override with $$ escaping
+      AUTH_PASSWORD_HASH: $$2b$$12$$CbrQ2EUWc07/gDZWgm3ygejXf8h3mUBc9wdDztgHcwq8T9l5GobTO
     depends_on:
       db:
         condition: service_healthy
@@ -60,6 +62,7 @@ services:
       DB_NAME: ${POSTGRES_DB:-rag_db}
       DB_USER: ${POSTGRES_USER:-rag}
       DB_PASS: ${POSTGRES_PASSWORD:-rag_pass}
+      AUTH_PASSWORD_HASH: $$2b$$12$$CbrQ2EUWc07/gDZWgm3ygejXf8h3mUBc9wdDztgHcwq8T9l5GobTO
     depends_on: [ backend, redis ]
     working_dir: /app/backend
     command: bash -lc "celery -A app.celery_app:celery_app worker -l INFO"
