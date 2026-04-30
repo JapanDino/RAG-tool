@@ -2,11 +2,39 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 
 
 LEVEL_ORDER = ["remember", "understand", "apply", "analyze", "evaluate", "create"]
+
+_WORD_RE = re.compile(r"[А-Яа-яЁёA-Za-z]+(?:-[А-Яа-яЁёA-Za-z]+)?")
+
+
+@lru_cache(maxsize=1)
+def _get_morph():
+    """Return pymorphy3 analyser, or None if not installed."""
+    try:
+        import pymorphy3  # type: ignore
+        return pymorphy3.MorphAnalyzer()
+    except Exception:
+        return None
+
+
+def _normalize_text(text: str) -> str:
+    """Tokenise text, lemmatise each word with pymorphy3 (if available)."""
+    morph = _get_morph()
+    if morph is None:
+        return text.lower()
+    tokens = _WORD_RE.findall(text)
+    lemmas = []
+    for tok in tokens:
+        try:
+            lemmas.append(morph.parse(tok)[0].normal_form)
+        except Exception:
+            lemmas.append(tok.lower())
+    return " ".join(lemmas)
 
 
 def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
@@ -48,21 +76,43 @@ def _load_keywords() -> dict[str, list[str]]:
         out[lvl] = [str(x).lower() for x in data.get(lvl, []) if str(x).strip()]
     return out
 
+@lru_cache(maxsize=1)
+def _load_normalized_keywords() -> dict[str, list[str]]:
+    """Load keywords pre-lemmatised so matching is morphology-aware."""
+    morph = _get_morph()
+    raw = _load_keywords()
+    if morph is None:
+        return raw
+    out: dict[str, list[str]] = {}
+    for lvl, kws in raw.items():
+        normalized = []
+        for kw in kws:
+            tokens = _WORD_RE.findall(kw)
+            try:
+                lemmas = [morph.parse(t)[0].normal_form for t in tokens]
+                normalized.append(" ".join(lemmas))
+            except Exception:
+                normalized.append(kw.lower())
+        out[lvl] = normalized
+    return out
+
+
 def classify_bloom_multilabel(
     text: str,
     min_prob: float = 0.2,
     max_levels: int = 2,
 ):
-    lowered = text.lower()
+    normalized = _normalize_text(text)
     counts = []
     triggers: dict[str, list[str]] = {lvl: [] for lvl in LEVEL_ORDER}
-    keywords = _load_keywords()
+    norm_keywords = _load_normalized_keywords()
+    raw_keywords = _load_keywords()
     for level in LEVEL_ORDER:
         hits = 0
-        for kw in keywords.get(level, []):
-            if kw in lowered:
+        for norm_kw, raw_kw in zip(norm_keywords.get(level, []), raw_keywords.get(level, [])):
+            if norm_kw in normalized:
                 hits += 1
-                triggers[level].append(kw)
+                triggers[level].append(raw_kw)
         counts.append(hits)
 
     total = sum(counts)

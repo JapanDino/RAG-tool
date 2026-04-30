@@ -105,6 +105,9 @@ def classify_nodes(payload: ClassifyNodesIn):
 
 @router.post("/content", response_model=AnalyzeContentOut)
 def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
+    text_stripped = (payload.text or "").strip()
+    if len(text_stripped) < 10:
+        raise HTTPException(422, "Текст слишком короткий (минимум 10 символов). Введите фрагмент образовательного контента.")
     nodes = get_node_extractor().extract(
         payload.text,
         max_nodes=payload.max_nodes or 30,
