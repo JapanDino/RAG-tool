@@ -174,40 +174,46 @@ def get_graph(
     edges: dict[tuple[int, int, str], float] = {}
 
     if node_ids:
-        filters = ["kn2.id != :id", "kn2.vec IS NOT NULL"]
-        params_base: dict[str, object] = {"k": top_k, "min_score": min_score}
+        # Single batched query using LATERAL JOIN — pgvector finds top_k neighbours
+        # for every node in one round-trip instead of N separate queries.
+        extra_filters: list[str] = ["b.id != a.id", "b.vec IS NOT NULL"]
+        params_batch: dict[str, object] = {
+            "ids": node_ids,
+            "top_k": top_k,
+            "min_score": min_score,
+            "max_edges": max_edges,
+        }
         if dataset_id is not None:
-            filters.append("kn2.dataset_id = :ds")
-            params_base["ds"] = dataset_id
+            extra_filters.append("b.dataset_id = :ds")
+            params_batch["ds"] = dataset_id
         if document_id is not None:
-            filters.append("kn2.document_id = :doc")
-            params_base["doc"] = document_id
+            extra_filters.append("b.document_id = :doc")
+            params_batch["doc"] = document_id
         if embedding_model is not None:
-            filters.append("kn2.embedding_model = :em")
-            params_base["em"] = embedding_model
-        where_clause = " AND ".join(filters)
+            extra_filters.append("b.embedding_model = :em")
+            params_batch["em"] = embedding_model
+        neighbour_where = " AND ".join(extra_filters)
 
-        sql = f"""
-            WITH q AS (SELECT vec FROM knowledge_nodes WHERE id = :id)
-            SELECT kn2.id as node_id,
-                   1.0 - (kn2.vec <=> (SELECT vec FROM q)) as score
-            FROM knowledge_nodes kn2
-            WHERE {where_clause}
-            ORDER BY kn2.vec <=> (SELECT vec FROM q)
-            LIMIT :k
+        batch_sql = f"""
+            SELECT a.id AS from_id, nb.to_id, 1.0 - nb.dist AS score
+            FROM knowledge_nodes a
+            CROSS JOIN LATERAL (
+                SELECT b.id AS to_id, (a.vec <=> b.vec) AS dist
+                FROM knowledge_nodes b
+                WHERE {neighbour_where}
+                  AND b.id = ANY(:ids)
+                ORDER BY a.vec <=> b.vec ASC
+                LIMIT :top_k
+            ) nb
+            WHERE a.id = ANY(:ids)
+              AND a.vec IS NOT NULL
+              AND 1.0 - nb.dist >= :min_score
+            ORDER BY score DESC
+            LIMIT :max_edges
         """
-
-        for node_id in node_ids:
-            params = dict(params_base)
-            params["id"] = node_id
-            rows = db.execute(text(sql), params).mappings().all()
-            for row in rows:
-                score = float(row["score"])
-                if score < min_score:
-                    continue
-                _add_edge(edges, node_id, int(row["node_id"]), round(score, 4), "similarity")
-                if len(edges) >= max_edges:
-                    break
+        rows = db.execute(text(batch_sql), params_batch).mappings().all()
+        for row in rows:
+            _add_edge(edges, int(row["from_id"]), int(row["to_id"]), round(float(row["score"]), 4), "similarity")
             if len(edges) >= max_edges:
                 break
 
