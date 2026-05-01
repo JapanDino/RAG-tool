@@ -129,18 +129,18 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     max_levels = payload.max_levels or 2
 
     node_titles = [n["title"] for n in nodes]
-    existing_rows = (
+    q = (
         db.query(KnowledgeNode)
         .filter(
             KnowledgeNode.dataset_id == payload.dataset_id,
-            KnowledgeNode.document_id == payload.document_id,
             KnowledgeNode.title.in_(node_titles),
         )
-        .all()
     )
-    existing_map: dict[tuple[str, str], KnowledgeNode] = {
-        (kn.title, kn.context_text): kn for kn in existing_rows
-    }
+    if payload.document_id is not None:
+        q = q.filter(KnowledgeNode.document_id == payload.document_id)
+    existing_rows = q.all()
+    # Key by title only — context_text in DB may differ from extractor's context_snippet
+    existing_map: dict[str, KnowledgeNode] = {kn.title: kn for kn in existing_rows}
 
     for node in nodes:
         # Use a 800-char window around the node position for richer Bloom classification context.
@@ -157,7 +157,7 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
         rationale = cls.get("rationale")
         node_rationales.append(rationale)
 
-        existing = existing_map.get((node["title"], node["context_snippet"]))
+        existing = existing_map.get(node["title"])
         if existing:
             existing.context_text = node["context_snippet"]
             existing.prob_vector = cls["prob_vector"]

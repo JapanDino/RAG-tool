@@ -181,6 +181,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, o
         const id = Number(evt.target.data("id"));
         const node = filteredNodesRef.current.find((n) => n.id === id) || null;
         onSelectRef.current?.(node);
+        onHoverRef.current?.(null); // clear stale hover on touch/click
       });
     } else {
       const cy = cyRef.current;
