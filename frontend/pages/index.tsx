@@ -405,7 +405,7 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [minProb, setMinProb] = useState(0.2);
-  const [maxLevels, setMaxLevels] = useState(2);
+  const [maxLevels, setMaxLevels] = useState(6);
   const [embeddingModel, setEmbeddingModel] = useState("");
 
   // ── Node detail modal ─────────────────────────────────────────
@@ -802,7 +802,7 @@ export default function Home() {
 
   const saveInlineEdit = async (nodeId: number) => {
     const ok = await apiFetchJson(`/nodes/${nodeId}`, {
-      method: "PATCH",
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: editTitle, context_text: editContext }),
     });
@@ -843,13 +843,28 @@ export default function Home() {
       try {
         const r = await fetch(`${apiBase}/datasets/${ds}/documents`, { method: "POST", body: fd });
         setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: r.ok ? "done" : "error" } : x));
-        if (r.ok) { const j = await r.json(); if (j.job_id) setLastJob(j.job_id); }
+        if (r.ok) {
+          const j = await r.json();
+          if (j.job_id) setLastJob(j.job_id);
+          return true;
+        }
       } catch {
         setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: "error" } : x));
       }
+      return false;
     };
-    await Promise.allSettled(pending.map(uploadOne));
-    addToast("✓ Batch загрузка завершена", "success");
+    const maxConcurrent = 3;
+    let successCount = 0;
+    let errorCount = 0;
+    for (let i = 0; i < pending.length; i += maxConcurrent) {
+      const slice = pending.slice(i, i + maxConcurrent);
+      const results = await Promise.all(slice.map(uploadOne));
+      successCount += results.filter(Boolean).length;
+      errorCount += results.length - results.filter(Boolean).length;
+    }
+    if (errorCount === 0) addToast(`✓ Batch загрузка завершена: ${successCount}`, "success");
+    else if (successCount === 0) addToast(`Batch загрузка завершилась с ошибками: ${errorCount}`, "error");
+    else addToast(`Batch загрузка: ${successCount} успешно, ${errorCount} с ошибкой`, "info");
   };
 
   const undoLabel = () => {
@@ -882,9 +897,9 @@ export default function Home() {
 
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
-    result = result.filter(n => {
-      const primaryLevel = n.top_levels?.[0] as BloomLevel | undefined;
-      return primaryLevel ? filters[primaryLevel] : true;
+    result = result.filter((n) => {
+      const levels = (n.top_levels || []) as BloomLevel[];
+      return levels.length ? levels.some((lvl) => filters[lvl]) : true;
     });
     if (nodeSearch.trim()) {
       const q = nodeSearch.toLowerCase();
@@ -901,6 +916,11 @@ export default function Home() {
     }
     return result;
   }, [nodes, nodeSearch, nodeSort, filters]);
+
+  useEffect(() => {
+    setHoveredNode(null);
+    setSelectedNode(null);
+  }, [ds, filters, graphNodesData, graphEdgesData]);
 
   const loadGraph = async () => {
     if (!ds) return;
@@ -1757,7 +1777,7 @@ const analysisFlowSteps = [
                     <span className={styles.emptyIcon}><IconBrain /></span>
                     <div className={styles.emptyTitle}>Нет результатов</div>
                     <div className={styles.emptyText}>
-                      Вставь текст выше и нажми "Анализировать" (нужен активный dataset).
+                      Вставь текст выше и нажми &quot;Анализировать&quot; (нужен активный dataset).
                     </div>
                   </div>
                 )}
@@ -2088,10 +2108,8 @@ const analysisFlowSteps = [
                   filters={filters}
                   threshold={threshold}
                   searchQuery={graphSearch}
-                  onHover={(n: AnalyzeNode | null) => {
-                    setHoveredNode(n);
-                    if (n) setSelectedNode(n);
-                  }}
+                  onHover={(n: AnalyzeNode | null) => setHoveredNode(n)}
+                  onSelect={(n: AnalyzeNode | null) => setSelectedNode(n)}
                 />
               </ErrorBoundary>
 

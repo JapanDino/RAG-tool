@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Optional, Literal, List, Union
 from datetime import datetime
 
@@ -7,17 +7,25 @@ def _enum_to_str(v):
     """Coerce SQLAlchemy str-enum objects to plain strings for Pydantic Literal validation."""
     return v.value if hasattr(v, "value") else v
 
+
+def _validate_prob_vector(v):
+    if v is None:
+        return v
+    if len(v) != 6:
+        raise ValueError("prob_vector must contain exactly 6 Bloom probabilities")
+    return v
+
 BloomLevel = Literal["remember","understand","apply","analyze","evaluate","create"]
 NodeType = Literal["proper_noun","concept","skill","keyword","formula","other"]
 
 class DatasetIn(BaseModel): name: str
 class DatasetOut(BaseModel):
     id:int; name:str
-    class Config: from_attributes=True
+    model_config = ConfigDict(from_attributes=True)
 
 class DocumentOut(BaseModel):
     id:int; dataset_id:int; title:str; source:str; mime:str
-    class Config: from_attributes=True
+    model_config = ConfigDict(from_attributes=True)
 
 class SearchHit(BaseModel):
     chunk_id:int; text:str; score:float; document_id:int; document_title:str
@@ -28,7 +36,7 @@ class AnnotateIn(BaseModel):
 
 class AnnotationOut(BaseModel):
     id:int; chunk_id:int; level:BloomLevel; label:str; rationale:str; score:float; version:int
-    class Config: from_attributes=True
+    model_config = ConfigDict(from_attributes=True)
 
     @field_validator("level", mode="before")
     @classmethod
@@ -51,7 +59,7 @@ class AnnotationWithChunkOut(BaseModel):
     chunk_idx:int
     document_id:int
     document_title:str
-    class Config: from_attributes=True
+    model_config = ConfigDict(from_attributes=True)
 
     @field_validator("level", mode="before")
     @classmethod
@@ -77,7 +85,7 @@ class RubricOut(BaseModel):
     criteria:dict
     version:int
     is_active:bool
-    class Config: from_attributes=True
+    model_config = ConfigDict(from_attributes=True)
 
     @field_validator("level", mode="before")
     @classmethod
@@ -109,7 +117,7 @@ class ClassifyNodeIn(BaseModel):
 class ClassifyNodesIn(BaseModel):
     nodes: List[ClassifyNodeIn]
     min_prob: Optional[float] = 0.2
-    max_levels: Optional[int] = 2
+    max_levels: Optional[int] = 6
 
 class ClassifyNodeOut(BaseModel):
     title: str
@@ -153,6 +161,10 @@ class KnowledgeNodeIn(BaseModel):
     version: Optional[int] = 1
     model_info: Optional[dict] = None
 
+    @field_validator("prob_vector")
+    @classmethod
+    def validate_prob_vector(cls, v): return _validate_prob_vector(v)
+
 class KnowledgeNodeOut(BaseModel):
     id: int
     dataset_id: int
@@ -168,8 +180,7 @@ class KnowledgeNodeOut(BaseModel):
     model_info: dict
     created_at: Optional[Union[datetime, str]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class KnowledgeNodeUpdateIn(BaseModel):
     title: Optional[str] = None
@@ -180,6 +191,10 @@ class KnowledgeNodeUpdateIn(BaseModel):
     embedding_model: Optional[str] = None
     version: Optional[int] = None
     model_info: Optional[dict] = None
+
+    @field_validator("prob_vector")
+    @classmethod
+    def validate_prob_vector(cls, v): return _validate_prob_vector(v)
 
 class KnowledgeNodeBulkIn(BaseModel):
     nodes: List[KnowledgeNodeIn]
@@ -239,7 +254,7 @@ class AnalyzeContentIn(BaseModel):
     max_nodes: int = 30
     min_freq: int = 1
     min_prob: Optional[float] = 0.2
-    max_levels: Optional[int] = 2
+    max_levels: Optional[int] = 6
     embedding_dim: Optional[int] = 1536
     embedding_model: Optional[str] = None
     extractor: Optional[str] = "heuristic-v1"

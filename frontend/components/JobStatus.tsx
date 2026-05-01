@@ -53,7 +53,7 @@ export default function JobStatus({
     );
   }
 
-  const c = state.celery || {};
+  const c = state.celery;
   const status = String(state.status || "unknown");
   const dotClass =
     status === "done"

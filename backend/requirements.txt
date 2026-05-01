@@ -15,5 +15,7 @@ pdf2image>=1.16,<1.18
 pytesseract>=0.3.10,<0.4
 Pillow>=10.0,<11.0
 pgvector>=0.2.5
+natasha>=1.6.0,<2.0
+sentence-transformers>=3.0,<4.0
 
 # Local NLP/embeddings (Hybrid offline-first path)

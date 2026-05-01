@@ -11,6 +11,7 @@ from ..schemas.schemas import (
     KnowledgeNodeSearchHit,
     KnowledgeNodeUpdateIn,
 )
+from ..services.embedding_provider import current_embedding_model
 from ..services.query_embed import embed_query
 from ..utils.vector import vector_literal
 
@@ -77,16 +78,20 @@ def search_nodes(
 ):
     if dim != 1536:
         raise HTTPException(400, "dim must be 1536 for current storage")
+    current_model = current_embedding_model()
+    effective_model = embedding_model or current_model
+    if effective_model != current_model:
+        raise HTTPException(
+            400,
+            "query embedding model must match the active EMBEDDING_PROVIDER; switch provider or omit embedding_model",
+        )
     qvec = embed_query(q, dim=dim)
     lit = vector_literal(qvec)
-    filters = ["kn.vec IS NOT NULL"]
-    params = {"qvec": lit, "k": top_k}
+    filters = ["kn.vec IS NOT NULL", "kn.embedding_model = :em"]
+    params = {"qvec": lit, "k": top_k, "em": effective_model}
     if dataset_id is not None:
         filters.append("kn.dataset_id = :ds")
         params["ds"] = dataset_id
-    if embedding_model is not None:
-        filters.append("kn.embedding_model = :em")
-        params["em"] = embedding_model
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     sql = f"""
         WITH q AS (SELECT CAST(:qvec AS vector) AS v)

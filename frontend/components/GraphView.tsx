@@ -19,6 +19,7 @@ type Props = {
   filters: Record<BloomLevel, boolean>;
   threshold: number;
   onHover?: (node: AnalyzeNode | null) => void;
+  onSelect?: (node: AnalyzeNode | null) => void;
   searchQuery?: string;
 };
 
@@ -32,11 +33,12 @@ function computeSize(freq: number | null | undefined) {
   return 24 + 8 * Math.log(1 + f);
 }
 
-export default function GraphView({ nodes, edges, filters, threshold, onHover, searchQuery }: Props) {
+export default function GraphView({ nodes, edges, filters, threshold, onHover, onSelect, searchQuery }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
   const filteredNodesRef = useRef<AnalyzeNode[]>([]);
   const onHoverRef = useRef(onHover);
+  const onSelectRef = useRef(onSelect);
 
   const filteredNodes = useMemo(
     () => nodes.filter((n) => (n.top_levels || []).some((lvl) => filters[lvl])),
@@ -44,6 +46,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
   );
   filteredNodesRef.current = filteredNodes;
   onHoverRef.current = onHover;
+  onSelectRef.current = onSelect;
 
   const elements: ElementDefinition[] = useMemo(() => {
     const nodeIds = new Set(filteredNodes.map((n) => n.id));
@@ -117,14 +120,14 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
               "pie-1-background-color": (ele: cytoscape.NodeSingular) =>
                 LEVEL_COLORS[ele.data("primary") as BloomLevel] || "#60a5fa",
               "pie-1-background-size": (ele: cytoscape.NodeSingular) =>
-                String(ele.data("primaryPct") ?? 100),
+                Number(ele.data("primaryPct") ?? 100),
               "pie-1-background-opacity": 1,
               "pie-2-background-color": (ele: cytoscape.NodeSingular) =>
                 ele.data("secondary")
                   ? LEVEL_COLORS[ele.data("secondary") as BloomLevel]
                   : "transparent",
               "pie-2-background-size": (ele: cytoscape.NodeSingular) =>
-                String(ele.data("secondaryPct") ?? 0),
+                Number(ele.data("secondaryPct") ?? 0),
               "pie-2-background-opacity": (ele: cytoscape.NodeSingular) =>
                 ele.data("secondary") ? 1 : 0,
               "border-width": 0,
@@ -177,7 +180,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
       cyRef.current.on("tap", "node", (evt: cytoscape.EventObject) => {
         const id = Number(evt.target.data("id"));
         const node = filteredNodesRef.current.find((n) => n.id === id) || null;
-        onHoverRef.current?.(node);
+        onSelectRef.current?.(node);
       });
     } else {
       const cy = cyRef.current;
@@ -198,7 +201,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
       if (label.includes(q)) node.addClass("hl");
       else node.addClass("dim");
     });
-  }, [searchQuery]);
+  }, [searchQuery, elements]);
 
   const exportPng = () => {
     const cy = cyRef.current;
@@ -213,6 +216,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
   const zoomIn = () => cyRef.current?.zoom(cyRef.current.zoom() * 1.25);
   const zoomOut = () => cyRef.current?.zoom(cyRef.current.zoom() * 0.8);
   const zoomFit = () => cyRef.current?.fit(undefined, 20);
+  const visibleEdgeCount = Math.max(0, elements.length - filteredNodes.length);
 
   return (
     <div className={styles.wrap}>
@@ -225,7 +229,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
           Export PNG
         </button>
         <span className={styles.summary}>
-          {filteredNodes.length} узлов · {edges.length} рёбер
+          {filteredNodes.length} узлов · {visibleEdgeCount} рёбер
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
           <button className={styles.btn} onClick={zoomIn} title="Увеличить">+</button>

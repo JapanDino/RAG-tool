@@ -1,3 +1,4 @@
+import os
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -107,7 +108,8 @@ def classify_nodes(payload: ClassifyNodesIn):
 
 @router.post("/content", response_model=AnalyzeContentOut)
 def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
-    nodes = get_node_extractor().extract(
+    extractor = get_node_extractor()
+    nodes = extractor.extract(
         payload.text,
         max_nodes=payload.max_nodes or 30,
         min_freq=payload.min_freq or 1,
@@ -122,6 +124,7 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
         raise HTTPException(400, "embedding_dim must be 1536 for current storage")
     actual_embedding_model = current_embedding_model()
     requested_embedding_model = (payload.embedding_model or "").strip() or None
+    actual_classifier = os.getenv("BLOOM_CLASSIFIER", "keyword").strip().lower()
     min_prob = payload.min_prob or 0.2
     max_levels = payload.max_levels or 2
 
@@ -161,10 +164,14 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
             existing.top_levels = cls["top_levels"]
             existing.embedding_model = actual_embedding_model
             existing.model_info = {
-                "extractor": payload.extractor or "heuristic-v1",
-                "classifier": payload.classifier or "keyword-v1",
+                "extractor": extractor.name,
+                "classifier": actual_classifier,
                 "node_type": node.get("node_type"),
+                "frequency": node.get("frequency"),
+                "source": node.get("source"),
                 "rationale": rationale,
+                "requested_extractor": payload.extractor,
+                "requested_classifier": payload.classifier,
                 "requested_embedding_model": requested_embedding_model,
             }
             kn = existing
@@ -179,10 +186,14 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
                 embedding_dim=embedding_dim,
                 embedding_model=actual_embedding_model,
                 model_info={
-                    "extractor": payload.extractor or "heuristic-v1",
-                    "classifier": payload.classifier or "keyword-v1",
+                    "extractor": extractor.name,
+                    "classifier": actual_classifier,
                     "node_type": node.get("node_type"),
+                    "frequency": node.get("frequency"),
+                    "source": node.get("source"),
                     "rationale": rationale,
+                    "requested_extractor": payload.extractor,
+                    "requested_classifier": payload.classifier,
                     "requested_embedding_model": requested_embedding_model,
                 },
             )
@@ -212,6 +223,7 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
                 "context_text": kn.context_text,
                 "prob_vector": kn.prob_vector,
                 "top_levels": kn.top_levels,
+                "frequency": (kn.model_info or {}).get("frequency"),
                 "rationale": rationale,
             }
             for kn, rationale in zip(stored_nodes, node_rationales)
