@@ -474,8 +474,9 @@ export default function Home() {
   const [canvasCourses, setCanvasCourses] = useState<CanvasCourse[]>([]);
   const [canvasCoursesLoading, setCanvasCoursesLoading] = useState(false);
   const [canvasSelectedCourse, setCanvasSelectedCourse] = useState<number | null>(null);
-  const [canvasContentTypes, setCanvasContentTypes] = useState<string[]>(["syllabus", "pages", "assignments", "quizzes", "discussions"]);
+  const [canvasContentTypes, setCanvasContentTypes] = useState<string[]>(["syllabus", "pages", "assignments", "quizzes", "discussions", "files"]);
   const [canvasMaxNodes, setCanvasMaxNodes] = useState(30);
+  const [canvasMaxFiles, setCanvasMaxFiles] = useState(20);
   const [canvasIngesting, setCanvasIngesting] = useState(false);
   const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
   const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
@@ -936,13 +937,14 @@ export default function Home() {
         dataset_id: ds,
         content_types: canvasContentTypes,
         max_nodes_per_doc: canvasMaxNodes,
+        max_files: canvasMaxFiles,
       }),
     });
     setCanvasIngesting(false);
     if (!json) return;
     setCanvasIngestResult(json);
     addToast(`Canvas: создано ${json.nodes_created} узлов, обновлено ${json.nodes_updated}`, "success");
-  }, [apiFetchJson, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes]);
+  }, [apiFetchJson, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles]);
 
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
@@ -2638,7 +2640,14 @@ const analysisFlowSteps = [
                     Типы контента
                   </label>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                    {["syllabus", "pages", "assignments", "quizzes", "discussions"].map(ct => (
+                    {[
+                      { id: "syllabus",     label: "Силлабус" },
+                      { id: "pages",        label: "Страницы" },
+                      { id: "assignments",  label: "Задания" },
+                      { id: "quizzes",      label: "Тесты" },
+                      { id: "discussions",  label: "Обсуждения" },
+                      { id: "files",        label: "📎 Файлы" },
+                    ].map(({ id: ct, label }) => (
                       <label key={ct} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "5px 10px", borderRadius: 6, border: `1px solid ${canvasContentTypes.includes(ct) ? "var(--text-accent)" : "var(--border-1)"}`, background: canvasContentTypes.includes(ct) ? "rgba(99,102,241,0.08)" : "var(--bg-card)", transition: "all 0.12s" }}>
                         <input
                           type="checkbox"
@@ -2646,18 +2655,31 @@ const analysisFlowSteps = [
                           onChange={e => setCanvasContentTypes(prev => e.target.checked ? [...prev, ct] : prev.filter(x => x !== ct))}
                           style={{ accentColor: "var(--text-accent)" }}
                         />
-                        {ct === "syllabus" ? "Силлабус" : ct === "pages" ? "Страницы" : ct === "assignments" ? "Задания" : ct === "quizzes" ? "Тесты" : "Обсуждения"}
+                        {label}
                       </label>
                     ))}
                   </div>
 
-                  <div className={styles.paramField} style={{ marginBottom: 16 }}>
+                  <div className={styles.paramField} style={{ marginBottom: 10 }}>
                     <span>Макс. узлов на документ</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <input className={styles.paramSlider} type="range" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ flex: 1 }} />
                       <input className={styles.paramInput} type="number" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ width: 56 }} />
                     </div>
                   </div>
+
+                  {canvasContentTypes.includes("files") && (
+                    <div className={styles.paramField} style={{ marginBottom: 16 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        Макс. файлов
+                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>PDF, TXT, MD, DOCX (до 20 МБ)</span>
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input className={styles.paramSlider} type="range" min={1} max={100} step={1} value={canvasMaxFiles} onChange={e => setCanvasMaxFiles(Number(e.target.value))} style={{ flex: 1 }} />
+                        <input className={styles.paramInput} type="number" min={1} max={100} step={1} value={canvasMaxFiles} onChange={e => setCanvasMaxFiles(Number(e.target.value))} style={{ width: 56 }} />
+                      </div>
+                    </div>
+                  )}
 
                   {!ds && (
                     <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.3)", fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>

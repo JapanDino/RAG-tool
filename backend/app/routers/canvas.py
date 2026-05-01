@@ -2,6 +2,7 @@ import os
 import logging
 from typing import Optional
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -14,8 +15,15 @@ from ..services.node_extractor import get_node_extractor
 from ..services.bloom_multilabel import classify_bloom_multilabel
 from ..services.embedding import embed_texts
 from ..services.embedding_provider import current_embedding_model
+from ..services.text_extract import extract_text as extract_file_text
 from ..utils.bloom import LEVEL_ORDER
 from ..utils.vector import vector_literal
+
+# File types we can extract text from
+SUPPORTED_MIME_PREFIXES = ("application/pdf", "text/", "application/msword",
+                           "application/vnd.openxmlformats")
+SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md", ".docx", ".doc", ".rtf", ".csv"}
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +57,11 @@ def _html_to_text(html: str) -> str:
 class IngestRequest(BaseModel):
     course_id: int
     dataset_id: int
-    content_types: list[str] = ["syllabus", "pages", "assignments", "quizzes", "discussions"]
+    content_types: list[str] = ["syllabus", "pages", "assignments", "quizzes", "discussions", "files"]
     max_nodes_per_doc: int = 30
     min_prob: float = 0.2
     document_id: Optional[int] = None
+    max_files: int = 20  # safety cap — large courses can have hundreds of files
 
 
 class IngestResponse(BaseModel):
@@ -91,6 +100,29 @@ def list_courses():
             "workflow_state": c.get("workflow_state"),
         }
         for c in courses
+    ]
+
+
+@router.get("/courses/{course_id}/files")
+def list_course_files(course_id: int):
+    """Список файлов курса (только поддерживаемые форматы)."""
+    _check_canvas_configured()
+    try:
+        all_files = cc.list_files(course_id)
+    except Exception as e:
+        raise HTTPException(502, f"Canvas API error: {e}")
+    return [
+        {
+            "id": f["id"],
+            "name": f.get("display_name") or f.get("filename"),
+            "content_type": f.get("content-type"),
+            "size": f.get("size"),
+            "supported": (
+                any(f.get("content-type", "").startswith(p) for p in SUPPORTED_MIME_PREFIXES)
+                or any((f.get("filename") or "").lower().endswith(ext) for ext in SUPPORTED_EXTENSIONS)
+            ),
+        }
+        for f in all_files
     ]
 
 
@@ -278,6 +310,52 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
                 documents_ingested += 1
         except Exception as e:
             skipped.append(f"discussions: {e}")
+
+    # ── Files ──
+    if "files" in ctypes:
+        try:
+            all_files = cc.list_files(cid)
+            # Filter to supported types only
+            supported = [
+                f for f in all_files
+                if (
+                    any(f.get("content-type", "").startswith(p) for p in SUPPORTED_MIME_PREFIXES)
+                    or any((f.get("filename") or "").lower().endswith(ext) for ext in SUPPORTED_EXTENSIONS)
+                )
+                and (f.get("size") or 0) <= MAX_FILE_SIZE
+            ]
+            # Apply cap
+            capped = supported[: payload.max_files]
+            if len(supported) > payload.max_files:
+                skipped.append(
+                    f"files: показано {payload.max_files} из {len(supported)} "
+                    f"(увеличь max_files чтобы обработать больше)"
+                )
+            token = os.getenv("CANVAS_TOKEN", "")
+            auth_headers = {"Authorization": f"Bearer {token}"}
+            for f in capped:
+                fname = f.get("display_name") or f.get("filename") or f"file_{f['id']}"
+                download_url = f.get("url") or ""
+                content_type = f.get("content-type") or ""
+                label = f"file:{fname}"
+                if not download_url:
+                    skipped.append(f"{label}: нет URL для скачивания")
+                    continue
+                try:
+                    resp = requests.get(download_url, headers=auth_headers, timeout=60)
+                    resp.raise_for_status()
+                    file_bytes = resp.content
+                    text_content = extract_file_text(fname, content_type, file_bytes)
+                    text_content = text_content.strip()
+                    if not text_content:
+                        skipped.append(f"{label}: пустой текст после извлечения")
+                        continue
+                    process_document(text_content, label)
+                    documents_ingested += 1
+                except Exception as e:
+                    skipped.append(f"{label}: {e}")
+        except Exception as e:
+            skipped.append(f"files list: {e}")
 
     return IngestResponse(
         course_id=cid,
