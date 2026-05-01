@@ -867,14 +867,14 @@ export default function Home() {
     else addToast(`Batch загрузка: ${successCount} успешно, ${errorCount} с ошибкой`, "info");
   };
 
-  const undoLabel = () => {
+  const undoLabel = useCallback(() => {
     const last = undoStack[undoStack.length - 1];
     if (!last) return;
     setUndoStack(s => s.slice(0, -1));
     setLabelQueue(q => [last.node, ...q]);
     setCurrentLabels(last.labels);
     addToast("↩ Отменено", "info");
-  };
+  }, [undoStack]);
 
   const searchNodes = async () => {
     if (!searchQuery.trim()) return;
@@ -1023,8 +1023,7 @@ export default function Home() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, undoStack]);
+  }, [activeTab, undoLabel]);
 
   useEffect(() => {
     if (activeTab !== "labeling") return;
