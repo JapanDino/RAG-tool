@@ -361,10 +361,6 @@ def parse_document(document_id: int, file_path: str, filename: str,
 @celery_app.task
 def reindex_dataset_nodes(dataset_id: int, job_id: int | None = None):
     """Re-embed all KnowledgeNodes for a dataset using the current EMBEDDING_PROVIDER."""
-    from ..services.embedding import embed_texts
-    from ..services.embedding_provider import current_embedding_model
-    from ..utils.vector import vector_literal
-
     db = SessionLocal()
     try:
         if job_id is not None:

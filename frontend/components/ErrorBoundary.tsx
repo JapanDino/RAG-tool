@@ -14,8 +14,8 @@ interface State {
 export default class ErrorBoundary extends React.Component<Props, State> {
   state: State = { hasError: false, error: null, retryKey: 0 };
 
-  static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error, retryKey: 0 };
+  static getDerivedStateFromError(error: Error): Pick<State, "hasError" | "error"> {
+    return { hasError: true, error };
   }
 
   reset = () => this.setState((state) => ({ hasError: false, error: null, retryKey: state.retryKey + 1 }));
