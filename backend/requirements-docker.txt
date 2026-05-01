@@ -16,8 +16,4 @@ pytesseract>=0.3.10,<0.4
 Pillow>=10.0,<11.0
 pgvector>=0.2.5
 natasha>=1.6.0,<2.0
-sentence-transformers>=3.0,<4.0
-beautifulsoup4>=4.12,<5.0
-lxml>=5.0,<6.0
-
-# Local NLP/embeddings (Hybrid offline-first path)
+# sentence-transformers omitted — use EMBEDDING_PROVIDER=hash to avoid torch (530MB)
