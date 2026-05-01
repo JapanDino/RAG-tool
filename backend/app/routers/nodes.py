@@ -96,10 +96,10 @@ def search_nodes(
                kn.dataset_id,
                kn.document_id,
                kn.chunk_id,
-               1.0 - (kn.vec <-> (SELECT v FROM q)) as score
+               1.0 - (kn.vec <=> (SELECT v FROM q)) as score
         FROM knowledge_nodes kn
         {where_clause}
-        ORDER BY kn.vec <-> (SELECT v FROM q)
+        ORDER BY kn.vec <=> (SELECT v FROM q)
         LIMIT :k
     """
     rows = db.execute(text(sql), params).mappings().all()

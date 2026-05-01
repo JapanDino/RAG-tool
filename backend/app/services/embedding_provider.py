@@ -10,7 +10,9 @@ from typing import Sequence
 
 import numpy as np
 
-STORAGE_DIM = 1536  # pgvector storage is fixed to vector(1536)
+# multilingual-e5-small produces 384-dim vectors; they are zero-padded to 1536 so that the
+# pgvector column type (vector(1536)) stays compatible with OpenAI text-embedding-3-small.
+STORAGE_DIM = 1536
 
 
 class EmbeddingProvider(ABC):
@@ -172,8 +174,13 @@ class RandomProvider(EmbeddingProvider):
 
 @lru_cache(maxsize=1)
 def get_embedding_provider() -> EmbeddingProvider:
-    name = os.getenv("EMBEDDING_PROVIDER", "hash").strip().lower()
+    name = os.getenv("EMBEDDING_PROVIDER", "local").strip().lower()
     if name == "hash":
+        import logging
+        logging.getLogger(__name__).warning(
+            "EMBEDDING_PROVIDER=hash produces semantically meaningless embeddings. "
+            "Set EMBEDDING_PROVIDER=local or EMBEDDING_PROVIDER=openai for real semantic search."
+        )
         return HashingProvider()
     if name == "local":
         model = os.getenv("EMBEDDING_MODEL_LOCAL", "intfloat/multilingual-e5-small")

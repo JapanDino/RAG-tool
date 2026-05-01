@@ -3,6 +3,14 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 import enum
+from typing import Optional
+
+try:
+    from pgvector.sqlalchemy import Vector as _Vector
+    _PGVECTOR = True
+except ImportError:
+    _Vector = None
+    _PGVECTOR = False
 
 class JobType(str, enum.Enum): index="index"; annotate="annotate"; export="export"; graph="graph"; parse="parse"
 class JobStatus(str, enum.Enum): queued="queued"; running="running"; done="done"; failed="failed"
@@ -40,8 +48,9 @@ class Embedding(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), index=True)
     dim: Mapped[int] = mapped_column(Integer, default=1536)
-    # vec: vector(dim) — создадим колонку и индексы в SQL-миграции
-    model: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
+    # 1536-dim shim: multilingual-e5-small is 384-dim, zero-padded for OpenAI API compatibility
+    vec: Mapped[Optional[list]] = mapped_column(_Vector(1536) if _PGVECTOR else JSON, nullable=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class KnowledgeNode(Base):
@@ -55,7 +64,9 @@ class KnowledgeNode(Base):
     prob_vector: Mapped[list] = mapped_column(JSON, default=list)
     top_levels: Mapped[list] = mapped_column(JSON, default=list)
     embedding_dim: Mapped[int] = mapped_column(Integer, default=1536)
-    embedding_model: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
+    embedding_model: Mapped[str] = mapped_column(String(100), nullable=True)
+    # 1536-dim shim: multilingual-e5-small is 384-dim, zero-padded for OpenAI API compatibility
+    vec: Mapped[Optional[list]] = mapped_column(_Vector(1536) if _PGVECTOR else JSON, nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     model_info: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())

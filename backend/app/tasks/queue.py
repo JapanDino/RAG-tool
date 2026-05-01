@@ -3,7 +3,7 @@ import os
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from .celery_app import celery_app
-from .tasks import index_dataset, annotate_dataset, rebuild_graph_edges, parse_document
+from .tasks import index_dataset, annotate_dataset, rebuild_graph_edges, parse_document, reindex_dataset_nodes
 from ..models.models import Job, JobStatus, JobType
 
 logger = logging.getLogger(__name__)
@@ -29,17 +29,20 @@ def _run_sync(db: Session, job: Job):
                 job.id,
             )
         elif job.type == JobType.graph:
-            rebuild_graph_edges(
-                job.payload["dataset_id"],
-                job.id,
-                job.payload.get("embedding_model"),
-                job.payload.get("top_k", 5),
-                job.payload.get("min_score", 0.2),
-                job.payload.get("max_edges", 200),
-                job.payload.get("include_cooccurrence", True),
-                job.payload.get("limit_nodes", 500),
-                job.payload.get("co_window", 2),
-            )
+            if job.payload.get("action") == "reindex":
+                reindex_dataset_nodes(job.payload["dataset_id"], job.id)
+            else:
+                rebuild_graph_edges(
+                    job.payload["dataset_id"],
+                    job.id,
+                    job.payload.get("embedding_model"),
+                    job.payload.get("top_k", 5),
+                    job.payload.get("min_score", 0.2),
+                    job.payload.get("max_edges", 200),
+                    job.payload.get("include_cooccurrence", True),
+                    job.payload.get("limit_nodes", 500),
+                    job.payload.get("co_window", 2),
+                )
         else:
             db.execute(text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"), {"id": job.id})
             db.commit()
@@ -90,17 +93,20 @@ def enqueue_or_mark(db: Session, job: Job):
         elif job.type == JobType.export:
             pass
         elif job.type == JobType.graph:
-            async_result = rebuild_graph_edges.delay(
-                job.payload["dataset_id"],
-                job.id,
-                job.payload.get("embedding_model"),
-                job.payload.get("top_k", 5),
-                job.payload.get("min_score", 0.2),
-                job.payload.get("max_edges", 200),
-                job.payload.get("include_cooccurrence", True),
-                job.payload.get("limit_nodes", 500),
-                job.payload.get("co_window", 2),
-            )
+            if job.payload.get("action") == "reindex":
+                async_result = reindex_dataset_nodes.delay(job.payload["dataset_id"], job.id)
+            else:
+                async_result = rebuild_graph_edges.delay(
+                    job.payload["dataset_id"],
+                    job.id,
+                    job.payload.get("embedding_model"),
+                    job.payload.get("top_k", 5),
+                    job.payload.get("min_score", 0.2),
+                    job.payload.get("max_edges", 200),
+                    job.payload.get("include_cooccurrence", True),
+                    job.payload.get("limit_nodes", 500),
+                    job.payload.get("co_window", 2),
+                )
             db.execute(
                 text("UPDATE jobs SET status=:st, task_id=:tid WHERE id=:id"),
                 dict(st=JobStatus.queued.value, tid=async_result.id, id=job.id),

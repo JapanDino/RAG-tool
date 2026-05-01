@@ -14,5 +14,6 @@ pdfminer.six>=20221105
 pdf2image>=1.16,<1.18
 pytesseract>=0.3.10,<0.4
 Pillow>=10.0,<11.0
+pgvector>=0.2.5
 
 # Local NLP/embeddings (Hybrid offline-first path)

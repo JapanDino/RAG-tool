@@ -10,7 +10,7 @@ from typing import Any, Sequence
 from ..utils.node_extract import extract_nodes_from_text as heuristic_extract
 
 
-SENT_SPLIT_RE = re.compile(r"[.!?\\n]+")
+SENT_SPLIT_RE = re.compile(r"[.!?\n]+")
 
 
 def split_sentences_with_offsets(text: str) -> list[dict[str, Any]]:

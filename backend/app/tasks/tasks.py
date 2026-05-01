@@ -2,6 +2,7 @@ import logging
 import os
 
 from .celery_app import celery_app
+from ..services.chunking import split_into_chunks
 from ..db.session import SessionLocal
 from ..models.models import Chunk, Document
 from ..services.embedding import embed_texts
@@ -82,9 +83,10 @@ def annotate_dataset(dataset_id: int, level: str, job_id: int | None = None):
             )
             db.commit()
         chunks = db.query(Chunk).join(Chunk.document).filter(Chunk.document.has(dataset_id=dataset_id)).all()
+        rubric = get_active_rubric(level, db)
+        rubric_text = rubric.description if rubric else None
+        records = []
         for c in chunks:
-            rubric = get_active_rubric(level, db)
-            rubric_text = rubric.description if rubric else None
             a = (
                 llm_annotate(c.text, level, rubric_text)
                 if ENABLE_LLM
@@ -98,6 +100,8 @@ def annotate_dataset(dataset_id: int, level: str, job_id: int | None = None):
                 if not ok:
                     logger.error("Invalid heuristic annotation; skipping", extra={"error": err, "chunk_id": c.id})
                     continue
+            records.append(dict(cid=c.id, **a))
+        if records:
             db.execute(text("""
                 INSERT INTO bloom_annotations (chunk_id, level, label, rationale, score)
                 VALUES (:cid, :level, :label, :rationale, :score)
@@ -107,7 +111,7 @@ def annotate_dataset(dataset_id: int, level: str, job_id: int | None = None):
                               score = EXCLUDED.score,
                               version = COALESCE(bloom_annotations.version, 1) + 1,
                               created_at = now()
-            """), dict(cid=c.id, **a))
+            """), records)
         db.commit()
         if job_id is not None:
             db.execute(
@@ -142,7 +146,7 @@ def rebuild_graph_edges(
 ):
     """
     Rebuilds and persists graph edges into `knowledge_edges`.
-    Similarity edges are computed with pgvector (<->) over `knowledge_nodes.vec`.
+    Similarity edges are computed with pgvector (<=>) over `knowledge_nodes.vec`.
     """
     from ..models.models import KnowledgeNode  # avoid circular import at module import time
 
@@ -195,13 +199,13 @@ def rebuild_graph_edges(
         sql = """
             WITH q AS (SELECT vec FROM knowledge_nodes WHERE id = :id)
             SELECT kn2.id as node_id,
-                   1.0 - (kn2.vec <-> (SELECT vec FROM q)) as score
+                   1.0 - (kn2.vec <=> (SELECT vec FROM q)) as score
             FROM knowledge_nodes kn2
             WHERE kn2.dataset_id = :ds
               AND kn2.embedding_model = :em
               AND kn2.vec IS NOT NULL
               AND kn2.id != :id
-            ORDER BY kn2.vec <-> (SELECT vec FROM q)
+            ORDER BY kn2.vec <=> (SELECT vec FROM q)
             LIMIT :k
         """
         for nid in node_ids:
@@ -310,7 +314,7 @@ def parse_document(document_id: int, file_path: str, filename: str,
             data = f.read()
 
         text_str = _extract_text(filename, content_type, data)
-        parts = [text_str[i:i+800] for i in range(0, len(text_str), 800)]
+        parts = split_into_chunks(text_str, max_chars=1500, overlap_chars=150) or [text_str[:1500]]
 
         db.execute(
             text("DELETE FROM chunks WHERE document_id=:did"),
@@ -349,6 +353,58 @@ def parse_document(document_id: int, file_path: str, filename: str,
                 {"err": str(e), "id": job_id},
             )
         db.commit()
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task
+def reindex_dataset_nodes(dataset_id: int, job_id: int | None = None):
+    """Re-embed all KnowledgeNodes for a dataset using the current EMBEDDING_PROVIDER."""
+    from ..services.embedding import embed_texts
+    from ..services.embedding_provider import current_embedding_model
+    from ..utils.vector import vector_literal
+
+    db = SessionLocal()
+    try:
+        if job_id is not None:
+            db.execute(text("UPDATE jobs SET status='running' WHERE id=:id"), {"id": job_id})
+            db.commit()
+
+        nodes = (
+            db.execute(
+                text("SELECT id, title, context_text FROM knowledge_nodes WHERE dataset_id = :ds ORDER BY id"),
+                {"ds": dataset_id},
+            ).mappings().all()
+        )
+        if not nodes:
+            if job_id is not None:
+                db.execute(text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"), {"id": job_id})
+                db.commit()
+            return {"ok": True, "reindexed": 0}
+
+        model_name = current_embedding_model()
+        texts = [f"{n['title']}. {n['context_text']}".strip() for n in nodes]
+        vecs = embed_texts(texts, dim=1536)
+
+        for node, vec in zip(nodes, vecs):
+            db.execute(
+                text("UPDATE knowledge_nodes SET vec = CAST(:v AS vector), embedding_model = :m WHERE id = :id"),
+                {"v": vector_literal(vec), "m": model_name, "id": node["id"]},
+            )
+        db.commit()
+
+        if job_id is not None:
+            db.execute(text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"), {"id": job_id})
+            db.commit()
+        return {"ok": True, "reindexed": len(nodes), "model": model_name}
+    except Exception as e:
+        if job_id is not None:
+            db.execute(
+                text("UPDATE jobs SET status='failed', error=:err, finished_at=now() WHERE id=:id"),
+                {"err": str(e), "id": job_id},
+            )
+            db.commit()
         raise
     finally:
         db.close()

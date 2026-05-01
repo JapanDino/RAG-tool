@@ -3,12 +3,18 @@ import styles from "../styles/jobstatus.module.css";
 
 type Props = { jobId: number; apiBase?: string; intervalMs?: number };
 
+interface JobState {
+  status: "pending" | "running" | "done" | "failed" | string;
+  task_id?: string | null;
+  celery?: { state: string; ready: boolean };
+}
+
 export default function JobStatus({
   jobId,
   apiBase = "http://localhost:8000",
   intervalMs = 1500,
 }: Props) {
-  const [state, setState] = useState<any>(null);
+  const [state, setState] = useState<JobState | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {

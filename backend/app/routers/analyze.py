@@ -18,10 +18,10 @@ from ..schemas.schemas import (
     ExtractNodesIn,
     ExtractNodesOut,
 )
-from ..services.bloom_classifier import bloom_probabilities
 from ..services.chunking import split_into_chunks
 from ..services.embedding import embed_texts
 from ..services.bloom_multilabel import classify_bloom_multilabel
+from ..utils.bloom import LEVEL_ORDER
 from ..services.embedding_provider import current_embedding_model
 from ..services.node_extractor import get_node_extractor
 from ..utils.vector import vector_literal
@@ -48,11 +48,13 @@ def analyze(payload: AnalyzeIn):
     chunks = split_into_chunks(payload.text)
     results = []
     for idx, chunk in enumerate(chunks):
+        cls = classify_bloom_multilabel(chunk)
+        bloom = dict(zip(LEVEL_ORDER, cls["prob_vector"]))
         results.append(
             AnalyzeChunkOut(
                 idx=idx,
                 text=chunk,
-                bloom=bloom_probabilities(chunk),
+                bloom=bloom,
             )
         )
     edges = []
@@ -123,23 +125,36 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     min_prob = payload.min_prob or 0.2
     max_levels = payload.max_levels or 2
 
+    node_titles = [n["title"] for n in nodes]
+    existing_rows = (
+        db.query(KnowledgeNode)
+        .filter(
+            KnowledgeNode.dataset_id == payload.dataset_id,
+            KnowledgeNode.document_id == payload.document_id,
+            KnowledgeNode.title.in_(node_titles),
+        )
+        .all()
+    )
+    existing_map: dict[tuple[str, str], KnowledgeNode] = {
+        (kn.title, kn.context_text): kn for kn in existing_rows
+    }
+
     for node in nodes:
-        text_for_cls = node.get("context_snippet") or node["title"]
+        # Use a 800-char window around the node position for richer Bloom classification context.
+        source = node.get("source") or {}
+        char_start = source.get("char_start") if isinstance(source, dict) else None
+        char_end = source.get("char_end") if isinstance(source, dict) else None
+        if char_start is not None and char_end is not None:
+            win_start = max(0, char_start - 300)
+            win_end = min(len(payload.text), char_end + 300)
+            text_for_cls = payload.text[win_start:win_end]
+        else:
+            text_for_cls = node.get("context_snippet") or node["title"]
         cls = classify_bloom_multilabel(text_for_cls, min_prob=min_prob, max_levels=max_levels)
         rationale = cls.get("rationale")
         node_rationales.append(rationale)
 
-        # Avoid collapsing nodes from different documents or contexts into one record.
-        existing = (
-            db.query(KnowledgeNode)
-            .filter(
-                KnowledgeNode.dataset_id == payload.dataset_id,
-                KnowledgeNode.document_id == payload.document_id,
-                KnowledgeNode.title == node["title"],
-                KnowledgeNode.context_text == node["context_snippet"],
-            )
-            .first()
-        )
+        existing = existing_map.get((node["title"], node["context_snippet"]))
         if existing:
             existing.context_text = node["context_snippet"]
             existing.prob_vector = cls["prob_vector"]

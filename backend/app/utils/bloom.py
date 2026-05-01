@@ -10,18 +10,18 @@ LEVEL_ORDER = ["remember", "understand", "apply", "analyze", "evaluate", "create
 
 
 def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
-    # Placeholder deterministic annotator (без LLM): простая эвристика
-    score = min(1.0, 0.5 + len(chunk.strip())/2000.0)
+    result = classify_bloom_multilabel(chunk)
+    level_index = LEVEL_ORDER.index(level) if level in LEVEL_ORDER else 0
+    score = float(result["prob_vector"][level_index])
     label = {
-        "remember":"Факты",
-        "understand":"Понимание",
-        "apply":"Применение",
-        "analyze":"Анализ",
-        "evaluate":"Оценивание",
-        "create":"Создание"
+        "remember": "Факты",
+        "understand": "Понимание",
+        "apply": "Применение",
+        "analyze": "Анализ",
+        "evaluate": "Оценивание",
+        "create": "Создание",
     }.get(level, "N/A")
-    rationale = f"Эвристика: длина текста={len(chunk)}; уровень={level}"
-    return dict(level=level, label=label, rationale=rationale, score=round(score,3))
+    return dict(level=level, label=label, rationale=result["rationale"], score=round(score, 3))
 
 
 def _default_verbs_path() -> Path:

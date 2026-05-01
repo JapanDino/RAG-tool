@@ -1,49 +1,16 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import cytoscape, { Core, ElementDefinition } from "cytoscape";
 import styles from "../styles/graph.module.css";
+import {
+  BloomLevel,
+  BLOOM_LEVELS,
+  LEVEL_LABELS,
+  LEVEL_COLORS,
+  LEVEL_SHAPES,
+  AnalyzeNode,
+} from "../lib/bloom-constants";
 
-type BloomLevel = "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
-
-const BLOOM_LEVELS: BloomLevel[] = ["remember", "understand", "apply", "analyze", "evaluate", "create"];
-
-const LEVEL_LABELS: Record<BloomLevel, string> = {
-  remember:   "Знать",
-  understand: "Понимать",
-  apply:      "Применять",
-  analyze:    "Анализировать",
-  evaluate:   "Оценивать",
-  create:     "Создавать",
-};
-
-// Vivid palette matching the dark design system
-const LEVEL_COLORS: Record<BloomLevel, string> = {
-  remember:   "#60a5fa",
-  understand: "#34d399",
-  apply:      "#fb923c",
-  analyze:    "#c084fc",
-  evaluate:   "#f87171",
-  create:     "#2dd4bf",
-};
-
-const LEVEL_SHAPES: Record<BloomLevel, cytoscape.Css.NodeShape> = {
-  remember:   "ellipse",
-  understand: "round-rectangle",
-  apply:      "rectangle",
-  analyze:    "diamond",
-  evaluate:   "hexagon",
-  create:     "triangle",
-};
-
-export type AnalyzeNode = {
-  id: number;
-  title: string;
-  context_text: string;
-  prob_vector: number[];
-  top_levels: BloomLevel[];
-  frequency?: number | null;
-  rationale?: string | null;
-};
-
+export type { AnalyzeNode };
 export type GraphEdge = { from_id: number; to_id: number; weight: number };
 
 type Props = {
@@ -68,11 +35,15 @@ function computeSize(freq: number | null | undefined) {
 export default function GraphView({ nodes, edges, filters, threshold, onHover, searchQuery }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
+  const filteredNodesRef = useRef<AnalyzeNode[]>([]);
+  const onHoverRef = useRef(onHover);
 
   const filteredNodes = useMemo(
     () => nodes.filter((n) => (n.top_levels || []).some((lvl) => filters[lvl])),
     [nodes, filters]
   );
+  filteredNodesRef.current = filteredNodes;
+  onHoverRef.current = onHover;
 
   const elements: ElementDefinition[] = useMemo(() => {
     const nodeIds = new Set(filteredNodes.map((n) => n.id));
@@ -83,12 +54,17 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
       const primary = sorted[0]?.lvl ?? "remember";
       const secondary = sorted[1];
       const hasSecondary = Boolean(secondary && secondary.prob >= threshold);
+      const primaryPct = hasSecondary
+        ? Math.round((sorted[0].prob / (sorted[0].prob + secondary!.prob)) * 100)
+        : 100;
       els.push({
         data: {
           id: String(n.id),
           label: n.title,
           primary,
           secondary: hasSecondary ? secondary!.lvl : "",
+          primaryPct,
+          secondaryPct: 100 - primaryPct,
           size: computeSize(n.frequency),
         },
       });
@@ -130,17 +106,28 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
               "text-margin-y": 7,
               "text-outline-width": 2,
               "text-outline-color": "#161b27",
+              // background-color shows through when pie sections don't fill 100%
               "background-color": (ele: cytoscape.NodeSingular) =>
                 LEVEL_COLORS[ele.data("primary") as BloomLevel],
               shape: (ele: cytoscape.NodeSingular) => LEVEL_SHAPES[ele.data("primary") as BloomLevel],
               width: "data(size)",
               height: "data(size)",
-              "border-width": (ele: cytoscape.NodeSingular) => (ele.data("secondary") ? 3 : 0),
-              "border-color": (ele: cytoscape.NodeSingular) =>
+              // Pie-chart fill: primary sector + optional secondary sector
+              "pie-size": "100%",
+              "pie-1-background-color": (ele: cytoscape.NodeSingular) =>
+                LEVEL_COLORS[ele.data("primary") as BloomLevel] || "#60a5fa",
+              "pie-1-background-size": (ele: cytoscape.NodeSingular) =>
+                String(ele.data("primaryPct") ?? 100),
+              "pie-1-background-opacity": 1,
+              "pie-2-background-color": (ele: cytoscape.NodeSingular) =>
                 ele.data("secondary")
                   ? LEVEL_COLORS[ele.data("secondary") as BloomLevel]
                   : "transparent",
-              "border-opacity": 0.9,
+              "pie-2-background-size": (ele: cytoscape.NodeSingular) =>
+                String(ele.data("secondaryPct") ?? 0),
+              "pie-2-background-opacity": (ele: cytoscape.NodeSingular) =>
+                ele.data("secondary") ? 1 : 0,
+              "border-width": 0,
             },
           },
           {
@@ -183,14 +170,14 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
 
       cyRef.current.on("mouseover", "node", (evt: cytoscape.EventObject) => {
         const id = Number(evt.target.data("id"));
-        const node = filteredNodes.find((n) => n.id === id) || null;
-        onHover?.(node);
+        const node = filteredNodesRef.current.find((n) => n.id === id) || null;
+        onHoverRef.current?.(node);
       });
-      cyRef.current.on("mouseout", "node", () => onHover?.(null));
+      cyRef.current.on("mouseout", "node", () => onHoverRef.current?.(null));
       cyRef.current.on("tap", "node", (evt: cytoscape.EventObject) => {
         const id = Number(evt.target.data("id"));
-        const node = filteredNodes.find((n) => n.id === id) || null;
-        onHover?.(node);
+        const node = filteredNodesRef.current.find((n) => n.id === id) || null;
+        onHoverRef.current?.(node);
       });
     } else {
       const cy = cyRef.current;
@@ -198,7 +185,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
       cy.add(elements);
       cy.layout({ name: "cose", animate: true, fit: true }).run();
     }
-  }, [elements, filteredNodes, onHover]);
+  }, [elements]);
 
   // Highlight nodes matching searchQuery
   useEffect(() => {
@@ -223,6 +210,10 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
     a.click();
   };
 
+  const zoomIn = () => cyRef.current?.zoom(cyRef.current.zoom() * 1.25);
+  const zoomOut = () => cyRef.current?.zoom(cyRef.current.zoom() * 0.8);
+  const zoomFit = () => cyRef.current?.fit(undefined, 20);
+
   return (
     <div className={styles.wrap}>
       <div className={styles.toolbar}>
@@ -236,6 +227,11 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, s
         <span className={styles.summary}>
           {filteredNodes.length} узлов · {edges.length} рёбер
         </span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          <button className={styles.btn} onClick={zoomIn} title="Увеличить">+</button>
+          <button className={styles.btn} onClick={zoomOut} title="Уменьшить">−</button>
+          <button className={styles.btn} onClick={zoomFit} title="По размеру">⊡</button>
+        </div>
       </div>
 
       <div ref={containerRef} className={styles.canvas} />

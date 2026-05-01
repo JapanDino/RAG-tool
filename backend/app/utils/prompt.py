@@ -40,6 +40,7 @@ def build_bloom_prompt(chunk: str, level: str, rubric: str | None = None) -> str
 
 
 def build_bloom_multilabel_prompt(text: str) -> str:
+    text = text[:2000]
     return (
         dedent(
             f"""

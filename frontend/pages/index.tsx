@@ -1,65 +1,19 @@
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import JobStatus from "../components/JobStatus";
+import ErrorBoundary from "../components/ErrorBoundary";
 import styles from "../styles/home.module.css";
 
-type BloomLevel = "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
-
-const BLOOM_LEVELS: BloomLevel[] = [
-  "remember",
-  "understand",
-  "apply",
-  "analyze",
-  "evaluate",
-  "create",
-];
-
-const LEVEL_LABELS: Record<BloomLevel, string> = {
-  remember: "Знать",
-  understand: "Понимать",
-  apply: "Применять",
-  analyze: "Анализировать",
-  evaluate: "Оценивать",
-  create: "Создавать",
-};
-
-// Vivid colors for dark theme
-const LEVEL_COLORS: Record<BloomLevel, string> = {
-  remember:   "#60a5fa",
-  understand: "#34d399",
-  apply:      "#fb923c",
-  analyze:    "#c084fc",
-  evaluate:   "#f87171",
-  create:     "#2dd4bf",
-};
-
-const LEVEL_BG: Record<BloomLevel, string> = {
-  remember:   "rgba(96,165,250,0.14)",
-  understand: "rgba(52,211,153,0.14)",
-  apply:      "rgba(251,146,60,0.14)",
-  analyze:    "rgba(192,132,252,0.14)",
-  evaluate:   "rgba(248,113,113,0.14)",
-  create:     "rgba(45,212,191,0.14)",
-};
-
-const LEVEL_BORDER: Record<BloomLevel, string> = {
-  remember:   "rgba(96,165,250,0.28)",
-  understand: "rgba(52,211,153,0.28)",
-  apply:      "rgba(251,146,60,0.28)",
-  analyze:    "rgba(192,132,252,0.28)",
-  evaluate:   "rgba(248,113,113,0.28)",
-  create:     "rgba(45,212,191,0.28)",
-};
-
-type AnalyzeNode = {
-  id: number;
-  title: string;
-  context_text: string;
-  prob_vector: number[];
-  top_levels: BloomLevel[];
-  frequency?: number | null;
-  rationale?: string | null;
-};
+const GraphView = dynamic(() => import("../components/GraphView"), { ssr: false });
+import {
+  BloomLevel,
+  BLOOM_LEVELS,
+  LEVEL_LABELS,
+  LEVEL_COLORS,
+  LEVEL_BG,
+  LEVEL_BORDER,
+  AnalyzeNode,
+} from "../lib/bloom-constants";
 
 type SearchResult = {
   chunk_id: number;
@@ -396,6 +350,8 @@ export default function Home() {
   const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const [analyzeStatusMsg, setAnalyzeStatusMsg] = useState("");
   const analyzeProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const analyzeAbortRef = useRef<AbortController | null>(null);
+  const loadGraphAbortRef = useRef<AbortController | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [maxNodes, setMaxNodes] = useState(30);
   const [maxNodesAuto, setMaxNodesAuto] = useState(false);
@@ -504,10 +460,6 @@ export default function Home() {
   const [textHistory, setTextHistory] = useState<string[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  const GraphView = useMemo(
-    () => dynamic(() => import("../components/GraphView"), { ssr: false }),
-    []
-  );
 
   // Restore persisted values on mount
   useEffect(() => {
@@ -593,7 +545,7 @@ export default function Home() {
     };
   }, [apiBase]);
 
-  const apiFetchJson = async (path: string, init?: RequestInit): Promise<any | null> => {
+  const apiFetchJson = useCallback(async (path: string, init?: RequestInit): Promise<any | null> => {
     try {
       setError(null);
       const r = await fetch(`${apiBase}${path}`, init);
@@ -621,7 +573,7 @@ export default function Home() {
       setError(msg);
       return null;
     }
-  };
+  }, [apiBase]);
 
   const createDataset = async () => {
     if (!name.trim()) {
@@ -682,6 +634,10 @@ export default function Home() {
   const analyzeText = async () => {
     if (!textInput.trim()) return;
 
+    analyzeAbortRef.current?.abort();
+    analyzeAbortRef.current = new AbortController();
+    const signal = analyzeAbortRef.current.signal;
+
     // Auto-create dataset if none is selected yet
     let datasetId = ds;
     if (!datasetId) {
@@ -724,6 +680,7 @@ export default function Home() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (analyzeProgressRef.current) { clearInterval(analyzeProgressRef.current); analyzeProgressRef.current = null; }
@@ -876,21 +833,22 @@ export default function Home() {
 
   const batchUploadAll = async () => {
     if (!ds) { addToast("Выбери dataset перед загрузкой", "error"); return; }
-    for (let i = 0; i < batchFiles.length; i++) {
-      const item = batchFiles[i];
-      if (item.status === "done") continue;
-      setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: "uploading" } : x));
+    const pending = batchFiles.map((item, i) => ({ item, i })).filter(({ item }) => item.status !== "done");
+    pending.forEach(({ i }) =>
+      setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: "uploading" } : x))
+    );
+    const uploadOne = async ({ item, i }: { item: typeof batchFiles[0]; i: number }) => {
       const fd = new FormData();
       fd.append("file", item.file);
       try {
         const r = await fetch(`${apiBase}/datasets/${ds}/documents`, { method: "POST", body: fd });
-        const ok = r.ok;
-        setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: ok ? "done" : "error" } : x));
-        if (ok) { const j = await r.json(); if (j.job_id) setLastJob(j.job_id); }
+        setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: r.ok ? "done" : "error" } : x));
+        if (r.ok) { const j = await r.json(); if (j.job_id) setLastJob(j.job_id); }
       } catch {
         setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: "error" } : x));
       }
-    }
+    };
+    await Promise.allSettled(pending.map(uploadOne));
     addToast("✓ Batch загрузка завершена", "success");
   };
 
@@ -924,6 +882,10 @@ export default function Home() {
 
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
+    result = result.filter(n => {
+      const primaryLevel = n.top_levels?.[0] as BloomLevel | undefined;
+      return primaryLevel ? filters[primaryLevel] : true;
+    });
     if (nodeSearch.trim()) {
       const q = nodeSearch.toLowerCase();
       result = result.filter(n =>
@@ -938,10 +900,12 @@ export default function Home() {
       result.sort((a, b) => BLOOM_LEVELS.indexOf(a.top_levels[0]) - BLOOM_LEVELS.indexOf(b.top_levels[0]));
     }
     return result;
-  }, [nodes, nodeSearch, nodeSort]);
+  }, [nodes, nodeSearch, nodeSort, filters]);
 
   const loadGraph = async () => {
     if (!ds) return;
+    loadGraphAbortRef.current?.abort();
+    loadGraphAbortRef.current = new AbortController();
     const params = new URLSearchParams({
       dataset_id: String(ds),
       source: "db",
@@ -950,7 +914,7 @@ export default function Home() {
       include_cooccurrence: graphIncludeCo ? "true" : "false",
       limit_nodes: String(graphLimitNodes),
     });
-    const json = await apiFetchJson(`/graph?${params.toString()}`);
+    const json = await apiFetchJson(`/graph?${params.toString()}`, { signal: loadGraphAbortRef.current.signal });
     if (!json) return;
     setGraphNodesData(json.nodes || []);
     setGraphEdgesData(json.edges || []);
@@ -2117,34 +2081,55 @@ const analysisFlowSteps = [
               </div>
 
               {/* Graph canvas */}
-              <GraphView
-                nodes={graphNodesData}
-                edges={graphEdgesData}
-                filters={filters}
-                threshold={threshold}
-                searchQuery={graphSearch}
-                onHover={(n: AnalyzeNode | null) => {
-                  setHoveredNode(n);
-                  if (n) setSelectedNode(n);
-                }}
-              />
+              <ErrorBoundary>
+                <GraphView
+                  nodes={graphNodesData}
+                  edges={graphEdgesData}
+                  filters={filters}
+                  threshold={threshold}
+                  searchQuery={graphSearch}
+                  onHover={(n: AnalyzeNode | null) => {
+                    setHoveredNode(n);
+                    if (n) setSelectedNode(n);
+                  }}
+                />
+              </ErrorBoundary>
 
-              {/* Node detail card */}
+              {/* Node detail card — fixed overlay, sticky on click */}
               {(selectedNode || hoveredNode) && (() => {
-                const n = (hoveredNode || selectedNode)!;
+                const n = (selectedNode || hoveredNode)!;
                 const sorted = getSortedLevels(n.prob_vector);
                 const confidence = getConfidenceMeta(n);
                 return (
-                  <div className={styles.cardSm} style={{ marginTop: 12 }}>
+                  <div
+                    className={styles.cardSm}
+                    style={{
+                      position: "fixed",
+                      bottom: 24,
+                      right: 24,
+                      width: 340,
+                      maxWidth: "calc(100vw - 48px)",
+                      zIndex: 200,
+                      boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                    }}
+                  >
                     <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
-                      <div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
                         <div className={styles.cardTitle}>{n.title}</div>
                         {n.rationale && (
                           <div className={styles.muted} style={{ marginTop: 4 }}>{n.rationale}</div>
                         )}
                       </div>
-                      <div style={{ marginLeft: "auto", display: "flex", gap: 5, flexWrap: "wrap", flexShrink: 0 }}>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", flexShrink: 0, alignItems: "center" }}>
                         {n.top_levels.map((lvl) => <BloomBadge key={lvl} level={lvl} />)}
+                        <button
+                          onClick={() => { setSelectedNode(null); setHoveredNode(null); }}
+                          style={{
+                            marginLeft: 4, background: "none", border: "none", cursor: "pointer",
+                            color: "var(--text-muted)", fontSize: 16, lineHeight: 1, padding: "0 2px",
+                          }}
+                          title="Закрыть"
+                        >×</button>
                       </div>
                     </div>
                     <div className={styles.muted}>{n.context_text}</div>
