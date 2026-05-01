@@ -215,6 +215,15 @@ function IconSparkle() {
   );
 }
 
+function IconCanvas() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+      <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+    </svg>
+  );
+}
+
 // ── BloomBadge component ──────────────────────────────────────
 
 function BloomBadge({ level }: { level: BloomLevel }) {
@@ -340,7 +349,7 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [lastJob, setLastJob] = useState<number | undefined>();
-  const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling" | "search" | "dashboard">("analysis");
+  const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling" | "search" | "dashboard" | "canvas">("analysis");
   const [textInput, setTextInput] = useState("");
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [analyzeFileName, setAnalyzeFileName] = useState<string | null>(null);
@@ -459,6 +468,17 @@ export default function Home() {
   // ── Text history ─────────────────────────────────────────────
   const [textHistory, setTextHistory] = useState<string[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+
+  // ── Canvas LMS ───────────────────────────────────────────────
+  type CanvasCourse = { id: number; name: string; course_code: string | null; workflow_state: string };
+  const [canvasCourses, setCanvasCourses] = useState<CanvasCourse[]>([]);
+  const [canvasCoursesLoading, setCanvasCoursesLoading] = useState(false);
+  const [canvasSelectedCourse, setCanvasSelectedCourse] = useState<number | null>(null);
+  const [canvasContentTypes, setCanvasContentTypes] = useState<string[]>(["syllabus", "pages", "assignments", "quizzes", "discussions"]);
+  const [canvasMaxNodes, setCanvasMaxNodes] = useState(30);
+  const [canvasIngesting, setCanvasIngesting] = useState(false);
+  const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
+  const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
 
 
   // Restore persisted values on mount
@@ -895,6 +915,35 @@ export default function Home() {
     navigator.clipboard.writeText(text).then(() => addToast("Скопировано в буфер", "success"));
   };
 
+  const loadCanvasCourses = useCallback(async () => {
+    setCanvasCoursesLoading(true);
+    setCanvasCourses([]);
+    const json = await apiFetchJson("/canvas/courses");
+    setCanvasCoursesLoading(false);
+    if (!json) return;
+    setCanvasCourses(Array.isArray(json) ? json : []);
+  }, [apiFetchJson]);
+
+  const ingestCanvasCourse = useCallback(async () => {
+    if (!canvasSelectedCourse || !ds) return;
+    setCanvasIngesting(true);
+    setCanvasIngestResult(null);
+    const json = await apiFetchJson("/canvas/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        course_id: canvasSelectedCourse,
+        dataset_id: ds,
+        content_types: canvasContentTypes,
+        max_nodes_per_doc: canvasMaxNodes,
+      }),
+    });
+    setCanvasIngesting(false);
+    if (!json) return;
+    setCanvasIngestResult(json);
+    addToast(`Canvas: создано ${json.nodes_created} узлов, обновлено ${json.nodes_updated}`, "success");
+  }, [apiFetchJson, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes]);
+
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
     result = result.filter((n) => {
@@ -1246,6 +1295,15 @@ const analysisFlowSteps = [
               </span>
               <span className={styles.navLabel}>Поиск</span>
               <span className={styles.navHint}>RAG</span>
+            </button>
+
+            <button
+              className={[styles.navBtn, activeTab === "canvas" ? styles.navBtnActive : ""].join(" ")}
+              onClick={() => { setActiveTab("canvas"); if (!canvasCourses.length) loadCanvasCourses(); }}
+            >
+              <span className={styles.navIcon}><IconCanvas /></span>
+              <span className={styles.navLabel}>Canvas</span>
+              <span className={styles.navHint}>LMS</span>
             </button>
           </div>
         </nav>
@@ -2480,6 +2538,182 @@ const analysisFlowSteps = [
                   )}
                 </>
               )}
+            </div>
+          )}
+
+          {/* ── Canvas LMS tab ──────────────────────── */}
+          {activeTab === "canvas" && (
+            <div className={styles.card}>
+
+              <SectionHero
+                eyebrow="Интеграция"
+                title="Canvas LMS"
+                description="Загрузи содержимое курса Canvas в датасет Bloom RAG Studio. Страницы, задания, тесты и обсуждения будут автоматически размечены по уровням Блума."
+                stats={[
+                  { label: "Курсов", value: canvasCourses.length || "—", tone: canvasCourses.length ? "accent" : "neutral" },
+                  { label: "Датасет", value: ds ? `#${ds}` : "Не выбран", tone: ds ? "success" : "warning" },
+                  { label: "Выбран курс", value: canvasSelectedCourse
+                      ? (canvasCourses.find(c => c.id === canvasSelectedCourse)?.name?.slice(0, 22) ?? `#${canvasSelectedCourse}`)
+                      : "—", tone: canvasSelectedCourse ? "info" : "neutral" },
+                ]}
+                actions={
+                  <button
+                    className={[styles.btn, styles.btnGhost].join(" ")}
+                    onClick={loadCanvasCourses}
+                    disabled={canvasCoursesLoading}
+                    type="button"
+                  >
+                    {canvasCoursesLoading ? <span className={styles.spinner} /> : <IconRefresh />}
+                    Обновить список
+                  </button>
+                }
+              />
+
+              <div className={styles.grid}>
+                {/* Course search + list */}
+                <div>
+                  <label className={styles.fieldLabel}>
+                    Поиск курса
+                    <input
+                      className={styles.input}
+                      placeholder="Введи название курса..."
+                      value={canvasCourseSearch}
+                      onChange={e => setCanvasCourseSearch(e.target.value)}
+                    />
+                  </label>
+
+                  {canvasCoursesLoading && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 0", color: "var(--text-muted)", fontSize: 13 }}>
+                      <span className={styles.spinner} /> Загружаем курсы из Canvas...
+                    </div>
+                  )}
+
+                  {!canvasCoursesLoading && canvasCourses.length === 0 && (
+                    <div className={styles.emptyState} style={{ padding: "24px 0" }}>
+                      <span className={styles.emptyIcon}><IconCanvas /></span>
+                      <div className={styles.emptyTitle}>Курсы не загружены</div>
+                      <div className={styles.emptyText}>Нажми «Обновить список» или проверь CANVAS_TOKEN в backend/.env</div>
+                    </div>
+                  )}
+
+                  {canvasCourses.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 340, overflowY: "auto", marginTop: 8 }}>
+                      {canvasCourses
+                        .filter(c => !canvasCourseSearch || c.name.toLowerCase().includes(canvasCourseSearch.toLowerCase()) || (c.course_code || "").toLowerCase().includes(canvasCourseSearch.toLowerCase()))
+                        .map(course => (
+                          <div
+                            key={course.id}
+                            onClick={() => setCanvasSelectedCourse(course.id)}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10,
+                              padding: "9px 12px", borderRadius: 8, cursor: "pointer",
+                              border: `1.5px solid ${canvasSelectedCourse === course.id ? "var(--text-accent)" : "var(--border-1)"}`,
+                              background: canvasSelectedCourse === course.id ? "rgba(99,102,241,0.08)" : "var(--bg-card)",
+                              transition: "all 0.12s",
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {course.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
+                                {course.course_code || ""} · id: {course.id}
+                              </div>
+                            </div>
+                            {canvasSelectedCourse === course.id && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12"/>
+                              </svg>
+                            )}
+                          </div>
+                        ))
+                      }
+                    </div>
+                  )}
+                </div>
+
+                {/* Ingest settings */}
+                <div>
+                  <label className={styles.fieldLabel}>
+                    Типы контента
+                  </label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                    {["syllabus", "pages", "assignments", "quizzes", "discussions"].map(ct => (
+                      <label key={ct} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "5px 10px", borderRadius: 6, border: `1px solid ${canvasContentTypes.includes(ct) ? "var(--text-accent)" : "var(--border-1)"}`, background: canvasContentTypes.includes(ct) ? "rgba(99,102,241,0.08)" : "var(--bg-card)", transition: "all 0.12s" }}>
+                        <input
+                          type="checkbox"
+                          checked={canvasContentTypes.includes(ct)}
+                          onChange={e => setCanvasContentTypes(prev => e.target.checked ? [...prev, ct] : prev.filter(x => x !== ct))}
+                          style={{ accentColor: "var(--text-accent)" }}
+                        />
+                        {ct === "syllabus" ? "Силлабус" : ct === "pages" ? "Страницы" : ct === "assignments" ? "Задания" : ct === "quizzes" ? "Тесты" : "Обсуждения"}
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className={styles.paramField} style={{ marginBottom: 16 }}>
+                    <span>Макс. узлов на документ</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input className={styles.paramSlider} type="range" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ flex: 1 }} />
+                      <input className={styles.paramInput} type="number" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ width: 56 }} />
+                    </div>
+                  </div>
+
+                  {!ds && (
+                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.3)", fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>
+                      ⚠️ Выбери датасет в боковой панели, прежде чем запускать ингест
+                    </div>
+                  )}
+
+                  <button
+                    className={[styles.btn, styles.btnPrimaryLg].join(" ")}
+                    onClick={ingestCanvasCourse}
+                    disabled={!canvasSelectedCourse || !ds || canvasIngesting || canvasContentTypes.length === 0}
+                    style={{ width: "100%" }}
+                    type="button"
+                  >
+                    {canvasIngesting
+                      ? <><span className={styles.spinner} /> Загружаем курс...</>
+                      : <><IconCanvas /> Запустить анализ курса</>
+                    }
+                  </button>
+
+                  {/* Result */}
+                  {canvasIngestResult && (
+                    <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 10, background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.25)" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--success)", marginBottom: 8 }}>Готово!</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                        {[
+                          { label: "Документов", value: canvasIngestResult.documents_ingested },
+                          { label: "Узлов создано", value: canvasIngestResult.nodes_created },
+                          { label: "Обновлено", value: canvasIngestResult.nodes_updated },
+                        ].map(s => (
+                          <div key={s.label} style={{ textAlign: "center", padding: "8px", borderRadius: 8, background: "var(--bg-card)" }}>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: "var(--text-primary)" }}>{s.value}</div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{s.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {canvasIngestResult.skipped.length > 0 && (
+                        <details style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                          <summary style={{ cursor: "pointer" }}>Пропущено: {canvasIngestResult.skipped.length}</summary>
+                          <ul style={{ margin: "6px 0 0 16px", lineHeight: 1.6 }}>
+                            {canvasIngestResult.skipped.map((s, i) => <li key={i}>{s}</li>)}
+                          </ul>
+                        </details>
+                      )}
+                      <button
+                        className={[styles.btn, styles.btnPrimary].join(" ")}
+                        onClick={() => setActiveTab("graph")}
+                        style={{ marginTop: 10, width: "100%" }}
+                        type="button"
+                      >
+                        <IconGraph /> Открыть граф знаний
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
