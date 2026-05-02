@@ -24,6 +24,7 @@ type SearchResult = {
 };
 
 type Toast = { id: number; msg: string; type: "success" | "error" | "info" };
+type CanvasAlert = { title: string; message: string };
 
 type GraphEdge = {
   from_id: number;
@@ -478,9 +479,10 @@ export default function Home() {
   const [canvasMaxNodes, setCanvasMaxNodes] = useState(30);
   const [canvasMaxFiles, setCanvasMaxFiles] = useState(20);
   const [canvasIngesting, setCanvasIngesting] = useState(false);
-  const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
-  const [canvasProgress, setCanvasProgress] = useState<{ label: string; stage: string; nodes_created: number; nodes_updated: number } | null>(null);
-  const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
+const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
+const [canvasProgress, setCanvasProgress] = useState<{ label: string; stage: string; nodes_created: number; nodes_updated: number } | null>(null);
+const [canvasAlert, setCanvasAlert] = useState<CanvasAlert | null>(null);
+const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
 
 
   // Restore persisted values on mount
@@ -548,7 +550,8 @@ export default function Home() {
   const checkApiStatus = useCallback(async () => {
     try {
       const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 3000);
+      // 8 s — Docker Desktop + WSL2 relay can be slow on first request
+      const t = setTimeout(() => controller.abort(), 8000);
       const r = await fetch(`${apiBase}/health`, { signal: controller.signal });
       clearTimeout(t);
       setApiStatus(r.ok ? "ok" : "down");
@@ -922,16 +925,26 @@ export default function Home() {
   const loadCanvasCourses = useCallback(async () => {
     setCanvasCoursesLoading(true);
     setCanvasCourses([]);
+    setCanvasAlert(null);
     const json = await apiFetchJson("/canvas/courses");
     setCanvasCoursesLoading(false);
-    if (!json) return;
+    if (!json) {
+      setCanvasAlert({
+        title: "Не удалось загрузить курсы",
+        message: apiStatus === "down"
+          ? "Backend недоступен — проверь, что Docker запущен и backend-контейнер поднят."
+          : "Ошибка запроса к Canvas. Возможно, CANVAS_TOKEN неверный, URL недоступен или нет курсов. Детали — во вкладке «Анализ» (красная строка ошибки).",
+      });
+      return;
+    }
     setCanvasCourses(Array.isArray(json) ? json : []);
-  }, [apiFetchJson]);
+  }, [apiFetchJson, apiStatus]);
 
   const ingestCanvasCourse = useCallback(async () => {
     if (!canvasSelectedCourse || !ds) return;
     setCanvasIngesting(true);
     setCanvasIngestResult(null);
+    setCanvasAlert(null);
     setCanvasProgress({ label: "Подключение к Canvas…", stage: "start", nodes_created: 0, nodes_updated: 0 });
 
     try {
@@ -948,7 +961,18 @@ export default function Home() {
       });
 
       if (!response.ok || !response.body) {
-        addToast("Ошибка при запуске анализа курса", "error");
+        // HTTP error ≠ backend down — read actual message from server
+        let errDetail = `HTTP ${response.status}`;
+        try {
+          const body = await response.text();
+          const j = JSON.parse(body);
+          errDetail = j.detail || j.message || errDetail;
+        } catch { /* ignore parse errors */ }
+        setCanvasAlert({
+          title: "Анализ не запущен",
+          message: `Ошибка: ${errDetail}. Проверь, что датасет выбран и Canvas настроен.`,
+        });
+        addToast(`Canvas: ${errDetail}`, "error");
         setCanvasIngesting(false);
         setCanvasProgress(null);
         return;
@@ -976,16 +1000,30 @@ export default function Home() {
                 setCanvasProgress({ label: ev.label, stage: "processing", nodes_created: ev.nodes_created ?? 0, nodes_updated: ev.nodes_updated ?? 0 });
               } else if (ev.type === "done") {
                 setCanvasIngestResult(ev.result);
+                setCanvasAlert(null);
                 addToast(`Canvas: создано ${ev.result.nodes_created} узлов, обновлено ${ev.result.nodes_updated}`, "success");
               } else if (ev.type === "error") {
+                setCanvasAlert({
+                  title: "Анализ курса остановлен",
+                  message: String(ev.message || "Во время обработки Canvas-курса произошла ошибка. Проверь backend и повтори запуск."),
+                });
                 addToast(`Ошибка Canvas: ${ev.message}`, "error");
               }
             } catch { /* skip malformed SSE line */ }
           }
         }
       }
-    } catch (err) {
-      addToast("Ошибка подключения к Canvas API", "error");
+    } catch (err: unknown) {
+      // Only a true network error (connection refused, timeout) means backend is down
+      const isNetwork = err instanceof TypeError && String(err.message).toLowerCase().includes("fetch");
+      if (isNetwork) setApiStatus("down");
+      setCanvasAlert({
+        title: isNetwork ? "Анализ курса прерван" : "Ошибка выполнения",
+        message: isNetwork
+          ? "Backend недоступен — проверь, что Docker запущен и backend-контейнер поднят, затем нажми «Проверить backend» или запусти анализ еще раз."
+          : `Ошибка: ${String(err instanceof Error ? err.message : err)}`,
+      });
+      addToast(isNetwork ? "Нет связи с backend" : `Canvas: ${String(err instanceof Error ? err.message : err)}`, "error");
     } finally {
       setCanvasIngesting(false);
       setCanvasProgress(null);
@@ -1018,6 +1056,24 @@ export default function Home() {
     setHoveredNode(null);
     setSelectedNode(null);
   }, [ds, filters, graphNodesData, graphEdgesData]);
+
+  useEffect(() => {
+    if (activeTab !== "canvas") return;
+    if (apiStatus === "down") {
+      setCanvasAlert((prev) => prev ?? {
+        title: "Canvas сейчас недоступен",
+        message: "Backend недоступен — проверь, что Docker запущен и backend-контейнер поднят. После восстановления backend можно снова загрузить курсы или запустить анализ курса.",
+      });
+      return;
+    }
+    if (apiStatus === "ok") {
+      setCanvasAlert((prev) => {
+        if (!prev) return prev;
+        if (!prev.message.includes("Backend недоступен")) return prev;
+        return null;
+      });
+    }
+  }, [activeTab, apiStatus]);
 
   const loadGraph = async () => {
     if (!ds) return;
@@ -2682,6 +2738,33 @@ const analysisFlowSteps = [
 
                 {/* Ingest settings */}
                 <div>
+                  {canvasAlert && (
+                    <div className={styles.canvasAlert} role="alert" aria-live="assertive">
+                      <div className={styles.canvasAlertTitle}>
+                        <IconAlert />
+                        {canvasAlert.title}
+                      </div>
+                      <div className={styles.canvasAlertText}>{canvasAlert.message}</div>
+                      <div className={styles.canvasAlertActions}>
+                        <button
+                          className={[styles.btn, styles.btnWarn].join(" ")}
+                          onClick={() => { setApiStatus("unknown"); checkApiStatus(); }}
+                          type="button"
+                        >
+                          <IconRefresh />
+                          Проверить backend
+                        </button>
+                        <button
+                          className={[styles.btn, styles.btnGhost].join(" ")}
+                          onClick={() => setCanvasAlert(null)}
+                          type="button"
+                        >
+                          Скрыть
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <label className={styles.fieldLabel}>
                     Типы контента
                   </label>
