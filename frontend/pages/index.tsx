@@ -479,6 +479,7 @@ export default function Home() {
   const [canvasMaxFiles, setCanvasMaxFiles] = useState(20);
   const [canvasIngesting, setCanvasIngesting] = useState(false);
   const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
+  const [canvasProgress, setCanvasProgress] = useState<{ label: string; stage: string; nodes_created: number; nodes_updated: number } | null>(null);
   const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
 
 
@@ -544,27 +545,29 @@ export default function Home() {
     localStorage.setItem("bloom_api", apiBase);
   }, [apiBase]);
 
+  const checkApiStatus = useCallback(async () => {
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 3000);
+      const r = await fetch(`${apiBase}/health`, { signal: controller.signal });
+      clearTimeout(t);
+      setApiStatus(r.ok ? "ok" : "down");
+    } catch {
+      setApiStatus("down");
+    }
+  }, [apiBase]);
+
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
-      try {
-        const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 2000);
-        const r = await fetch(`${apiBase}/health`, { signal: controller.signal });
-        clearTimeout(t);
-        if (!cancelled) setApiStatus(r.ok ? "ok" : "down");
-      } catch {
-        if (!cancelled) setApiStatus("down");
-      }
+      if (cancelled) return;
+      await checkApiStatus();
     };
     setApiStatus("unknown");
     check();
-    const it = setInterval(check, 6000);
-    return () => {
-      cancelled = true;
-      clearInterval(it);
-    };
-  }, [apiBase]);
+    const it = setInterval(check, 8000);
+    return () => { cancelled = true; clearInterval(it); };
+  }, [checkApiStatus]);
 
   const apiFetchJson = useCallback(async (path: string, init?: RequestInit): Promise<any | null> => {
     try {
@@ -929,22 +932,65 @@ export default function Home() {
     if (!canvasSelectedCourse || !ds) return;
     setCanvasIngesting(true);
     setCanvasIngestResult(null);
-    const json = await apiFetchJson("/canvas/ingest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        course_id: canvasSelectedCourse,
-        dataset_id: ds,
-        content_types: canvasContentTypes,
-        max_nodes_per_doc: canvasMaxNodes,
-        max_files: canvasMaxFiles,
-      }),
-    });
-    setCanvasIngesting(false);
-    if (!json) return;
-    setCanvasIngestResult(json);
-    addToast(`Canvas: создано ${json.nodes_created} узлов, обновлено ${json.nodes_updated}`, "success");
-  }, [apiFetchJson, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles]);
+    setCanvasProgress({ label: "Подключение к Canvas…", stage: "start", nodes_created: 0, nodes_updated: 0 });
+
+    try {
+      const response = await fetch(`${apiBase}/canvas/ingest-stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          course_id: canvasSelectedCourse,
+          dataset_id: ds,
+          content_types: canvasContentTypes,
+          max_nodes_per_doc: canvasMaxNodes,
+          max_files: canvasMaxFiles,
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        addToast("Ошибка при запуске анализа курса", "error");
+        setCanvasIngesting(false);
+        setCanvasProgress(null);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // SSE lines end with \n\n
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          for (const line of part.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const ev = JSON.parse(line.slice(6));
+              if (ev.type === "start" || ev.type === "stage") {
+                setCanvasProgress(p => ({ ...p!, label: ev.label, stage: ev.stage ?? ev.type }));
+              } else if (ev.type === "progress") {
+                setCanvasProgress({ label: ev.label, stage: "processing", nodes_created: ev.nodes_created ?? 0, nodes_updated: ev.nodes_updated ?? 0 });
+              } else if (ev.type === "done") {
+                setCanvasIngestResult(ev.result);
+                addToast(`Canvas: создано ${ev.result.nodes_created} узлов, обновлено ${ev.result.nodes_updated}`, "success");
+              } else if (ev.type === "error") {
+                addToast(`Ошибка Canvas: ${ev.message}`, "error");
+              }
+            } catch { /* skip malformed SSE line */ }
+          }
+        }
+      }
+    } catch (err) {
+      addToast("Ошибка подключения к Canvas API", "error");
+    } finally {
+      setCanvasIngesting(false);
+      setCanvasProgress(null);
+    }
+  }, [apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles]);
 
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
@@ -2695,10 +2741,32 @@ const analysisFlowSteps = [
                     type="button"
                   >
                     {canvasIngesting
-                      ? <><span className={styles.spinner} /> Загружаем курс...</>
+                      ? <><span className={styles.spinner} /> Анализируем...</>
                       : <><IconCanvas /> Запустить анализ курса</>
                     }
                   </button>
+
+                  {/* Streaming progress block */}
+                  {canvasIngesting && canvasProgress && (
+                    <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <span className={styles.spinner} style={{ flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 500, lineHeight: 1.4 }}>
+                          {canvasProgress.label}
+                        </span>
+                      </div>
+                      {/* Indeterminate progress bar */}
+                      <div style={{ height: 4, borderRadius: 4, background: "rgba(99,102,241,0.15)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: "40%", borderRadius: 4, background: "var(--accent)", animation: "canvasSlide 1.4s ease-in-out infinite" }} />
+                      </div>
+                      {(canvasProgress.nodes_created > 0 || canvasProgress.nodes_updated > 0) && (
+                        <div style={{ marginTop: 8, display: "flex", gap: 12, fontSize: 11, color: "var(--text-muted)" }}>
+                          <span>✦ создано: <strong style={{ color: "var(--success)" }}>{canvasProgress.nodes_created}</strong></span>
+                          <span>↺ обновлено: <strong style={{ color: "var(--accent)" }}>{canvasProgress.nodes_updated}</strong></span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Result */}
                   {canvasIngestResult && (
@@ -2748,7 +2816,12 @@ const analysisFlowSteps = [
           <div className={styles.asideCard}>
             <div className={styles.asideCardHeader}>
               <span className={styles.asideCardTitle}>Подключение</span>
-              <div className={[styles.dot, apiStatusDotClass].join(" ")} />
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div className={[styles.dot, apiStatusDotClass].join(" ")} />
+                <span style={{ fontSize: 11, color: apiStatus === "ok" ? "var(--success)" : apiStatus === "down" ? "var(--error, #f87171)" : "var(--text-muted)" }}>
+                  {apiStatus === "ok" ? "online" : apiStatus === "down" ? "offline" : "…"}
+                </span>
+              </div>
             </div>
             <div className={styles.asideCardBody}>
               <label className={styles.fieldLabel}>
@@ -2760,6 +2833,11 @@ const analysisFlowSteps = [
                   placeholder="http://localhost:8000"
                 />
               </label>
+              {apiStatus === "down" && (
+                <div style={{ padding: "8px 10px", borderRadius: 7, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", fontSize: 12, color: "#f87171", marginBottom: 6 }}>
+                  Backend недоступен — проверь что Docker запущен и backend-контейнер поднят
+                </div>
+              )}
               <div className={styles.row}>
                 <button
                   className={styles.btnCompact}
@@ -2774,10 +2852,11 @@ const analysisFlowSteps = [
                   /docs
                 </button>
                 <button
-                  className={styles.btnCompact}
-                  onClick={() => window.open(`${apiBase}/health`, "_blank")}
+                  className={[styles.btnCompact, apiStatus === "down" ? styles.btnCompactPrimary : ""].join(" ")}
+                  onClick={() => { setApiStatus("unknown"); checkApiStatus(); }}
+                  title="Проверить соединение с бэкендом"
                 >
-                  /health
+                  ↺ Проверить
                 </button>
               </div>
             </div>
