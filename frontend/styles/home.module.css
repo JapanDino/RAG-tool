@@ -898,6 +898,41 @@
   line-height: 1.5;
 }
 
+.canvasAlert {
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--error) 42%, var(--border));
+  background:
+    radial-gradient(circle at top right, rgba(248, 113, 113, 0.18), transparent 38%),
+    linear-gradient(135deg, rgba(127, 29, 29, 0.92), rgba(69, 10, 10, 0.96));
+  box-shadow: 0 16px 40px rgba(127, 29, 29, 0.24);
+}
+
+.canvasAlertTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #fee2e2;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.canvasAlertText {
+  margin-top: 8px;
+  color: rgba(254, 226, 226, 0.92);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.canvasAlertActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
 /* ─────────────────────────────────────────────────────────
    Graph Tab
    ───────────────────────────────────────────────────────── */
