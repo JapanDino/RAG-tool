@@ -401,7 +401,7 @@ export default function Home() {
     create: false,
   });
 
-  const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE || "/api-proxy";
   const [apiBase, setApiBase] = useState(DEFAULT_API);
   const [apiStatus, setApiStatus] = useState<"unknown" | "ok" | "down">("unknown");
   const [error, setError] = useState<string | null>(null);
@@ -489,9 +489,12 @@ const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
   useEffect(() => {
     if (typeof window === "undefined") return;
     const savedApi = localStorage.getItem("bloom_api");
-    const resolvedApi = savedApi
-      ? (savedApi.includes("://backend:") && window.location.hostname === "localhost" ? "http://localhost:8000" : savedApi)
-      : (DEFAULT_API.includes("://backend:") && window.location.hostname === "localhost" ? "http://localhost:8000" : DEFAULT_API);
+    const shouldUseProxy =
+      !savedApi ||
+      savedApi === "http://localhost:8000" ||
+      savedApi === "http://127.0.0.1:8000" ||
+      savedApi.includes("://backend:");
+    const resolvedApi = shouldUseProxy ? DEFAULT_API : savedApi;
     setApiBase(resolvedApi);
 
     const savedDs = localStorage.getItem("bloom_ds");
@@ -2913,7 +2916,7 @@ const analysisFlowSteps = [
                   className={styles.input}
                   value={apiBase}
                   onChange={(e) => setApiBase(e.target.value)}
-                  placeholder="http://localhost:8000"
+                  placeholder="/api-proxy"
                 />
               </label>
               {apiStatus === "down" && (
@@ -2924,9 +2927,9 @@ const analysisFlowSteps = [
               <div className={styles.row}>
                 <button
                   className={styles.btnCompact}
-                  onClick={() => setApiBase("http://localhost:8000")}
+                  onClick={() => setApiBase("/api-proxy")}
                 >
-                  localhost
+                  proxy
                 </button>
                 <button
                   className={styles.btnCompact}
@@ -3555,9 +3558,9 @@ const analysisFlowSteps = [
               Ресурсы
             </div>
             {[
-              { label: "API Docs", href: "http://localhost:8000/docs", icon: "📄" },
-              { label: "Health Check", href: "http://localhost:8000/health", icon: "🟢" },
-              { label: "OpenAPI JSON", href: "http://localhost:8000/openapi.json", icon: "⚙️" },
+              { label: "API Docs", href: `${apiBase}/docs`, icon: "📄" },
+              { label: "Health Check", href: `${apiBase}/health`, icon: "🟢" },
+              { label: "OpenAPI JSON", href: `${apiBase}/openapi.json`, icon: "⚙️" },
             ].map(({ label, href, icon }) => (
               <a key={label} href={href} target="_blank" rel="noopener noreferrer" style={{
                 display: "flex", alignItems: "center", gap: 7,

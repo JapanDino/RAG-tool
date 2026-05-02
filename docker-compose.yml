@@ -65,7 +65,7 @@ services:
   frontend:
     build: ./frontend
     environment:
-      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-/api-proxy}
     depends_on: [ backend ]
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
