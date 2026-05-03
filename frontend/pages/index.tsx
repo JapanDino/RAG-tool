@@ -564,6 +564,15 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     }
   }, [apiBase]);
 
+  const getDirectBackendBase = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "http://127.0.0.1:8000";
+    }
+    return null;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
@@ -971,7 +980,10 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     }, 1000);
 
     try {
-      const response = await fetch(`${apiBase}/canvas/ingest-stream`, {
+      const directBackendBase = getDirectBackendBase();
+      const streamApiBase =
+        apiBase === "/api-proxy" && directBackendBase ? directBackendBase : apiBase;
+      const response = await fetch(`${streamApiBase}/canvas/ingest-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1055,7 +1067,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
       setCanvasIngesting(false);
       setCanvasProgress(null);
     }
-  }, [apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles]);
+  }, [apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles, getDirectBackendBase]);
 
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
