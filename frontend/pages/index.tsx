@@ -449,11 +449,11 @@ export default function Home() {
   // ── Toast system ────────────────────────────────────────────
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastCounter = useRef(0);
-  const addToast = (msg: string, type: Toast["type"] = "info") => {
+  const addToast = useCallback((msg: string, type: Toast["type"] = "info") => {
     const id = ++toastCounter.current;
     setToasts(p => [...p, { id, msg, type }]);
     setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3800);
-  };
+  }, []);
 
   // ── Search tab ───────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
@@ -914,7 +914,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     setLabelQueue(q => [last.node, ...q]);
     setCurrentLabels(last.labels);
     addToast("↩ Отменено", "info");
-  }, [undoStack]);
+  }, [addToast, undoStack]);
 
   const searchNodes = async () => {
     if (!searchQuery.trim()) return;
@@ -1067,7 +1067,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
       setCanvasIngesting(false);
       setCanvasProgress(null);
     }
-  }, [apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles, getDirectBackendBase]);
+  }, [addToast, apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles, getDirectBackendBase]);
 
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
@@ -1114,7 +1114,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     }
   }, [activeTab, apiStatus]);
 
-  const loadGraph = async () => {
+  const loadGraph = useCallback(async () => {
     if (!ds) return;
     loadGraphAbortRef.current?.abort();
     loadGraphAbortRef.current = new AbortController();
@@ -1130,7 +1130,21 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     if (!json) return;
     setGraphNodesData(json.nodes || []);
     setGraphEdgesData(json.edges || []);
-  };
+  }, [apiFetchJson, ds, graphTopK, graphMinScore, graphIncludeCo, graphLimitNodes]);
+
+  const openGraphForCurrentDataset = useCallback(async () => {
+    if (!ds) {
+      addToast("Выбери dataset перед открытием графа", "error");
+      return;
+    }
+    setActiveTab("graph");
+    setHoveredNode(null);
+    setSelectedNode(null);
+    setGraphSearch("");
+    setGraphNodesData([]);
+    setGraphEdgesData([]);
+    await loadGraph();
+  }, [ds, loadGraph, addToast]);
 
   const rebuildGraph = async () => {
     if (!ds) return;
@@ -1150,6 +1164,14 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     if (!json) return;
     setLastJob(json.job_id);
   };
+
+  useEffect(() => {
+    setHoveredNode(null);
+    setSelectedNode(null);
+    setGraphSearch("");
+    setGraphNodesData([]);
+    setGraphEdgesData([]);
+  }, [ds]);
 
   const loadLabelQueue = async () => {
     if (!ds) return;
@@ -2921,7 +2943,7 @@ const analysisFlowSteps = [
                       )}
                       <button
                         className={[styles.btn, styles.btnPrimary].join(" ")}
-                        onClick={() => setActiveTab("graph")}
+                        onClick={openGraphForCurrentDataset}
                         style={{ marginTop: 10, width: "100%" }}
                         type="button"
                       >
