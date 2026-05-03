@@ -29,6 +29,10 @@ SUPPORTED_MIME_PREFIXES = (
 )
 SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md", ".docx", ".doc", ".rtf", ".csv"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+CANVAS_TEXT_MAX_CHARS = int(os.getenv("CANVAS_TEXT_MAX_CHARS", "120000"))
+CANVAS_PDF_MAX_PAGES = int(os.getenv("CANVAS_PDF_MAX_PAGES", "25"))
+CANVAS_PDF_OCR_MAX_PAGES = int(os.getenv("CANVAS_PDF_OCR_MAX_PAGES", "4"))
+CANVAS_ENABLE_FILE_OCR = os.getenv("CANVAS_ENABLE_FILE_OCR", "0").lower() in {"1", "true", "yes"}
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +106,45 @@ def _canvas_source_key(source_label: str) -> str:
 
 def _document_title(source_label: str) -> str:
     return (source_label.split(":", 1)[-1] or source_label)[:300]
+
+
+def _download_canvas_file(download_url: str, auth_headers: dict[str, str]) -> bytes:
+    resp = requests.get(download_url, headers=auth_headers, timeout=60, stream=True)
+    resp.raise_for_status()
+    size_header = resp.headers.get("Content-Length")
+    if size_header:
+        try:
+            declared_size = int(size_header)
+        except ValueError:
+            declared_size = 0
+        if declared_size > MAX_FILE_SIZE:
+            raise ValueError(
+                f"файл слишком большой: {declared_size / (1024 * 1024):.1f} MB > "
+                f"{MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
+            )
+
+    data = bytearray()
+    for chunk in resp.iter_content(chunk_size=1024 * 1024):
+        if not chunk:
+            continue
+        data.extend(chunk)
+        if len(data) > MAX_FILE_SIZE:
+            raise ValueError(
+                f"файл превысил лимит {MAX_FILE_SIZE / (1024 * 1024):.0f} MB во время скачивания"
+            )
+    return bytes(data)
+
+
+def _extract_canvas_file_text(filename: str, content_type: str, data: bytes) -> str:
+    return extract_file_text(
+        filename,
+        content_type,
+        data,
+        max_chars=CANVAS_TEXT_MAX_CHARS,
+        pdf_max_pages=CANVAS_PDF_MAX_PAGES,
+        allow_ocr=CANVAS_ENABLE_FILE_OCR,
+        ocr_max_pages=CANVAS_PDF_OCR_MAX_PAGES,
+    )
 
 
 def _safe_list_pages(course_id: int) -> list[dict]:
@@ -475,9 +518,12 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
                     skipped.append(f"{label}: нет URL для скачивания")
                     continue
                 try:
-                    resp = requests.get(download_url, headers=auth_headers, timeout=60)
-                    resp.raise_for_status()
-                    text_content = extract_file_text(fname, file_meta.get("content-type") or "", resp.content)
+                    file_bytes = _download_canvas_file(download_url, auth_headers)
+                    text_content = _extract_canvas_file_text(
+                        fname,
+                        file_meta.get("content-type") or "",
+                        file_bytes,
+                    )
                     process(text_content, label)
                 except Exception as exc:
                     skipped.append(f"{label}: {exc}")
@@ -686,9 +732,12 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                             skipped.append(f"{label}: нет URL для скачивания")
                             continue
                         try:
-                            resp = requests.get(download_url, headers=auth_headers, timeout=60)
-                            resp.raise_for_status()
-                            text_content = extract_file_text(fname, file_meta.get("content-type") or "", resp.content)
+                            file_bytes = _download_canvas_file(download_url, auth_headers)
+                            text_content = _extract_canvas_file_text(
+                                fname,
+                                file_meta.get("content-type") or "",
+                                file_bytes,
+                            )
                             process(text_content, label)
                         except Exception as exc:
                             skipped.append(f"{label}: {exc}")
