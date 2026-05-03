@@ -4,9 +4,20 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
+import re
 
 
 LEVEL_ORDER = ["remember", "understand", "apply", "analyze", "evaluate", "create"]
+
+HEURISTIC_PATTERNS = {
+    "remember": [r"\bформул", r"\bопределен", r"\bтермин", r"\bсвойств", r"\bтаблиц"],
+    "understand": [r"\bобъясн", r"\bпонят", r"\bтеор", r"\bпринцип", r"\bзакон"],
+    "apply": [r"\bсеминар", r"\bлаборатор", r"\bпрактичес", r"\bзадач", r"\bупражнен", r"\bрасчет", r"\bвычисл"],
+    "analyze": [r"\bанализ", r"\bразбор", r"\bсравнен", r"\bструктур", r"\bпричин", r"\bследств"],
+    "evaluate": [r"\bоцен", r"\bкритич", r"\bаргумент", r"\bдоказ", r"\bвывод"],
+    "create": [r"\bпроект", r"\bсозда", r"\bразработ", r"\bмодел", r"\bсформулир"],
+}
+DEFAULT_CONTENT_PRIORS = [0.17, 0.24, 0.22, 0.16, 0.11, 0.10]
 
 
 def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
@@ -48,13 +59,35 @@ def _load_keywords() -> dict[str, list[str]]:
         out[lvl] = [str(x).lower() for x in data.get(lvl, []) if str(x).strip()]
     return out
 
+
+@lru_cache(maxsize=1)
+def _compiled_heuristics() -> dict[str, list[re.Pattern[str]]]:
+    return {
+        lvl: [re.compile(pat, re.IGNORECASE) for pat in patterns]
+        for lvl, patterns in HEURISTIC_PATTERNS.items()
+    }
+
+
+def _heuristic_counts(text: str) -> tuple[list[int], dict[str, list[str]]]:
+    compiled = _compiled_heuristics()
+    counts: list[int] = []
+    triggers: dict[str, list[str]] = {lvl: [] for lvl in LEVEL_ORDER}
+    for lvl in LEVEL_ORDER:
+        hits = 0
+        for pat in compiled.get(lvl, []):
+            if pat.search(text):
+                hits += 1
+                triggers[lvl].append(pat.pattern)
+        counts.append(hits)
+    return counts, triggers
+
 def classify_bloom_multilabel(
     text: str,
     min_prob: float = 0.2,
     max_levels: int = 2,
 ):
     lowered = text.lower()
-    counts = []
+    keyword_counts = []
     triggers: dict[str, list[str]] = {lvl: [] for lvl in LEVEL_ORDER}
     keywords = _load_keywords()
     for level in LEVEL_ORDER:
@@ -63,11 +96,20 @@ def classify_bloom_multilabel(
             if kw in lowered:
                 hits += 1
                 triggers[level].append(kw)
-        counts.append(hits)
+        keyword_counts.append(hits)
+
+    heuristic_counts, heuristic_triggers = _heuristic_counts(lowered)
+    counts = []
+    for i, level in enumerate(LEVEL_ORDER):
+        # Structural cues ("семинар", "лабораторная", "формулы") are useful for
+        # content pages that do not contain explicit task verbs.
+        counts.append(keyword_counts[i] + heuristic_counts[i])
+        if heuristic_triggers[level]:
+            triggers[level].extend(heuristic_triggers[level])
 
     total = sum(counts)
     if total == 0:
-        raw = [1.0 / 6.0] * 6
+        raw = DEFAULT_CONTENT_PRIORS[:]
     else:
         raw = [(c + 1) / (total + 6) for c in counts]
 
