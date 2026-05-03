@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json as _json
 import logging
 import os
@@ -9,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ..db.session import get_db
+from ..db.session import SessionLocal, get_db
 from ..models.models import Chunk, Dataset, Document, KnowledgeNode
 from ..services import canvas_client as cc
 from ..services.bloom_multilabel import classify_bloom_multilabel
@@ -80,7 +82,18 @@ class IngestResponse(BaseModel):
     documents_ingested: int
     nodes_created: int
     nodes_updated: int
+    document_ids: list[int]
+    documents: list["ImportedDocumentOut"]
     skipped: list[str]
+
+
+class ImportedDocumentOut(BaseModel):
+    document_id: int
+    title: str
+    source: str
+    source_label: str
+    nodes_created: int
+    nodes_updated: int
 
 
 def _check_canvas_configured() -> None:
@@ -100,8 +113,8 @@ def _sse(event: dict, pad: bool = False) -> str:
     return (":" + (" " * 2048) + "\n\n") + payload
 
 
-def _canvas_source_key(source_label: str) -> str:
-    return f"canvas:{source_label}"
+def _canvas_source_key(course_id: int, source_label: str) -> str:
+    return f"canvas:course:{course_id}:{source_label}"
 
 
 def _document_title(source_label: str) -> str:
@@ -159,11 +172,12 @@ def _safe_list_pages(course_id: int) -> list[dict]:
 
 def _ensure_canvas_document_and_chunks(
     raw_text: str,
+    course_id: int,
     source_label: str,
     dataset_id: int,
     db: Session,
 ) -> tuple[Document, list[Chunk]]:
-    source_key = _canvas_source_key(source_label)
+    source_key = _canvas_source_key(course_id, source_label)
     doc = (
         db.query(Document)
         .filter(Document.dataset_id == dataset_id, Document.source == source_key)
@@ -193,7 +207,7 @@ def _ensure_canvas_document_and_chunks(
             document_id=doc.id,
             idx=idx,
             text=part,
-            meta={"source": "canvas", "canvas_label": source_label},
+            meta={"source": "canvas", "course_id": course_id, "canvas_label": source_label},
         )
         db.add(chunk)
         chunks.append(chunk)
@@ -224,6 +238,7 @@ def _pick_chunk_for_node(node: dict, chunks: list[Chunk]) -> Chunk | None:
 
 def _process_document(
     raw_text: str,
+    course_id: int,
     source_label: str,
     dataset_id: int,
     max_nodes: int,
@@ -232,19 +247,20 @@ def _process_document(
     embedding_model: str,
     db: Session,
     skipped: list[str],
-) -> tuple[int, int]:
+) -> ImportedDocumentOut | None:
     raw_text = raw_text.strip()
     if not raw_text:
         skipped.append(f"{source_label}: пустой текст")
-        return 0, 0
+        return None
 
     raw_nodes = extractor.extract(raw_text, max_nodes=max_nodes, min_freq=1)
     if not raw_nodes:
         skipped.append(f"{source_label}: узлы не найдены")
-        return 0, 0
+        return None
 
-    doc, chunks = _ensure_canvas_document_and_chunks(raw_text, source_label, dataset_id, db)
+    doc, chunks = _ensure_canvas_document_and_chunks(raw_text, course_id, source_label, dataset_id, db)
     document_id = doc.id
+    source_key = _canvas_source_key(course_id, source_label)
 
     titles = [n["title"] for n in raw_nodes]
     existing_rows = (
@@ -278,8 +294,9 @@ def _process_document(
             "extractor": extractor.name,
             "source": {
                 "kind": "canvas",
+                "course_id": course_id,
                 "label": source_label,
-                "document_source": _canvas_source_key(source_label),
+                "document_source": source_key,
             },
             "frequency": node.get("frequency"),
             "node_type": node.get("node_type"),
@@ -317,10 +334,13 @@ def _process_document(
     if stale_ids:
         db.execute(text("DELETE FROM knowledge_nodes WHERE id = ANY(:ids)"), {"ids": stale_ids})
 
-    db.commit()
+    # flush → get DB-assigned IDs without committing yet
+    db.flush()
     for kn in stored:
         db.refresh(kn)
 
+    # Attempt embeddings; failures are logged but never abort the commit —
+    # nodes with vec=NULL are saved and can be re-embedded later.
     try:
         chunk_vecs = embed_texts([chunk.text for chunk in chunks], dim=1536)
         for chunk, vec in zip(chunks, chunk_vecs):
@@ -337,7 +357,6 @@ def _process_document(
                 ),
                 {"cid": chunk.id, "dim": 1536, "model": embedding_model, "v": vector_literal(vec)},
             )
-        db.commit()
     except Exception as exc:
         logger.warning("Chunk embedding failed for %s: %s", source_label, exc)
 
@@ -348,11 +367,22 @@ def _process_document(
                 text("UPDATE knowledge_nodes SET vec = CAST(:v AS vector) WHERE id = :id"),
                 {"v": vector_literal(vec), "id": kn.id},
             )
-        db.commit()
     except Exception as exc:
         logger.warning("Node embedding failed for %s: %s", source_label, exc)
 
-    return nodes_created, nodes_updated
+    # Single commit: nodes + chunk embeddings + node vectors land atomically.
+    # If anything above raised outside the try/except the caller's session
+    # will roll back the whole document — no partial writes.
+    db.commit()
+
+    return ImportedDocumentOut(
+        document_id=document_id,
+        title=doc.title,
+        source=source_key,
+        source_label=source_label,
+        nodes_created=nodes_created,
+        nodes_updated=nodes_updated,
+    )
 
 
 @router.get("/courses")
@@ -409,12 +439,14 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
     documents_ingested = 0
     nodes_created = 0
     nodes_updated = 0
+    documents: list[ImportedDocumentOut] = []
     skipped: list[str] = []
 
     def process(raw_text: str, label: str) -> None:
         nonlocal nodes_created, nodes_updated, documents_ingested
-        nc, nu = _process_document(
+        imported = _process_document(
             raw_text,
+            payload.course_id,
             label,
             payload.dataset_id,
             payload.max_nodes_per_doc,
@@ -424,10 +456,11 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
             db,
             skipped,
         )
-        if nc > 0 or nu > 0:
+        if imported and (imported.nodes_created > 0 or imported.nodes_updated > 0):
+            documents.append(imported)
             documents_ingested += 1
-            nodes_created += nc
-            nodes_updated += nu
+            nodes_created += imported.nodes_created
+            nodes_updated += imported.nodes_updated
 
     cid = payload.course_id
     ctypes = set(payload.content_types)
@@ -535,6 +568,8 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
         documents_ingested=documents_ingested,
         nodes_created=nodes_created,
         nodes_updated=nodes_updated,
+        document_ids=[doc.document_id for doc in documents],
+        documents=documents,
         skipped=skipped,
     )
 
@@ -543,6 +578,9 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
 def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
     _check_canvas_configured()
 
+    # Validate BEFORE opening the stream so we can return HTTP 404 synchronously.
+    # The `db` dependency session is used only for this check and then closed
+    # normally by FastAPI — it is NOT passed into the generator.
     ds_obj = db.get(Dataset, payload.dataset_id)
     if not ds_obj:
         raise HTTPException(404, f"Dataset {payload.dataset_id} не найден")
@@ -551,214 +589,227 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
     embedding_model = current_embedding_model()
 
     def generate():
-        documents_ingested = 0
-        nodes_created = 0
-        nodes_updated = 0
-        skipped: list[str] = []
-        cid = payload.course_id
-        ctypes = set(payload.content_types)
+        # Open a dedicated session whose lifetime is tied to the generator,
+        # not to FastAPI's dependency teardown (which fires when the Response
+        # object is GC-d, potentially racing with ongoing generator commits).
+        with SessionLocal() as gen_db:
+            documents_ingested = 0
+            nodes_created = 0
+            nodes_updated = 0
+            documents: list[ImportedDocumentOut] = []
+            skipped: list[str] = []
+            cid = payload.course_id
+            ctypes = set(payload.content_types)
 
-        def process(raw_text: str, label: str) -> None:
-            nonlocal nodes_created, nodes_updated, documents_ingested
-            nc, nu = _process_document(
-                raw_text,
-                label,
-                payload.dataset_id,
-                payload.max_nodes_per_doc,
-                payload.min_prob,
-                extractor,
-                embedding_model,
-                db,
-                skipped,
-            )
-            if nc > 0 or nu > 0:
-                documents_ingested += 1
-                nodes_created += nc
-                nodes_updated += nu
+            def process(raw_text: str, label: str) -> None:
+                nonlocal nodes_created, nodes_updated, documents_ingested
+                imported = _process_document(
+                    raw_text,
+                    payload.course_id,
+                    label,
+                    payload.dataset_id,
+                    payload.max_nodes_per_doc,
+                    payload.min_prob,
+                    extractor,
+                    embedding_model,
+                    gen_db,
+                    skipped,
+                )
+                if imported and (imported.nodes_created > 0 or imported.nodes_updated > 0):
+                    documents.append(imported)
+                    documents_ingested += 1
+                    nodes_created += imported.nodes_created
+                    nodes_updated += imported.nodes_updated
 
-        try:
-            yield _sse({"type": "start", "label": "Подключение к Canvas..."}, pad=True)
+            try:
+                yield _sse({"type": "start", "label": "Подключение к Canvas..."}, pad=True)
 
-            if "syllabus" in ctypes:
-                yield _sse({"type": "stage", "stage": "syllabus", "label": "Силлабус"}, pad=True)
-                try:
-                    course = cc.get_one(f"/courses/{cid}", {"include[]": "syllabus_body"})
-                    body = _html_to_text(course.get("syllabus_body") or "")
-                    if body:
-                        yield _sse(
-                            {
-                                "type": "progress",
-                                "current": documents_ingested + 1,
-                                "label": "Обрабатываем силлабус...",
-                                "nodes_created": nodes_created,
-                                "nodes_updated": nodes_updated,
-                            }
-                        )
-                        process(body, f"syllabus:{cid}")
-                except Exception as exc:
-                    skipped.append(f"syllabus: {exc}")
-
-            if "pages" in ctypes:
-                yield _sse({"type": "stage", "stage": "pages", "label": "Страницы курса"}, pad=True)
-                try:
-                    pages = _safe_list_pages(cid)
-                    total_pages = len(pages)
-                    for i, page in enumerate(pages, 1):
-                        page_title = page.get("title") or page["url"]
-                        yield _sse(
-                            {
-                                "type": "progress",
-                                "current": documents_ingested + 1,
-                                "label": f"Страница {i}/{total_pages}: {page_title}",
-                                "nodes_created": nodes_created,
-                                "nodes_updated": nodes_updated,
-                            }
-                        )
-                        try:
-                            full = cc.get_page(cid, page["url"])
-                            process(_html_to_text(full.get("body") or ""), f"page:{page_title}")
-                        except Exception as exc:
-                            skipped.append(f"page {page.get('url')}: {exc}")
-                except Exception as exc:
-                    skipped.append(f"pages list: {exc}")
-
-            if "assignments" in ctypes:
-                yield _sse({"type": "stage", "stage": "assignments", "label": "Задания"}, pad=True)
-                try:
-                    assignments = cc.list_assignments(cid)
-                    total = len(assignments)
-                    for i, assignment in enumerate(assignments, 1):
-                        name = assignment.get("name", f"#{assignment['id']}")
-                        yield _sse(
-                            {
-                                "type": "progress",
-                                "current": documents_ingested + 1,
-                                "label": f"Задание {i}/{total}: {name}",
-                                "nodes_created": nodes_created,
-                                "nodes_updated": nodes_updated,
-                            }
-                        )
-                        desc = _html_to_text(assignment.get("description") or "")
-                        process(f"{name}\n\n{desc}".strip(), f"assignment:{name}")
-                except Exception as exc:
-                    skipped.append(f"assignments: {exc}")
-
-            if "quizzes" in ctypes:
-                yield _sse({"type": "stage", "stage": "quizzes", "label": "Тесты"}, pad=True)
-                try:
-                    quizzes = cc.list_quizzes(cid)
-                    total = len(quizzes)
-                    for i, quiz in enumerate(quizzes, 1):
-                        title = quiz.get("title", f"#{quiz['id']}")
-                        yield _sse(
-                            {
-                                "type": "progress",
-                                "current": documents_ingested + 1,
-                                "label": f"Тест {i}/{total}: {title}",
-                                "nodes_created": nodes_created,
-                                "nodes_updated": nodes_updated,
-                            }
-                        )
-                        try:
-                            questions = cc.list_quiz_questions(cid, quiz["id"])
-                            parts = [title]
-                            for question in questions:
-                                parts.append(_html_to_text(question.get("question_text") or ""))
-                                for answer in question.get("answers") or []:
-                                    parts.append(_html_to_text(answer.get("text") or answer.get("html") or ""))
-                            process("\n".join(p for p in parts if p.strip()), f"quiz:{title}")
-                        except Exception as exc:
-                            skipped.append(f"quiz {quiz.get('id')}: {exc}")
-                except Exception as exc:
-                    skipped.append(f"quizzes: {exc}")
-
-            if "discussions" in ctypes:
-                yield _sse({"type": "stage", "stage": "discussions", "label": "Обсуждения"}, pad=True)
-                try:
-                    topics = cc.list_discussions(cid)
-                    total = len(topics)
-                    for i, topic in enumerate(topics, 1):
-                        title = topic.get("title", f"#{topic['id']}")
-                        yield _sse(
-                            {
-                                "type": "progress",
-                                "current": documents_ingested + 1,
-                                "label": f"Обсуждение {i}/{total}: {title}",
-                                "nodes_created": nodes_created,
-                                "nodes_updated": nodes_updated,
-                            }
-                        )
-                        msg = _html_to_text(topic.get("message") or "")
-                        process(f"{title}\n\n{msg}".strip(), f"discussion:{title}")
-                except Exception as exc:
-                    skipped.append(f"discussions: {exc}")
-
-            if "files" in ctypes:
-                yield _sse({"type": "stage", "stage": "files", "label": "Файлы курса"}, pad=True)
-                try:
-                    all_files = cc.list_files(cid)
-                    supported = [
-                        f
-                        for f in all_files
-                        if (
-                            any(f.get("content-type", "").startswith(p) for p in SUPPORTED_MIME_PREFIXES)
-                            or any((f.get("filename") or "").lower().endswith(ext) for ext in SUPPORTED_EXTENSIONS)
-                        )
-                        and (f.get("size") or 0) <= MAX_FILE_SIZE
-                    ]
-                    capped = supported[: payload.max_files]
-                    if len(supported) > payload.max_files:
-                        skipped.append(
-                            f"files: показано {payload.max_files} из {len(supported)} "
-                            f"(увеличь max_files чтобы обработать больше)"
-                        )
-                    token = os.getenv("CANVAS_TOKEN", "")
-                    auth_headers = {"Authorization": f"Bearer {token}"}
-                    total = len(capped)
-                    for i, file_meta in enumerate(capped, 1):
-                        fname = file_meta.get("display_name") or file_meta.get("filename") or f"file_{file_meta['id']}"
-                        download_url = file_meta.get("url") or ""
-                        label = f"file:{fname}"
-                        yield _sse(
-                            {
-                                "type": "progress",
-                                "current": documents_ingested + 1,
-                                "label": f"Файл {i}/{total}: {fname}",
-                                "nodes_created": nodes_created,
-                                "nodes_updated": nodes_updated,
-                            }
-                        )
-                        if not download_url:
-                            skipped.append(f"{label}: нет URL для скачивания")
-                            continue
-                        try:
-                            file_bytes = _download_canvas_file(download_url, auth_headers)
-                            text_content = _extract_canvas_file_text(
-                                fname,
-                                file_meta.get("content-type") or "",
-                                file_bytes,
+                if "syllabus" in ctypes:
+                    yield _sse({"type": "stage", "stage": "syllabus", "label": "Силлабус"}, pad=True)
+                    try:
+                        course = cc.get_one(f"/courses/{cid}", {"include[]": "syllabus_body"})
+                        body = _html_to_text(course.get("syllabus_body") or "")
+                        if body:
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "current": documents_ingested + 1,
+                                    "label": "Обрабатываем силлабус...",
+                                    "nodes_created": nodes_created,
+                                    "nodes_updated": nodes_updated,
+                                }
                             )
-                            process(text_content, label)
-                        except Exception as exc:
-                            skipped.append(f"{label}: {exc}")
-                except Exception as exc:
-                    skipped.append(f"files list: {exc}")
+                            process(body, f"syllabus:{cid}")
+                    except Exception as exc:
+                        skipped.append(f"syllabus: {exc}")
 
-            yield _sse(
-                {
-                    "type": "done",
-                    "result": {
-                        "course_id": cid,
-                        "documents_ingested": documents_ingested,
-                        "nodes_created": nodes_created,
-                        "nodes_updated": nodes_updated,
-                        "skipped": skipped,
-                    },
-                }
-            )
-        except Exception as exc:
-            logger.exception("ingest-stream fatal error: %s", exc)
-            yield _sse({"type": "error", "message": str(exc)})
+                if "pages" in ctypes:
+                    yield _sse({"type": "stage", "stage": "pages", "label": "Страницы курса"}, pad=True)
+                    try:
+                        pages = _safe_list_pages(cid)
+                        total_pages = len(pages)
+                        for i, page in enumerate(pages, 1):
+                            page_title = page.get("title") or page["url"]
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "current": documents_ingested + 1,
+                                    "label": f"Страница {i}/{total_pages}: {page_title}",
+                                    "nodes_created": nodes_created,
+                                    "nodes_updated": nodes_updated,
+                                }
+                            )
+                            try:
+                                full = cc.get_page(cid, page["url"])
+                                process(_html_to_text(full.get("body") or ""), f"page:{page_title}")
+                            except Exception as exc:
+                                skipped.append(f"page {page.get('url')}: {exc}")
+                    except Exception as exc:
+                        skipped.append(f"pages list: {exc}")
+
+                if "assignments" in ctypes:
+                    yield _sse({"type": "stage", "stage": "assignments", "label": "Задания"}, pad=True)
+                    try:
+                        assignments = cc.list_assignments(cid)
+                        total = len(assignments)
+                        for i, assignment in enumerate(assignments, 1):
+                            name = assignment.get("name", f"#{assignment['id']}")
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "current": documents_ingested + 1,
+                                    "label": f"Задание {i}/{total}: {name}",
+                                    "nodes_created": nodes_created,
+                                    "nodes_updated": nodes_updated,
+                                }
+                            )
+                            desc = _html_to_text(assignment.get("description") or "")
+                            process(f"{name}\n\n{desc}".strip(), f"assignment:{name}")
+                    except Exception as exc:
+                        skipped.append(f"assignments: {exc}")
+
+                if "quizzes" in ctypes:
+                    yield _sse({"type": "stage", "stage": "quizzes", "label": "Тесты"}, pad=True)
+                    try:
+                        quizzes = cc.list_quizzes(cid)
+                        total = len(quizzes)
+                        for i, quiz in enumerate(quizzes, 1):
+                            title = quiz.get("title", f"#{quiz['id']}")
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "current": documents_ingested + 1,
+                                    "label": f"Тест {i}/{total}: {title}",
+                                    "nodes_created": nodes_created,
+                                    "nodes_updated": nodes_updated,
+                                }
+                            )
+                            try:
+                                questions = cc.list_quiz_questions(cid, quiz["id"])
+                                parts = [title]
+                                for question in questions:
+                                    parts.append(_html_to_text(question.get("question_text") or ""))
+                                    for answer in question.get("answers") or []:
+                                        parts.append(_html_to_text(answer.get("text") or answer.get("html") or ""))
+                                process("\n".join(p for p in parts if p.strip()), f"quiz:{title}")
+                            except Exception as exc:
+                                skipped.append(f"quiz {quiz.get('id')}: {exc}")
+                    except Exception as exc:
+                        skipped.append(f"quizzes: {exc}")
+
+                if "discussions" in ctypes:
+                    yield _sse({"type": "stage", "stage": "discussions", "label": "Обсуждения"}, pad=True)
+                    try:
+                        topics = cc.list_discussions(cid)
+                        total = len(topics)
+                        for i, topic in enumerate(topics, 1):
+                            title = topic.get("title", f"#{topic['id']}")
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "current": documents_ingested + 1,
+                                    "label": f"Обсуждение {i}/{total}: {title}",
+                                    "nodes_created": nodes_created,
+                                    "nodes_updated": nodes_updated,
+                                }
+                            )
+                            msg = _html_to_text(topic.get("message") or "")
+                            process(f"{title}\n\n{msg}".strip(), f"discussion:{title}")
+                    except Exception as exc:
+                        skipped.append(f"discussions: {exc}")
+
+                if "files" in ctypes:
+                    yield _sse({"type": "stage", "stage": "files", "label": "Файлы курса"}, pad=True)
+                    try:
+                        all_files = cc.list_files(cid)
+                        supported = [
+                            f
+                            for f in all_files
+                            if (
+                                any(f.get("content-type", "").startswith(p) for p in SUPPORTED_MIME_PREFIXES)
+                                or any((f.get("filename") or "").lower().endswith(ext) for ext in SUPPORTED_EXTENSIONS)
+                            )
+                            and (f.get("size") or 0) <= MAX_FILE_SIZE
+                        ]
+                        capped = supported[: payload.max_files]
+                        if len(supported) > payload.max_files:
+                            skipped.append(
+                                f"files: показано {payload.max_files} из {len(supported)} "
+                                f"(увеличь max_files чтобы обработать больше)"
+                            )
+                        token = os.getenv("CANVAS_TOKEN", "")
+                        auth_headers = {"Authorization": f"Bearer {token}"}
+                        total = len(capped)
+                        for i, file_meta in enumerate(capped, 1):
+                            fname = (
+                                file_meta.get("display_name")
+                                or file_meta.get("filename")
+                                or f"file_{file_meta['id']}"
+                            )
+                            download_url = file_meta.get("url") or ""
+                            label = f"file:{fname}"
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "current": documents_ingested + 1,
+                                    "label": f"Файл {i}/{total}: {fname}",
+                                    "nodes_created": nodes_created,
+                                    "nodes_updated": nodes_updated,
+                                }
+                            )
+                            if not download_url:
+                                skipped.append(f"{label}: нет URL для скачивания")
+                                continue
+                            try:
+                                file_bytes = _download_canvas_file(download_url, auth_headers)
+                                text_content = _extract_canvas_file_text(
+                                    fname,
+                                    file_meta.get("content-type") or "",
+                                    file_bytes,
+                                )
+                                process(text_content, label)
+                            except Exception as exc:
+                                skipped.append(f"{label}: {exc}")
+                    except Exception as exc:
+                        skipped.append(f"files list: {exc}")
+
+                yield _sse(
+                    {
+                        "type": "done",
+                        "result": {
+                            "course_id": cid,
+                            "documents_ingested": documents_ingested,
+                            "nodes_created": nodes_created,
+                            "nodes_updated": nodes_updated,
+                            "document_ids": [doc.document_id for doc in documents],
+                            "documents": [doc.model_dump() for doc in documents],
+                            "skipped": skipped,
+                        },
+                    }
+                )
+            except Exception as exc:
+                logger.exception("ingest-stream fatal error: %s", exc)
+                yield _sse({"type": "error", "message": str(exc)})
 
     return StreamingResponse(
         generate(),
