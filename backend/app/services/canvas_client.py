@@ -1,6 +1,7 @@
 """
 Canvas LMS REST API client.
-Reads CANVAS_URL and CANVAS_TOKEN from environment variables.
+Reads CANVAS_URL and CANVAS_TOKEN from environment at call time
+(no module-level caching — safe for test environments that swap env vars).
 """
 import os
 import re
@@ -10,19 +11,16 @@ from urllib.parse import urlencode
 
 import requests
 
-_CANVAS_URL = os.getenv("CANVAS_URL", "").rstrip("/")
-_CANVAS_TOKEN = os.getenv("CANVAS_TOKEN", "")
-
 
 def _headers() -> dict:
-    token = os.getenv("CANVAS_TOKEN", _CANVAS_TOKEN)
+    token = os.getenv("CANVAS_TOKEN", "")
     if not token:
         raise RuntimeError("CANVAS_TOKEN environment variable not set")
     return {"Authorization": f"Bearer {token}"}
 
 
 def _base_url() -> str:
-    url = os.getenv("CANVAS_URL", _CANVAS_URL).rstrip("/")
+    url = os.getenv("CANVAS_URL", "").rstrip("/")
     if not url:
         raise RuntimeError("CANVAS_URL environment variable not set")
     return url
@@ -37,6 +35,19 @@ def _parse_next_link(link_header: str) -> str | None:
     return None
 
 
+def _check_canvas_errors(data: Any, url: str) -> None:
+    """Raise a descriptive error if Canvas returned an error envelope."""
+    if isinstance(data, dict) and "errors" in data:
+        msgs = "; ".join(
+            e.get("message") or e.get("type") or str(e)
+            for e in (data["errors"] if isinstance(data["errors"], list) else [data["errors"]])
+        )
+        raise requests.HTTPError(
+            f"Canvas API error for {url}: {msgs}",
+            response=None,
+        )
+
+
 def get_all(path: str, params: dict | None = None) -> list[dict[str, Any]]:
     """Paginate through all pages of a Canvas list endpoint."""
     url = f"{_base_url()}/api/v1{path}"
@@ -49,12 +60,18 @@ def get_all(path: str, params: dict | None = None) -> list[dict[str, Any]]:
             time.sleep(5)
             continue
         resp.raise_for_status()
-        # Respect Canvas leaky-bucket rate limit
+
+        # Respect Canvas leaky-bucket rate limit.
+        # Formula: sleep proportional to how close we are to exhaustion.
+        # Divide by 100 (not 1000) so the sleep is meaningful before hitting 429.
         remaining = float(resp.headers.get("X-Rate-Limit-Remaining", 600))
         cost = float(resp.headers.get("X-Request-Cost", 1))
         if remaining < 300:
-            time.sleep(max(0.5 * cost * (300 - remaining) / 1000, 0.05))
+            time.sleep(max(0.5 * cost * (300 - remaining) / 100, 0.05))
+
         data = resp.json()
+        _check_canvas_errors(data, url)
+
         if isinstance(data, list):
             results.extend(data)
         else:
@@ -68,7 +85,9 @@ def get_one(path: str, params: dict | None = None) -> dict[str, Any]:
     url = f"{_base_url()}/api/v1{path}"
     resp = requests.get(url, headers=_headers(), params=params, timeout=30)
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    _check_canvas_errors(data, url)
+    return data
 
 
 # ── Convenience wrappers ────────────────────────────────────────────────────

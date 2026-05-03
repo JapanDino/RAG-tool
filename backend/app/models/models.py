@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Text, JSON, DateTime, ForeignKey, Enum, Float, Boolean
+from sqlalchemy import String, Integer, Text, JSON, DateTime, ForeignKey, Enum, Float, Boolean, UniqueConstraint, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
@@ -55,6 +55,12 @@ class Embedding(Base):
 
 class KnowledgeNode(Base):
     __tablename__ = "knowledge_nodes"
+    __table_args__ = (
+        # Prevents duplicate nodes from concurrent Canvas ingestions.
+        # Covers the non-NULL document_id case (all Canvas-ingested nodes).
+        # A separate partial index (see migration 0016) covers document_id IS NULL.
+        UniqueConstraint("dataset_id", "document_id", "title", name="uq_kn_dataset_doc_title"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
     document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)

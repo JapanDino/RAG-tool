@@ -122,6 +122,9 @@ def _document_title(source_label: str) -> str:
 
 
 def _download_canvas_file(download_url: str, auth_headers: dict[str, str]) -> bytes:
+    token = auth_headers.get("Authorization", "")
+    if not token or token == "Bearer ":
+        raise ValueError("CANVAS_TOKEN пустой — невозможно скачать файл")
     resp = requests.get(download_url, headers=auth_headers, timeout=60, stream=True)
     resp.raise_for_status()
     size_header = resp.headers.get("Content-Length")
@@ -544,7 +547,10 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
             token = os.getenv("CANVAS_TOKEN", "")
             auth_headers = {"Authorization": f"Bearer {token}"}
             for file_meta in capped:
-                fname = file_meta.get("display_name") or file_meta.get("filename") or f"file_{file_meta['id']}"
+                fname = file_meta.get("display_name") or file_meta.get("filename")
+                if not fname:
+                    fname = f"file_{file_meta['id']}"
+                    logger.warning("Canvas file %s has no name/extension — text extraction may fail", file_meta['id'])
                 download_url = file_meta.get("url") or ""
                 label = f"file:{fname}"
                 if not download_url:
@@ -761,11 +767,13 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                         auth_headers = {"Authorization": f"Bearer {token}"}
                         total = len(capped)
                         for i, file_meta in enumerate(capped, 1):
-                            fname = (
-                                file_meta.get("display_name")
-                                or file_meta.get("filename")
-                                or f"file_{file_meta['id']}"
-                            )
+                            fname = file_meta.get("display_name") or file_meta.get("filename")
+                            if not fname:
+                                fname = f"file_{file_meta['id']}"
+                                logger.warning(
+                                    "Canvas file %s has no name/extension — text extraction may fail",
+                                    file_meta["id"],
+                                )
                             download_url = file_meta.get("url") or ""
                             label = f"file:{fname}"
                             yield _sse(
