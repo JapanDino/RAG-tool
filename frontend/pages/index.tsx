@@ -480,9 +480,10 @@ export default function Home() {
   const [canvasMaxFiles, setCanvasMaxFiles] = useState(20);
   const [canvasIngesting, setCanvasIngesting] = useState(false);
 const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
-const [canvasProgress, setCanvasProgress] = useState<{ label: string; stage: string; nodes_created: number; nodes_updated: number } | null>(null);
+const [canvasProgress, setCanvasProgress] = useState<{ label: string; stage: string; nodes_created: number; nodes_updated: number; elapsedSec?: number } | null>(null);
 const [canvasAlert, setCanvasAlert] = useState<CanvasAlert | null>(null);
 const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
+const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 
   // Restore persisted values on mount
@@ -948,7 +949,26 @@ const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
     setCanvasIngesting(true);
     setCanvasIngestResult(null);
     setCanvasAlert(null);
-    setCanvasProgress({ label: "Подключение к Canvas…", stage: "start", nodes_created: 0, nodes_updated: 0 });
+    setCanvasProgress({ label: "Подключение к Canvas…", stage: "start", nodes_created: 0, nodes_updated: 0, elapsedSec: 0 });
+    if (canvasProgressTimerRef.current) clearInterval(canvasProgressTimerRef.current);
+    const startedAt = Date.now();
+    canvasProgressTimerRef.current = setInterval(() => {
+      const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+      setCanvasProgress((prev) => {
+        if (!prev) return prev;
+        let label = prev.label;
+        if (prev.stage === "start") {
+          if (elapsedSec >= 15) {
+            label = "Canvas отвечает медленно, но анализ продолжается…";
+          } else if (elapsedSec >= 8) {
+            label = "Запрашиваем структуру курса и список материалов…";
+          } else if (elapsedSec >= 4) {
+            label = "Открываем поток событий и готовим импорт…";
+          }
+        }
+        return { ...prev, label, elapsedSec };
+      });
+    }, 1000);
 
     try {
       const response = await fetch(`${apiBase}/canvas/ingest-stream`, {
@@ -1000,7 +1020,7 @@ const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
               if (ev.type === "start" || ev.type === "stage") {
                 setCanvasProgress(p => ({ ...p!, label: ev.label, stage: ev.stage ?? ev.type }));
               } else if (ev.type === "progress") {
-                setCanvasProgress({ label: ev.label, stage: "processing", nodes_created: ev.nodes_created ?? 0, nodes_updated: ev.nodes_updated ?? 0 });
+                setCanvasProgress(p => ({ ...(p || { elapsedSec: 0 }), label: ev.label, stage: "processing", nodes_created: ev.nodes_created ?? 0, nodes_updated: ev.nodes_updated ?? 0 }));
               } else if (ev.type === "done") {
                 setCanvasIngestResult(ev.result);
                 setCanvasAlert(null);
@@ -1028,6 +1048,10 @@ const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
       });
       addToast(isNetwork ? "Нет связи с backend" : `Canvas: ${String(err instanceof Error ? err.message : err)}`, "error");
     } finally {
+      if (canvasProgressTimerRef.current) {
+        clearInterval(canvasProgressTimerRef.current);
+        canvasProgressTimerRef.current = null;
+      }
       setCanvasIngesting(false);
       setCanvasProgress(null);
     }
@@ -2837,9 +2861,14 @@ const analysisFlowSteps = [
                     <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.2)" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                         <span className={styles.spinner} style={{ flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 500, lineHeight: 1.4 }}>
-                          {canvasProgress.label}
-                        </span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 500, lineHeight: 1.4 }}>
+                            {canvasProgress.label}
+                          </div>
+                          <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)" }}>
+                            Шаг: {canvasProgress.stage} · прошло {canvasProgress.elapsedSec ?? 0} c
+                          </div>
+                        </div>
                       </div>
                       {/* Indeterminate progress bar */}
                       <div style={{ height: 4, borderRadius: 4, background: "rgba(99,102,241,0.15)", overflow: "hidden" }}>

@@ -86,8 +86,14 @@ def _check_canvas_configured() -> None:
         raise HTTPException(400, "CANVAS_URL не настроен в backend/.env")
 
 
-def _sse(event: dict) -> str:
-    return f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+def _sse(event: dict, pad: bool = False) -> str:
+    payload = f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+    if not pad:
+        return payload
+    # Some proxies/browser paths buffer tiny initial SSE chunks. Padding the first
+    # control events helps the client receive them immediately instead of waiting
+    # for the first large "progress" event.
+    return (":" + (" " * 2048) + "\n\n") + payload
 
 
 def _canvas_source_key(source_label: str) -> str:
@@ -525,10 +531,10 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                 nodes_updated += nu
 
         try:
-            yield _sse({"type": "start", "label": "Подключение к Canvas..."})
+            yield _sse({"type": "start", "label": "Подключение к Canvas..."}, pad=True)
 
             if "syllabus" in ctypes:
-                yield _sse({"type": "stage", "stage": "syllabus", "label": "Силлабус"})
+                yield _sse({"type": "stage", "stage": "syllabus", "label": "Силлабус"}, pad=True)
                 try:
                     course = cc.get_one(f"/courses/{cid}", {"include[]": "syllabus_body"})
                     body = _html_to_text(course.get("syllabus_body") or "")
@@ -547,7 +553,7 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                     skipped.append(f"syllabus: {exc}")
 
             if "pages" in ctypes:
-                yield _sse({"type": "stage", "stage": "pages", "label": "Страницы курса"})
+                yield _sse({"type": "stage", "stage": "pages", "label": "Страницы курса"}, pad=True)
                 try:
                     pages = _safe_list_pages(cid)
                     total_pages = len(pages)
@@ -571,7 +577,7 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                     skipped.append(f"pages list: {exc}")
 
             if "assignments" in ctypes:
-                yield _sse({"type": "stage", "stage": "assignments", "label": "Задания"})
+                yield _sse({"type": "stage", "stage": "assignments", "label": "Задания"}, pad=True)
                 try:
                     assignments = cc.list_assignments(cid)
                     total = len(assignments)
@@ -592,7 +598,7 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                     skipped.append(f"assignments: {exc}")
 
             if "quizzes" in ctypes:
-                yield _sse({"type": "stage", "stage": "quizzes", "label": "Тесты"})
+                yield _sse({"type": "stage", "stage": "quizzes", "label": "Тесты"}, pad=True)
                 try:
                     quizzes = cc.list_quizzes(cid)
                     total = len(quizzes)
@@ -621,7 +627,7 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                     skipped.append(f"quizzes: {exc}")
 
             if "discussions" in ctypes:
-                yield _sse({"type": "stage", "stage": "discussions", "label": "Обсуждения"})
+                yield _sse({"type": "stage", "stage": "discussions", "label": "Обсуждения"}, pad=True)
                 try:
                     topics = cc.list_discussions(cid)
                     total = len(topics)
@@ -642,7 +648,7 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                     skipped.append(f"discussions: {exc}")
 
             if "files" in ctypes:
-                yield _sse({"type": "stage", "stage": "files", "label": "Файлы курса"})
+                yield _sse({"type": "stage", "stage": "files", "label": "Файлы курса"}, pad=True)
                 try:
                     all_files = cc.list_files(cid)
                     supported = [
