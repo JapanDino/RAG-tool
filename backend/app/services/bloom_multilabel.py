@@ -67,8 +67,6 @@ def classify_bloom_multilabel(
 
     sorted_levels = sorted(zip(LEVEL_ORDER, probs), key=lambda x: x[1], reverse=True)
     top_levels = [lvl for lvl, p in sorted_levels if p >= min_prob][:max_levels]
-    if not top_levels:
-        top_levels = [sorted_levels[0][0]]
 
     return {
         "prob_vector": probs,
@@ -76,4 +74,3 @@ def classify_bloom_multilabel(
         "rationale": obj.rationale,
         "triggers": {},
     }
-

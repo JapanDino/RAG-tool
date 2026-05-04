@@ -228,6 +228,18 @@ class NodeLabelsOut(BaseModel):
     node_id: int
     annotator: str
     labels: List[BloomLevel]
+    version: int = 1
+    created_at: Optional[Union[datetime, str]] = None
+    updated_at: Optional[Union[datetime, str]] = None
+
+
+class NodeLabelRevisionOut(BaseModel):
+    id: int
+    node_id: int
+    annotator: str
+    labels: List[BloomLevel]
+    version: int
+    source: str
     created_at: Optional[Union[datetime, str]] = None
 
 class LabelQueueItem(BaseModel):
@@ -238,12 +250,17 @@ class LabelQueueItem(BaseModel):
     top_levels: List[BloomLevel]
     frequency: Optional[int] = None
     rationale: Optional[str] = None
+    uncertainty: float = 1.0
+    review_status: Literal["scorable", "needs_review"] = "needs_review"
+    review_reasons: List[str] = []
     labeled: bool = False
     labels: Optional[List[BloomLevel]] = None
 
 class LabelQueueOut(BaseModel):
     total: int
     labeled: int
+    scorable: int = 0
+    needs_review: int = 0
     items: List[LabelQueueItem]
 
 class NodeMergeIn(BaseModel):

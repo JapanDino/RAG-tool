@@ -1,6 +1,7 @@
 import type { Css } from "cytoscape";
 
 export type BloomLevel = "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
+export type ReviewStatus = "scorable" | "needs_review";
 
 export const BLOOM_LEVELS: BloomLevel[] = [
   "remember",
@@ -64,4 +65,7 @@ export type AnalyzeNode = {
   top_levels: BloomLevel[];
   frequency?: number | null;
   rationale?: string | null;
+  uncertainty?: number | null;
+  review_status?: ReviewStatus | null;
+  review_reasons?: string[] | null;
 };

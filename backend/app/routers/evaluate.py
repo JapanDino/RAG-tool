@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..db.session import get_db
 from ..models.models import KnowledgeNode, NodeLabel
 from ..utils.bloom import LEVEL_ORDER
+from ..utils.review_status import assess_prediction_review
 from ..services.bloom_multilabel import classify_bloom_multilabel
 
 
@@ -94,6 +95,14 @@ def evaluate_multilabel(
     embedding_model: str | None = None,
     min_prob: float = 0.2,
     max_levels: int = 2,
+    prediction_source: str = Query(
+        "recompute",
+        pattern="^(recompute|stored|auto)$",
+    ),
+    evaluation_scope: str = Query(
+        "all",
+        pattern="^(all|scorable_only|needs_review_only)$",
+    ),
     db: Session = Depends(get_db),
 ):
     q = (
@@ -114,20 +123,52 @@ def evaluate_multilabel(
     y_pred: list[list[int]] = []
     used_stored_predictions = 0
     used_recomputed_predictions = 0
+    considered_predictions = 0
+    review_needed_predictions = 0
+    scorable_predictions = 0
+    skipped_predictions = 0
 
     for nl, kn in rows:
-        y_true.append(_vectorize(nl.labels or []))
-        if kn.top_levels:
-            y_pred.append(_vectorize(kn.top_levels))
+        if prediction_source == "stored":
+            pred_levels = list(kn.top_levels or [])
+            pred_rationale = ((kn.model_info or {}) if isinstance(kn.model_info, dict) else {}).get("rationale")
+            pred_prob_vector = list(kn.prob_vector or [])
+            used_stored_predictions += 1
+        elif prediction_source == "auto" and kn.top_levels:
+            pred_levels = list(kn.top_levels or [])
+            pred_rationale = ((kn.model_info or {}) if isinstance(kn.model_info, dict) else {}).get("rationale")
+            pred_prob_vector = list(kn.prob_vector or [])
             used_stored_predictions += 1
         else:
             text = f"{kn.title}. {kn.context_text}".strip()
             pred = classify_bloom_multilabel(text, min_prob=min_prob, max_levels=max_levels)
-            y_pred.append(_vectorize(pred.get("top_levels") or []))
+            pred_levels = list(pred.get("top_levels") or [])
+            pred_rationale = pred.get("rationale")
+            pred_prob_vector = list(pred.get("prob_vector") or [])
             used_recomputed_predictions += 1
+
+        review = assess_prediction_review(pred_levels, pred_rationale, pred_prob_vector)
+        considered_predictions += 1
+        if review["status"] == "needs_review":
+            review_needed_predictions += 1
+        else:
+            scorable_predictions += 1
+
+        if evaluation_scope == "scorable_only" and review["status"] != "scorable":
+            skipped_predictions += 1
+            continue
+        if evaluation_scope == "needs_review_only" and review["status"] != "needs_review":
+            skipped_predictions += 1
+            continue
+
+        # An explicit stored-only evaluation should surface missing cached
+        # predictions as empty predictions instead of silently recomputing them.
+        y_true.append(_vectorize(nl.labels or []))
+        y_pred.append(_vectorize(pred_levels))
 
     report: dict[str, Any] = {
         "samples": len(y_true),
+        "samples_considered": considered_predictions,
         "hamming_loss": round(_hamming_loss(y_true, y_pred), 4),
         "f1_micro": round(_f1_micro(y_true, y_pred), 4),
         "f1_macro": round(_f1_macro(y_true, y_pred), 4),
@@ -136,12 +177,24 @@ def evaluate_multilabel(
         "max_levels": max_levels,
         "embedding_model": embedding_model or "all",
         "annotator": annotator,
+        "prediction_source_requested": prediction_source,
+        "evaluation_scope_requested": evaluation_scope,
+        "evaluation_scope": evaluation_scope,
         "prediction_source": (
             "stored_top_levels"
             if used_recomputed_predictions == 0
+            else "current_classifier"
+            if used_stored_predictions == 0
             else "mixed"
         ),
         "stored_predictions": used_stored_predictions,
         "recomputed_predictions": used_recomputed_predictions,
+        "review_needed_predictions": review_needed_predictions,
+        "scorable_predictions": scorable_predictions,
+        "skipped_predictions": skipped_predictions,
+        "review_needed_rate": round(
+            (review_needed_predictions / considered_predictions) if considered_predictions else 0.0,
+            4,
+        ),
     }
     return report

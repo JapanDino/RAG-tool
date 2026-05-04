@@ -124,6 +124,13 @@ def list_discussions(course_id: int) -> list[dict]:
     return get_all(f"/courses/{course_id}/discussion_topics", {"per_page": 50})
 
 
+def list_announcements(course_id: int) -> list[dict]:
+    return get_all(
+        f"/courses/{course_id}/discussion_topics",
+        {"only_announcements": True, "per_page": 50},
+    )
+
+
 def list_files(course_id: int) -> list[dict]:
     return get_all(f"/courses/{course_id}/files", {"per_page": 50})
 

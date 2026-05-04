@@ -90,6 +90,7 @@ def create_nodes(payload: KnowledgeNodeBulkIn, db: Session = Depends(get_db)):
 def list_nodes(
     dataset_id: int | None = None,
     document_id: int | None = None,
+    document_ids: list[int] | None = Query(None),
     chunk_id: int | None = None,
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -100,6 +101,8 @@ def list_nodes(
         query = query.filter(KnowledgeNode.dataset_id == dataset_id)
     if document_id is not None:
         query = query.filter(KnowledgeNode.document_id == document_id)
+    if document_ids:
+        query = query.filter(KnowledgeNode.document_id.in_(document_ids))
     if chunk_id is not None:
         query = query.filter(KnowledgeNode.chunk_id == chunk_id)
 
@@ -119,14 +122,11 @@ def search_nodes(
 ):
     if dim != 1536:
         raise HTTPException(400, "dim must be 1536 for current storage")
-    current_model = current_embedding_model()
-    effective_model = embedding_model or current_model
-    if effective_model != current_model:
-        raise HTTPException(
-            400,
-            "query embedding model must match the active EMBEDDING_PROVIDER; switch provider or omit embedding_model",
-        )
-    qvec = embed_query(q, dim=dim)
+    effective_model = embedding_model or current_embedding_model()
+    try:
+        qvec = embed_query(q, dim=dim, embedding_model=effective_model)
+    except Exception as exc:
+        raise HTTPException(400, f"cannot build query embedding for model '{effective_model}': {exc}")
     lit = vector_literal(qvec)
     filters = ["kn.vec IS NOT NULL", "kn.embedding_model = :em"]
     params = {"qvec": lit, "k": top_k, "em": effective_model}

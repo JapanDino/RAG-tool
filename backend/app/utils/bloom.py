@@ -20,8 +20,6 @@ HEURISTIC_PATTERNS = {
     "evaluate": [r"\bоцен", r"\bкритич", r"\bаргумент", r"\bдоказ", r"\bвывод"],
     "create": [r"\bпроект", r"\bсозда", r"\bразработ", r"\bмодел", r"\bсформулир"],
 }
-DEFAULT_CONTENT_PRIORS = [0.17, 0.24, 0.22, 0.16, 0.11, 0.10]
-
 _WORD_RE = re.compile(r"[А-Яа-яЁёA-Za-z]+(?:-[А-Яа-яЁёA-Za-z]+)?")
 
 
@@ -48,6 +46,7 @@ def _normalize_text(text: str) -> str:
         except Exception:
             lemmas.append(tok.lower())
     return " ".join(lemmas)
+
 
 
 def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
@@ -168,7 +167,7 @@ def classify_bloom_multilabel(
 
     total = sum(counts)
     if total == 0:
-        raw = DEFAULT_CONTENT_PRIORS[:]
+        raw = [1.0 / len(LEVEL_ORDER)] * len(LEVEL_ORDER)
     else:
         raw = [(c + 1) / (total + 6) for c in counts]
 
@@ -179,16 +178,19 @@ def classify_bloom_multilabel(
         probs[max_idx] = round(probs[max_idx] + drift, 3)
 
     sorted_levels = sorted(zip(LEVEL_ORDER, probs), key=lambda x: x[1], reverse=True)
-    top_levels = [lvl for lvl, p in sorted_levels if p >= min_prob][:max_levels]
-    if not top_levels:
-        top_levels = [sorted_levels[0][0]]
+    top_levels = [] if total == 0 else [lvl for lvl, p in sorted_levels if p >= min_prob][:max_levels]
 
     rationale_parts = []
     for lvl in top_levels:
         kws = triggers.get(lvl) or []
         if kws:
             rationale_parts.append(f"{lvl}: {', '.join(sorted(set(kws))[:6])}")
-    rationale = "; ".join(rationale_parts) if rationale_parts else "keyword-baseline"
+    if total == 0:
+        rationale = "insufficient-signal"
+    elif rationale_parts:
+        rationale = "; ".join(rationale_parts)
+    else:
+        rationale = "low-confidence"
 
     return {
         "prob_vector": probs,

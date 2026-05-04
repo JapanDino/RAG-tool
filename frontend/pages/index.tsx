@@ -13,6 +13,7 @@ import {
   LEVEL_BG,
   LEVEL_BORDER,
   AnalyzeNode,
+  ReviewStatus,
 } from "../lib/bloom-constants";
 
 type SearchResult = {
@@ -25,11 +26,42 @@ type SearchResult = {
 
 type Toast = { id: number; msg: string; type: "success" | "error" | "info" };
 type CanvasAlert = { title: string; message: string };
+type CanvasImportedDocument = {
+  document_id: number;
+  title: string;
+  source: string;
+  source_label: string;
+  nodes_created: number;
+  nodes_updated: number;
+};
+type CanvasIngestResult = {
+  course_id: number;
+  documents_ingested: number;
+  nodes_created: number;
+  nodes_updated: number;
+  document_ids: number[];
+  documents: CanvasImportedDocument[];
+  skipped: string[];
+};
 
 type GraphEdge = {
   from_id: number;
   to_id: number;
   weight: number;
+};
+
+type LabelQueueFilter = "all" | "needs_review" | "scorable";
+type LabelProgress = {
+  total: number;
+  labeled: number;
+  scorable: number;
+  needs_review: number;
+};
+
+const LABEL_QUEUE_FILTER_LABELS: Record<LabelQueueFilter, string> = {
+  all: "Все",
+  needs_review: "Нужна проверка",
+  scorable: "Сильные",
 };
 
 const getSortedLevels = (probs: number[]) =>
@@ -40,7 +72,8 @@ type ConfidenceBand = "high" | "medium" | "low";
 
 function getConfidenceMeta(node: Pick<AnalyzeNode, "prob_vector" | "top_levels">) {
   const sorted = getSortedLevels(node.prob_vector || []);
-  const primary = sorted[0] || { lvl: node.top_levels?.[0] || "remember", prob: 0 };
+  const hasAssignedLevel = Boolean(node.top_levels?.length);
+  const primary = sorted[0] || { lvl: "remember", prob: 0 };
   const runnerUp = sorted[1] || null;
   const gap = runnerUp ? primary.prob - runnerUp.prob : primary.prob;
 
@@ -48,28 +81,34 @@ function getConfidenceMeta(node: Pick<AnalyzeNode, "prob_vector" | "top_levels">
   // flat distributions: typical max prob 0.25–0.50). LLM mode will naturally land
   // in "high" more often since it can reach 0.70+.
   let band: ConfidenceBand = "low";
-  if (primary.prob >= 0.45 && gap >= 0.15) {
+  if (hasAssignedLevel && primary.prob >= 0.72 && gap >= 0.18) {
     band = "high";
-  } else if (primary.prob >= 0.30 && gap >= 0.07) {
+  } else if (hasAssignedLevel && primary.prob >= 0.52 && gap >= 0.08) {
     band = "medium";
   }
 
-  const label =
+  let label =
     band === "high"
       ? "Высокая уверенность"
       : band === "medium"
         ? "Средняя уверенность"
         : "Низкая уверенность";
 
-  const shortLabel =
+  let shortLabel =
     band === "high" ? "Высокая" : band === "medium" ? "Средняя" : "Низкая";
 
-  const guidance =
+  let guidance =
     band === "high"
       ? "Распределение устойчивое, ручная проверка обычно не требуется."
       : band === "medium"
         ? "Решение выглядит правдоподобно, но есть близкие альтернативы."
         : "Уровни расположены близко друг к другу — лучше проверить вручную.";
+
+  if (!hasAssignedLevel) {
+    label = "Нет сигнала";
+    shortLabel = "Нет сигнала";
+    guidance = "Модель не нашла достаточных Bloom-маркеров в тексте. Лучше проверить фрагмент вручную.";
+  }
 
   return {
     band,
@@ -80,6 +119,10 @@ function getConfidenceMeta(node: Pick<AnalyzeNode, "prob_vector" | "top_levels">
     runnerUp,
     gap,
   };
+}
+
+function getPrimaryAssignedLevel(node: Pick<AnalyzeNode, "top_levels">): BloomLevel | null {
+  return node.top_levels?.[0] || null;
 }
 
 function getExplainabilityLines(node: AnalyzeNode) {
@@ -261,6 +304,118 @@ function BloomBadge({ level }: { level: BloomLevel }) {
   );
 }
 
+function NoSignalBadge() {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "3px 9px",
+        borderRadius: 999,
+        fontSize: 11.5,
+        fontWeight: 500,
+        whiteSpace: "nowrap",
+        background: "rgba(148, 163, 184, 0.12)",
+        color: "var(--text-muted)",
+        border: "1px solid var(--border-2)",
+      }}
+    >
+      Нет сигнала
+    </span>
+  );
+}
+
+function formatReviewReason(reason: string) {
+  const labels: Record<string, string> = {
+    "no-top-levels": "нет top-level labels",
+    "insufficient-signal": "недостаточно сигнала",
+    "low-confidence": "низкая уверенность",
+    "high-uncertainty": "высокая неопределенность",
+  };
+  return labels[reason] || reason;
+}
+
+function getReviewMeta(
+  node: Pick<AnalyzeNode, "top_levels" | "rationale" | "prob_vector" | "review_status" | "review_reasons" | "uncertainty">
+) {
+  const sorted = getSortedLevels(node.prob_vector || []);
+  const primary = sorted[0]?.prob ?? 0;
+  const secondary = sorted[1]?.prob ?? 0;
+  const uncertainty = node.uncertainty ?? Math.max(0, Math.min(1, 1 - (primary - secondary)));
+  const reasons = [...(node.review_reasons || [])];
+
+  if (reasons.length === 0) {
+    if (!node.top_levels?.length) reasons.push("no-top-levels");
+    if (node.rationale === "insufficient-signal" || node.rationale === "low-confidence") {
+      reasons.push(node.rationale);
+    }
+    if (node.top_levels?.length && uncertainty >= 0.85) {
+      reasons.push("high-uncertainty");
+    }
+  }
+
+  const reviewStatus: ReviewStatus =
+    node.review_status || (reasons.length > 0 ? "needs_review" : "scorable");
+
+  return {
+    reviewStatus,
+    reviewReasons: reasons,
+    uncertainty,
+    needsReview: reviewStatus === "needs_review",
+  };
+}
+
+function ReviewStatusBadge({
+  reviewStatus,
+  uncertainty,
+}: {
+  reviewStatus?: ReviewStatus | null;
+  uncertainty?: number | null;
+}) {
+  const needsReview = reviewStatus === "needs_review";
+  const label = needsReview ? "Needs review" : "Scorable";
+  const tone = needsReview
+    ? {
+        background: "rgba(245, 158, 11, 0.14)",
+        color: "var(--warning)",
+        border: "1px solid rgba(245, 158, 11, 0.28)",
+      }
+    : {
+        background: "rgba(16, 185, 129, 0.12)",
+        color: "var(--success)",
+        border: "1px solid rgba(16, 185, 129, 0.24)",
+      };
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "3px 9px",
+        borderRadius: 999,
+        fontSize: 11.5,
+        fontWeight: 600,
+        whiteSpace: "nowrap",
+        ...tone,
+      }}
+      title={uncertainty != null ? `Uncertainty: ${Number(uncertainty).toFixed(2)}` : label}
+    >
+      <span
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: "50%",
+          background: "currentColor",
+          flexShrink: 0,
+        }}
+      />
+      {label}
+    </span>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────
 
 
@@ -380,6 +535,9 @@ export default function Home() {
   const [graphMinScore, setGraphMinScore] = useState(0.2);
   const [graphIncludeCo, setGraphIncludeCo] = useState(true);
   const [graphLimitNodes, setGraphLimitNodes] = useState(300);
+  const [graphDocumentScope, setGraphDocumentScope] = useState<number[] | null>(null);
+  const [graphScopeLabel, setGraphScopeLabel] = useState<string | null>(null);
+  const [analysisScopeLabel, setAnalysisScopeLabel] = useState<string | null>(null);
   const [filters, setFilters] = useState<Record<BloomLevel, boolean>>({
     remember: true,
     understand: true,
@@ -393,8 +551,9 @@ export default function Home() {
 
   const [annotator, setAnnotator] = useState("default");
   const [labelQueue, setLabelQueue] = useState<AnalyzeNode[]>([]);
+  const [labelQueueFilter, setLabelQueueFilter] = useState<LabelQueueFilter>("all");
   const [labelQueueStatus, setLabelQueueStatus] = useState<string | null>(null);
-  const [labelProgress, setLabelProgress] = useState<{ total: number; labeled: number } | null>(null);
+  const [labelProgress, setLabelProgress] = useState<LabelProgress | null>(null);
   const [currentLabels, setCurrentLabels] = useState<Record<BloomLevel, boolean>>({
     remember: false,
     understand: false,
@@ -487,11 +646,11 @@ export default function Home() {
   const [canvasMaxNodes, setCanvasMaxNodes] = useState(30);
   const [canvasMaxFiles, setCanvasMaxFiles] = useState(20);
   const [canvasIngesting, setCanvasIngesting] = useState(false);
-const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
-const [canvasProgress, setCanvasProgress] = useState<{ label: string; stage: string; nodes_created: number; nodes_updated: number; elapsedSec?: number } | null>(null);
-const [canvasAlert, setCanvasAlert] = useState<CanvasAlert | null>(null);
-const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
-const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [canvasIngestResult, setCanvasIngestResult] = useState<CanvasIngestResult | null>(null);
+  const [canvasProgress, setCanvasProgress] = useState<{ label: string; stage: string; nodes_created: number; nodes_updated: number; elapsedSec?: number } | null>(null);
+  const [canvasAlert, setCanvasAlert] = useState<CanvasAlert | null>(null);
+  const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
+  const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 
   // Restore persisted values on mount
@@ -834,14 +993,20 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     URL.revokeObjectURL(url);
   };
 
-  const loadNodesFromDb = async () => {
+  const loadNodesFromDb = async (documentIds?: number[] | null, scopeLabel?: string | null) => {
     if (!ds) return;
     setNodesStatus("Загружаем узлы из БД...");
+    setAnalysisScopeLabel(scopeLabel ?? null);
     const params = new URLSearchParams({
       dataset_id: String(ds),
       limit: "1000",
       offset: "0",
     });
+    if (documentIds?.length) {
+      for (const documentId of documentIds) {
+        params.append("document_ids", String(documentId));
+      }
+    }
     const json = await apiFetchJson(`/nodes?${params.toString()}`);
     if (!json) {
       setNodesStatus("Ошибка загрузки узлов.");
@@ -850,6 +1015,12 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     const items: AnalyzeNode[] = json.items || [];
     setNodes(items);
     setNodesStatus(items.length ? `Загружено узлов: ${items.length}` : "В БД нет узлов");
+  };
+
+  const openCanvasCourseNodes = async (result: CanvasIngestResult) => {
+    const scopeLabel = `Canvas курс #${result.course_id}: ${result.documents_ingested} документов`;
+    setActiveTab("analysis");
+    await loadNodesFromDb(result.document_ids, scopeLabel);
   };
 
   const loadDashboard = async () => {
@@ -1110,7 +1281,13 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     } else if (nodeSort === "alpha") {
       result.sort((a, b) => a.title.localeCompare(b.title, "ru"));
     } else if (nodeSort === "level") {
-      result.sort((a, b) => BLOOM_LEVELS.indexOf(a.top_levels[0]) - BLOOM_LEVELS.indexOf(b.top_levels[0]));
+      result.sort((a, b) => {
+        const aLevel = getPrimaryAssignedLevel(a);
+        const bLevel = getPrimaryAssignedLevel(b);
+        const aIdx = aLevel ? BLOOM_LEVELS.indexOf(aLevel) : Number.MAX_SAFE_INTEGER;
+        const bIdx = bLevel ? BLOOM_LEVELS.indexOf(bLevel) : Number.MAX_SAFE_INTEGER;
+        return aIdx - bIdx;
+      });
     }
     return result;
   }, [nodes, nodeSearch, nodeSort, filters]);
@@ -1138,7 +1315,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     }
   }, [activeTab, apiStatus]);
 
-  const loadGraph = useCallback(async () => {
+  const fetchGraph = useCallback(async (documentScope?: number[] | null, scopeLabel?: string | null) => {
     if (!ds) return;
     loadGraphAbortRef.current?.abort();
     loadGraphAbortRef.current = new AbortController();
@@ -1150,11 +1327,22 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
       include_cooccurrence: graphIncludeCo ? "true" : "false",
       limit_nodes: String(graphLimitNodes),
     });
+    if (documentScope?.length) {
+      for (const documentId of documentScope) {
+        params.append("document_ids", String(documentId));
+      }
+    }
     const json = await apiFetchJson(`/graph?${params.toString()}`, { signal: loadGraphAbortRef.current.signal });
     if (!json) return;
+    setGraphDocumentScope(documentScope?.length ? documentScope : null);
+    setGraphScopeLabel(scopeLabel ?? null);
     setGraphNodesData(json.nodes || []);
     setGraphEdgesData(json.edges || []);
   }, [apiFetchJson, ds, graphTopK, graphMinScore, graphIncludeCo, graphLimitNodes]);
+
+  const loadGraph = useCallback(async () => {
+    await fetchGraph(graphDocumentScope, graphScopeLabel);
+  }, [fetchGraph, graphDocumentScope, graphScopeLabel]);
 
   const openGraphForCurrentDataset = useCallback(async () => {
     if (!ds) {
@@ -1167,8 +1355,24 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     setGraphSearch("");
     setGraphNodesData([]);
     setGraphEdgesData([]);
-    await loadGraph();
-  }, [ds, loadGraph, addToast]);
+    setGraphDocumentScope(null);
+    setGraphScopeLabel(null);
+    await fetchGraph(null, null);
+  }, [ds, fetchGraph, addToast]);
+
+  const openGraphForDocumentScope = useCallback(async (documentIds: number[], scopeLabel: string) => {
+    if (!ds) {
+      addToast("Выбери dataset перед открытием графа", "error");
+      return;
+    }
+    setActiveTab("graph");
+    setHoveredNode(null);
+    setSelectedNode(null);
+    setGraphSearch("");
+    setGraphNodesData([]);
+    setGraphEdgesData([]);
+    await fetchGraph(documentIds, scopeLabel);
+  }, [addToast, ds, fetchGraph]);
 
   const rebuildGraph = async () => {
     if (!ds) return;
@@ -1195,6 +1399,9 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     setGraphSearch("");
     setGraphNodesData([]);
     setGraphEdgesData([]);
+    setGraphDocumentScope(null);
+    setGraphScopeLabel(null);
+    setAnalysisScopeLabel(null);
   }, [ds]);
 
   const loadMetrics = async () => {
@@ -1210,7 +1417,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
   const loadLabelQueue = async () => {
     if (!ds) return;
     setLabelQueueStatus("Загружаем очередь разметки...");
-    const params = new URLSearchParams({ annotator, limit: "80" });
+    const params = new URLSearchParams({ annotator, limit: "80", review_status: labelQueueFilter });
     const json = await apiFetchJson(`/datasets/${ds}/labeling/queue?${params.toString()}`);
     if (!json) {
       setLabelQueueStatus("Ошибка загрузки очереди.");
@@ -1218,8 +1425,17 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     }
     const items = (json.items || []) as AnalyzeNode[];
     setLabelQueue(items);
-    setLabelProgress({ total: Number(json.total || 0), labeled: Number(json.labeled || 0) });
-    setLabelQueueStatus(items.length ? `В очереди: ${items.length}` : "Очередь пуста");
+    setLabelProgress({
+      total: Number(json.total || 0),
+      labeled: Number(json.labeled || 0),
+      scorable: Number(json.scorable || 0),
+      needs_review: Number(json.needs_review || 0),
+    });
+    setLabelQueueStatus(
+      items.length
+        ? `${LABEL_QUEUE_FILTER_LABELS[labelQueueFilter]}: ${items.length} · needs review: ${Number(json.needs_review || 0)}`
+        : "Очередь пуста"
+    );
     setCurrentLabels({
       remember: false, understand: false, apply: false,
       analyze: false, evaluate: false, create: false,
@@ -1304,6 +1520,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
 const progressPct = labelProgress && labelProgress.total > 0
   ? Math.round((labelProgress.labeled / labelProgress.total) * 100)
   : 0;
+const currentLabelNode = labelQueue[0] ?? null;
 const hasDataset = Boolean(ds);
 const hasAnalysisSource = Boolean(textInput.trim() || analyzeFileName);
 const hasNodes = nodes.length > 0;
@@ -1704,6 +1921,30 @@ const analysisFlowSteps = [
   </div>
 </SectionHero>
 
+              {analysisScopeLabel && (
+                <div
+                  style={{
+                    marginBottom: 14,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(99,102,241,0.22)",
+                    background: "rgba(99,102,241,0.08)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
+                    Сейчас показана разметка: <strong>{analysisScopeLabel}</strong>
+                  </div>
+                  <button className={[styles.btn, styles.btnGhost].join(" ")} onClick={() => loadNodesFromDb()} type="button">
+                    Весь dataset
+                  </button>
+                </div>
+              )}
+
               <div className={styles.grid}>
                 {/* File drop zone */}
                 <div
@@ -1870,7 +2111,7 @@ const analysisFlowSteps = [
 
                   <button
                     className={[styles.btn].join(" ")}
-                    onClick={loadNodesFromDb}
+                    onClick={() => loadNodesFromDb()}
                     disabled={!ds}
                   >
                     <IconNodes />
@@ -1916,7 +2157,13 @@ const analysisFlowSteps = [
                   const topLvl = BLOOM_LEVELS
                     .map(lvl => ({ lvl, count: nodes.filter(n => n.top_levels.includes(lvl)).length }))
                     .sort((a, b) => b.count - a.count)[0];
-                  const avgProb = nodes.reduce((acc, n) => acc + (n.prob_vector[BLOOM_LEVELS.indexOf(n.top_levels[0])] ?? 0), 0) / nodes.length;
+                  const nodesWithTopLevel = nodes.filter((n) => getPrimaryAssignedLevel(n));
+                  const avgProb = nodesWithTopLevel.length > 0
+                    ? nodesWithTopLevel.reduce((acc, n) => {
+                        const topLevel = getPrimaryAssignedLevel(n);
+                        return acc + (topLevel ? (n.prob_vector[BLOOM_LEVELS.indexOf(topLevel)] ?? 0) : 0);
+                      }, 0) / nodesWithTopLevel.length
+                    : 0;
                   return (
                     <div className={styles.statChips}>
                       <div className={styles.statChip}>
@@ -2044,8 +2291,10 @@ const analysisFlowSteps = [
                     {filteredNodes.map((n) => {
                       const sorted = getSortedLevels(n.prob_vector);
                       const confidence = getConfidenceMeta(n);
+                      const review = getReviewMeta(n);
                       const explanationLines = getExplainabilityLines(n);
-                      const accentColor = n.top_levels[0] ? LEVEL_COLORS[n.top_levels[0]] : "var(--border)";
+                      const primaryLevel = getPrimaryAssignedLevel(n);
+                      const accentColor = primaryLevel ? LEVEL_COLORS[primaryLevel] : "var(--border)";
                       return (
                         <div
                           key={n.id}
@@ -2075,9 +2324,10 @@ const analysisFlowSteps = [
 
                           {/* Bloom level badges */}
                           <div className={styles.nodeLevels}>
-                            {n.top_levels.map((lvl) => (
+                            {n.top_levels.length > 0 ? n.top_levels.map((lvl) => (
                               <BloomBadge key={lvl} level={lvl} />
-                            ))}
+                            )) : <NoSignalBadge />}
+                            <ReviewStatusBadge reviewStatus={review.reviewStatus} uncertainty={review.uncertainty} />
                             {typeof n.frequency === "number" && (
                               <span className={styles.kbd}>freq: {n.frequency}</span>
                             )}
@@ -2150,7 +2400,7 @@ const analysisFlowSteps = [
                               </div>
                             ))}
                           </div>
-                          {confidence.band === "low" && (
+                          {(confidence.band === "low" || review.needsReview) && (
                             <div className={styles.reviewHint}>
                               Лучше проверить вручную: модель видит близкие альтернативы между уровнями.
                             </div>
@@ -2328,16 +2578,24 @@ const analysisFlowSteps = [
                   </div>
                   {nodeSearchResults.length > 0 && (
                     <div className={styles.searchResults} style={{ marginTop: 12 }}>
-                      {nodeSearchResults.map(n => (
+                      {nodeSearchResults.map(n => {
+                        const review = getReviewMeta(n);
+                        return (
                         <div key={n.id} className={styles.searchResultCard} style={{ cursor: "pointer" }} onClick={() => setDetailNode(n)}>
                           <div className={styles.searchResultHead}>
-                            {n.top_levels.map(lvl => <BloomBadge key={lvl} level={lvl} />)}
+                            {n.top_levels.length > 0 ? n.top_levels.map(lvl => <BloomBadge key={lvl} level={lvl} />) : <NoSignalBadge />}
+                            <ReviewStatusBadge reviewStatus={review.reviewStatus} uncertainty={review.uncertainty} />
                             <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginLeft: "auto" }}>#{n.id}</span>
                           </div>
                           <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)", marginBottom: 4 }}>{n.title}</div>
                           <div className={styles.searchChunkText}>{n.context_text}</div>
+                          {review.needsReview && (
+                            <div className={styles.reviewHint} style={{ marginTop: 8 }}>
+                              {`Нужна ручная проверка: ${review.reviewReasons.map(formatReviewReason).join(", ")}.`}
+                            </div>
+                          )}
                         </div>
-                      ))}
+                      )})}
                     </div>
                   )}
                   {!isSearching && searchDone && nodeSearchResults.length === 0 && (
@@ -2372,6 +2630,30 @@ const analysisFlowSteps = [
     { label: "Связи", value: graphEdgesData.length, tone: hasGraph ? "success" : "neutral" },
   ]}
 />
+
+              {graphScopeLabel && (
+                <div
+                  style={{
+                    marginBottom: 14,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(16,185,129,0.24)",
+                    background: "rgba(16,185,129,0.08)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
+                    Сейчас показан граф: <strong>{graphScopeLabel}</strong>
+                  </div>
+                  <button className={[styles.btn, styles.btnGhost].join(" ")} onClick={openGraphForCurrentDataset} type="button">
+                    Весь dataset
+                  </button>
+                </div>
+              )}
 
 <div className={[styles.sectionBlock, styles.graphControls].join(" ")}>
                 {/* Level filters */}
@@ -2617,6 +2899,27 @@ const analysisFlowSteps = [
   ]}
 />
 
+{labelProgress && (
+  <div className={[styles.sectionBlock, styles.labelReviewSummary].join(" ")}>
+    <div className={styles.labelReviewStat}>
+      <span className={styles.labelReviewLabel}>Filter</span>
+      <span className={styles.labelReviewValue}>{LABEL_QUEUE_FILTER_LABELS[labelQueueFilter]}</span>
+    </div>
+    <div className={styles.labelReviewStat}>
+      <span className={styles.labelReviewLabel}>Needs review</span>
+      <span className={styles.labelReviewValue}>{labelProgress.needs_review}</span>
+    </div>
+    <div className={styles.labelReviewStat}>
+      <span className={styles.labelReviewLabel}>Scorable</span>
+      <span className={styles.labelReviewValue}>{labelProgress.scorable}</span>
+    </div>
+    <div className={styles.labelReviewStat}>
+      <span className={styles.labelReviewLabel}>Progress</span>
+      <span className={styles.labelReviewValue}>{progressPct}%</span>
+    </div>
+  </div>
+)}
+
 {/* Labeling controls */}
 <div className={[styles.sectionBlock, styles.labelingHeader].join(" ")}>
                 <label className={styles.fieldLabel} style={{ maxWidth: 200 }}>
@@ -2626,6 +2929,20 @@ const analysisFlowSteps = [
                     value={annotator}
                     onChange={(e) => setAnnotator(e.target.value)}
                   />
+                </label>
+                <label className={styles.fieldLabel} style={{ maxWidth: 220 }}>
+                  Queue filter
+                  <select
+                    className={styles.nodeSortSelect}
+                    value={labelQueueFilter}
+                    onChange={(e) => setLabelQueueFilter(e.target.value as LabelQueueFilter)}
+                  >
+                    {Object.entries(LABEL_QUEUE_FILTER_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <button
                   className={[styles.btn, styles.btnPrimary].join(" ")}
@@ -2638,8 +2955,12 @@ const analysisFlowSteps = [
                   className={[styles.btn, styles.btnGhost].join(" ")}
                   onClick={() => {
                     if (!ds) return;
+                    const params = new URLSearchParams({
+                      annotator,
+                      review_status: labelQueueFilter,
+                    });
                     window.open(
-                      `${apiBase}/datasets/${ds}/labeling/export?annotator=${encodeURIComponent(annotator)}`,
+                      `${apiBase}/datasets/${ds}/labeling/export?${params.toString()}`,
                       "_blank"
                     );
                   }}
@@ -2681,23 +3002,49 @@ const analysisFlowSteps = [
               )}
 
               {/* Label card */}
-              {labelQueue[0] ? (
+              {currentLabelNode ? (
                 <div className={styles.labelNodeCard}>
-                  <div className={styles.labelNodeTitle}>{labelQueue[0].title}</div>
-                  <div className={styles.labelNodeContext}>{labelQueue[0].context_text}</div>
+                  <div className={styles.labelNodeHeader}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className={styles.labelNodeTitle}>{currentLabelNode.title}</div>
+                      <div className={styles.labelNodeContext}>{currentLabelNode.context_text}</div>
+                    </div>
+                    <div className={styles.labelNodeReview}>
+                      <ReviewStatusBadge
+                        reviewStatus={currentLabelNode.review_status}
+                        uncertainty={currentLabelNode.uncertainty}
+                      />
+                      {currentLabelNode.uncertainty != null && (
+                        <span className={styles.mutedSm}>
+                          uncertainty {Number(currentLabelNode.uncertainty).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
                   {/* Model prediction meta */}
                   <div className={styles.labelNodeMeta}>
                     <span className={styles.mutedSm}>Предсказание модели:</span>
-                    {labelQueue[0].top_levels.map((lvl) => (
+                    {currentLabelNode.top_levels.length > 0 ? currentLabelNode.top_levels.map((lvl) => (
                       <BloomBadge key={lvl} level={lvl} />
-                    ))}
-                    {labelQueue[0].rationale && (
+                    )) : <NoSignalBadge />}
+                    {currentLabelNode.rationale && (
                       <span className={styles.mutedSm} style={{ marginLeft: 4 }}>
                         — {labelQueue[0].rationale}
                       </span>
                     )}
                   </div>
+
+                  {currentLabelNode.review_status === "needs_review" && (
+                    <div className={styles.reviewAlert}>
+                      <div className={styles.reviewAlertTitle}>Требуется ручная проверка</div>
+                      <div className={styles.reviewAlertText}>
+                        {currentLabelNode.review_reasons?.length
+                          ? currentLabelNode.review_reasons.map(formatReviewReason).join(", ")
+                          : "У модели недостаточно уверенности для надежной авторазметки."}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Level toggles */}
                   <div className={styles.labelLevelToggles}>
@@ -3241,14 +3588,73 @@ const analysisFlowSteps = [
                           </ul>
                         </details>
                       )}
-                      <button
-                        className={[styles.btn, styles.btnPrimary].join(" ")}
-                        onClick={openGraphForCurrentDataset}
-                        style={{ marginTop: 10, width: "100%" }}
-                        type="button"
-                      >
-                        <IconGraph /> Открыть граф знаний
-                      </button>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 10 }}>
+                        <button
+                          className={[styles.btn, styles.btnPrimary].join(" ")}
+                          onClick={() => openCanvasCourseNodes(canvasIngestResult)}
+                          type="button"
+                        >
+                          Показать узлы курса
+                        </button>
+                        <button
+                          className={[styles.btn, styles.btnPrimary].join(" ")}
+                          onClick={() => openGraphForDocumentScope(
+                            canvasIngestResult.document_ids,
+                            `Canvas курс #${canvasIngestResult.course_id}: ${canvasIngestResult.documents_ingested} документов`,
+                          )}
+                          type="button"
+                        >
+                          <IconGraph /> Граф курса
+                        </button>
+                        <button
+                          className={[styles.btn, styles.btnGhost].join(" ")}
+                          onClick={() => loadNodesFromDb()}
+                          type="button"
+                        >
+                          Узлы всего dataset
+                        </button>
+                        <button
+                          className={[styles.btn, styles.btnGhost].join(" ")}
+                          onClick={openGraphForCurrentDataset}
+                          type="button"
+                        >
+                          Граф всего dataset
+                        </button>
+                      </div>
+                      {canvasIngestResult.documents.length > 0 && (
+                        <details style={{ marginTop: 10, fontSize: 12, color: "var(--text-muted)" }}>
+                          <summary style={{ cursor: "pointer" }}>
+                            Импортировано документов: {canvasIngestResult.documents.length}
+                          </summary>
+                          <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                            {canvasIngestResult.documents.map((doc) => (
+                              <div
+                                key={doc.document_id}
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  gap: 10,
+                                  padding: "8px 10px",
+                                  borderRadius: 8,
+                                  background: "var(--bg-card)",
+                                }}
+                              >
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {doc.title}
+                                  </div>
+                                  <div style={{ marginTop: 2, fontSize: 11 }}>
+                                    {doc.source_label}
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 11, whiteSpace: "nowrap" }}>
+                                  +{doc.nodes_created} / ↺{doc.nodes_updated}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3526,6 +3932,10 @@ const analysisFlowSteps = [
       {detailNode && (
         <div className={styles.detailOverlay} onClick={() => setDetailNode(null)}>
           <div className={styles.detailModal} onClick={e => e.stopPropagation()}>
+            {(() => {
+              const detailReview = getReviewMeta(detailNode);
+              return (
+                <>
             <div className={styles.detailHeader}>
               <div className={styles.detailTitle}>{detailNode.title}</div>
               <button className={styles.detailClose} onClick={() => setDetailNode(null)}>×</button>
@@ -3533,10 +3943,24 @@ const analysisFlowSteps = [
             <div className={styles.detailBody}>
               <div className={styles.detailSection}>
                 <div className={styles.detailSectionLabel}>Уровни Блума</div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {detailNode.top_levels.map(lvl => <BloomBadge key={lvl} level={lvl} />)}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  {detailNode.top_levels.length > 0 ? detailNode.top_levels.map(lvl => <BloomBadge key={lvl} level={lvl} />) : <NoSignalBadge />}
+                  <ReviewStatusBadge reviewStatus={detailReview.reviewStatus} uncertainty={detailReview.uncertainty} />
                 </div>
               </div>
+              {detailReview.needsReview && (
+                <div className={styles.detailSection}>
+                  <div className={styles.detailSectionLabel}>Ручная проверка</div>
+                  <div className={styles.reviewAlert}>
+                    <div className={styles.reviewAlertTitle}>Этот узел лучше подтвердить вручную</div>
+                    <div className={styles.reviewAlertText}>
+                      {detailReview.reviewReasons.length
+                        ? detailReview.reviewReasons.map(formatReviewReason).join(", ")
+                        : "У модели недостаточно уверенности для надежной классификации."}
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className={styles.detailSection}>
                 <div className={styles.detailSectionLabel}>Уверенность модели</div>
                 <div className={styles.detailInsightCard}>
@@ -3598,6 +4022,9 @@ const analysisFlowSteps = [
                 </button>
               </div>
             </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

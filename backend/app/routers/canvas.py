@@ -61,15 +61,151 @@ def _html_to_text(html: str) -> str:
         return re.sub(r"\s+", " ", text).strip()
 
 
+def _join_sections(*sections: str) -> str:
+    return "\n\n".join(section.strip() for section in sections if section and section.strip())
+
+
+def _render_list(items: list[str]) -> str:
+    cleaned = [item.strip() for item in items if item and item.strip()]
+    return "\n".join(f"- {item}" for item in cleaned)
+
+
+def _build_syllabus_text(course_id: int, body: str) -> str:
+    return _join_sections(
+        f"# Syllabus: Course {course_id}",
+        "## Content",
+        body,
+    )
+
+
+def _build_page_text(page_title: str, body: str) -> str:
+    return _join_sections(
+        f"# Page: {page_title}",
+        "## Content",
+        body,
+    )
+
+
+def _build_assignment_text(assignment: dict) -> str:
+    name = assignment.get("name", f"#{assignment.get('id', 'assignment')}")
+    description = _html_to_text(assignment.get("description") or "")
+    sections = [f"# Assignment: {name}"]
+
+    if assignment.get("due_at"):
+        sections.append(_join_sections("## Due Date", str(assignment["due_at"])))
+    if assignment.get("points_possible") is not None:
+        sections.append(_join_sections("## Points", str(assignment["points_possible"])))
+
+    submission_types = assignment.get("submission_types") or []
+    rendered_types = _render_list([str(item) for item in submission_types])
+    if rendered_types:
+        sections.append(_join_sections("## Submission Types", rendered_types))
+
+    if description:
+        sections.append(_join_sections("## Description", description))
+
+    return _join_sections(*sections)
+
+
+def _build_quiz_text(quiz: dict, questions: list[dict]) -> str:
+    title = quiz.get("title", f"#{quiz.get('id', 'quiz')}")
+    sections = [f"# Quiz: {title}"]
+
+    description = _html_to_text(quiz.get("description") or "")
+    if description:
+        sections.append(_join_sections("## Description", description))
+    if quiz.get("quiz_type"):
+        sections.append(_join_sections("## Quiz Type", str(quiz["quiz_type"])))
+    if quiz.get("points_possible") is not None:
+        sections.append(_join_sections("## Points", str(quiz["points_possible"])))
+
+    for index, question in enumerate(questions, 1):
+        question_sections = [f"## Question {index}"]
+        question_name = (question.get("question_name") or "").strip()
+        if question_name:
+            question_sections.append(f"### Title\n{question_name}")
+        question_text = _html_to_text(question.get("question_text") or "")
+        if question_text:
+            question_sections.append(_join_sections("### Prompt", question_text))
+        answer_lines = _render_list(
+            [
+                _html_to_text(answer.get("text") or answer.get("html") or "")
+                for answer in (question.get("answers") or [])
+            ]
+        )
+        if answer_lines:
+            question_sections.append(_join_sections("### Answers", answer_lines))
+        sections.append(_join_sections(*question_sections))
+
+    return _join_sections(*sections)
+
+
+def _build_discussion_text(topic: dict) -> str:
+    title = topic.get("title", f"#{topic.get('id', 'discussion')}")
+    message = _html_to_text(topic.get("message") or "")
+    return _join_sections(
+        f"# Discussion: {title}",
+        "## Prompt",
+        message,
+    )
+
+
+def _build_announcement_text(topic: dict) -> str:
+    title = topic.get("title", f"#{topic.get('id', 'announcement')}")
+    message = _html_to_text(topic.get("message") or "")
+    sections = [f"# Announcement: {title}"]
+    if topic.get("posted_at"):
+        sections.append(_join_sections("## Posted At", str(topic["posted_at"])))
+    if message:
+        sections.append(_join_sections("## Message", message))
+    return _join_sections(*sections)
+
+
+def _build_module_text(module: dict) -> str:
+    name = module.get("name", f"#{module.get('id', 'module')}")
+    sections = [f"# Module: {name}"]
+    if module.get("unlock_at"):
+        sections.append(_join_sections("## Unlock At", str(module["unlock_at"])))
+    if module.get("state"):
+        sections.append(_join_sections("## State", str(module["state"])))
+
+    item_lines: list[str] = []
+    for index, item in enumerate(module.get("items") or [], 1):
+        title = item.get("title") or f"Item {index}"
+        item_type = item.get("type") or "Item"
+        line = f"{index}. [{item_type}] {title}"
+        completion = item.get("completion_requirement") or {}
+        if completion.get("type"):
+            line += f" (completion: {completion['type']})"
+        item_lines.append(line)
+
+    if item_lines:
+        sections.append(_join_sections("## Items", "\n".join(item_lines)))
+
+    return _join_sections(*sections)
+
+
+def _clean_canvas_meta(source_meta: dict | None) -> dict:
+    if not source_meta:
+        return {}
+    return {
+        key: value
+        for key, value in source_meta.items()
+        if value is not None and value != "" and value != []
+    }
+
+
 class IngestRequest(BaseModel):
     course_id: int
     dataset_id: int
     content_types: list[str] = [
         "syllabus",
+        "modules",
         "pages",
         "assignments",
         "quizzes",
         "discussions",
+        "announcements",
         "files",
     ]
     max_nodes_per_doc: int = 30
@@ -217,6 +353,7 @@ def _ensure_canvas_document_and_chunks(
     raw_text: str,
     course_id: int,
     source_label: str,
+    source_meta: dict | None,
     dataset_id: int,
     db: Session,
 ) -> tuple[Document, list[Chunk]]:
@@ -243,6 +380,7 @@ def _ensure_canvas_document_and_chunks(
         db.execute(text("DELETE FROM chunks WHERE document_id = :did"), {"did": doc.id})
         db.flush()
 
+    canvas_meta = _clean_canvas_meta(source_meta)
     parts = split_into_chunks(raw_text, max_chars=1500, overlap_chars=150) or [raw_text[:1500]]
     chunks: list[Chunk] = []
     for idx, part in enumerate(parts):
@@ -250,7 +388,12 @@ def _ensure_canvas_document_and_chunks(
             document_id=doc.id,
             idx=idx,
             text=part,
-            meta={"source": "canvas", "course_id": course_id, "canvas_label": source_label},
+            meta={
+                "source": "canvas",
+                "course_id": course_id,
+                "canvas_label": source_label,
+                **canvas_meta,
+            },
         )
         db.add(chunk)
         chunks.append(chunk)
@@ -279,10 +422,42 @@ def _pick_chunk_for_node(node: dict, chunks: list[Chunk]) -> Chunk | None:
     return best or chunks[0]
 
 
+def _build_bloom_input(
+    source_label: str,
+    source_meta: dict | None,
+    node_title: str,
+    context_snippet: str,
+    best_chunk: Chunk | None,
+) -> str:
+    canvas_meta = _clean_canvas_meta(source_meta)
+    sections: list[str] = []
+
+    source_type = canvas_meta.get("canvas_type")
+    source_title = canvas_meta.get("source_title")
+    if source_type or source_title:
+        descriptor = " / ".join(str(part) for part in [source_type, source_title] if part)
+        sections.append(_join_sections("Source", descriptor))
+    else:
+        sections.append(_join_sections("Source", source_label))
+
+    sections.append(_join_sections("Node Title", node_title))
+
+    chunk_text = (best_chunk.text or "").strip() if best_chunk else ""
+    if chunk_text:
+        sections.append(_join_sections("Structured Context", chunk_text[:1200]))
+
+    normalized_ctx = context_snippet.strip()
+    if normalized_ctx and normalized_ctx not in chunk_text:
+        sections.append(_join_sections("Extracted Context", normalized_ctx[:600]))
+
+    return _join_sections(*sections)
+
+
 def _process_document(
     raw_text: str,
     course_id: int,
     source_label: str,
+    source_meta: dict | None,
     dataset_id: int,
     max_nodes: int,
     min_prob: float,
@@ -302,7 +477,15 @@ def _process_document(
         skipped.append(f"{source_label}: узлы не найдены")
         return None
 
-    doc, chunks = _ensure_canvas_document_and_chunks(raw_text, course_id, source_label, dataset_id, db)
+    canvas_meta = _clean_canvas_meta(source_meta)
+    doc, chunks = _ensure_canvas_document_and_chunks(
+        raw_text,
+        course_id,
+        source_label,
+        canvas_meta,
+        dataset_id,
+        db,
+    )
     document_id = doc.id
     source_key = _canvas_source_key(course_id, source_label)
 
@@ -328,9 +511,10 @@ def _process_document(
         ctx = node.get("context_snippet") or raw_text[:600]
         seen_titles.add(title)
         best_chunk = _pick_chunk_for_node(node, chunks)
+        bloom_input = _build_bloom_input(source_label, canvas_meta, title, ctx, best_chunk)
 
         cls = classify_bloom_multilabel(
-            ctx,
+            bloom_input,
             min_prob=min_prob,
             max_levels=2,
         )
@@ -342,9 +526,14 @@ def _process_document(
                 "course_id": course_id,
                 "label": source_label,
                 "document_source": source_key,
+                **canvas_meta,
             },
             "frequency": node.get("frequency"),
             "node_type": node.get("node_type"),
+            "classification_context": {
+                "chunk_id": best_chunk.id if best_chunk else None,
+                "used_structured_chunk": bool(best_chunk and (best_chunk.text or "").strip()),
+            },
             "rationale": cls.get("rationale"),
             **({"module": module_meta} if module_meta else {}),
         }
@@ -489,12 +678,13 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
     documents: list[ImportedDocumentOut] = []
     skipped: list[str] = []
 
-    def process(raw_text: str, label: str) -> None:
+    def process(raw_text: str, label: str, source_meta: dict | None = None) -> None:
         nonlocal nodes_created, nodes_updated, documents_ingested
         imported = _process_document(
             raw_text,
             payload.course_id,
             label,
+            source_meta,
             payload.dataset_id,
             payload.max_nodes_per_doc,
             payload.min_prob,
@@ -518,9 +708,31 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
             course = cc.get_one(f"/courses/{cid}", {"include[]": "syllabus_body"})
             body = _html_to_text(course.get("syllabus_body") or "")
             if body:
-                process(body, f"syllabus:{cid}")
+                process(
+                    _build_syllabus_text(cid, body),
+                    f"syllabus:{cid}",
+                    {"canvas_type": "syllabus", "source_title": f"Course {cid}"},
+                )
         except Exception as exc:
             skipped.append(f"syllabus: {exc}")
+
+    if "modules" in ctypes:
+        try:
+            modules = cc.list_modules(cid)
+            for module in modules:
+                name = module.get("name", module["id"])
+                process(
+                    _build_module_text(module),
+                    f"module:{name}",
+                    {
+                        "canvas_type": "module",
+                        "source_title": name,
+                        "canvas_id": module.get("id"),
+                        "item_count": len(module.get("items") or []),
+                    },
+                )
+        except Exception as exc:
+            skipped.append(f"modules: {exc}")
 
     if "pages" in ctypes:
         try:
@@ -528,7 +740,17 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
             for page in pages:
                 try:
                     full = cc.get_page(cid, page["url"])
-                    process(_html_to_text(full.get("body") or ""), f"page:{page.get('title', page['url'])}")
+                    page_title = page.get("title", page["url"])
+                    process(
+                        _build_page_text(page_title, _html_to_text(full.get("body") or "")),
+                        f"page:{page_title}",
+                        {
+                            "canvas_type": "page",
+                            "source_title": page_title,
+                            "canvas_id": full.get("page_id") or page.get("page_id"),
+                            "page_url": page.get("url"),
+                        },
+                    )
                 except Exception as exc:
                     skipped.append(f"page {page.get('url')}: {exc}")
         except Exception as exc:
@@ -538,9 +760,17 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
         try:
             assignments = cc.list_assignments(cid)
             for assignment in assignments:
-                desc = _html_to_text(assignment.get("description") or "")
-                combined = f"{assignment.get('name', '')}\n\n{desc}".strip()
-                process(combined, f"assignment:{assignment.get('name', assignment['id'])}")
+                name = assignment.get("name", assignment["id"])
+                process(
+                    _build_assignment_text(assignment),
+                    f"assignment:{name}",
+                    {
+                        "canvas_type": "assignment",
+                        "source_title": name,
+                        "canvas_id": assignment.get("id"),
+                        "due_at": assignment.get("due_at"),
+                    },
+                )
         except Exception as exc:
             skipped.append(f"assignments: {exc}")
 
@@ -550,12 +780,17 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
             for quiz in quizzes:
                 try:
                     questions = cc.list_quiz_questions(cid, quiz["id"])
-                    parts = [quiz.get("title", "")]
-                    for question in questions:
-                        parts.append(_html_to_text(question.get("question_text") or ""))
-                        for answer in question.get("answers") or []:
-                            parts.append(_html_to_text(answer.get("text") or answer.get("html") or ""))
-                    process("\n".join(p for p in parts if p.strip()), f"quiz:{quiz.get('title', quiz['id'])}")
+                    title = quiz.get("title", quiz["id"])
+                    process(
+                        _build_quiz_text(quiz, questions),
+                        f"quiz:{title}",
+                        {
+                            "canvas_type": "quiz",
+                            "source_title": title,
+                            "canvas_id": quiz.get("id"),
+                            "question_count": len(questions),
+                        },
+                    )
                 except Exception as exc:
                     skipped.append(f"quiz {quiz.get('id')}: {exc}")
         except Exception as exc:
@@ -565,11 +800,37 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
         try:
             topics = cc.list_discussions(cid)
             for topic in topics:
-                msg = _html_to_text(topic.get("message") or "")
-                combined = f"{topic.get('title', '')}\n\n{msg}".strip()
-                process(combined, f"discussion:{topic.get('title', topic['id'])}")
+                title = topic.get("title", topic["id"])
+                process(
+                    _build_discussion_text(topic),
+                    f"discussion:{title}",
+                    {
+                        "canvas_type": "discussion",
+                        "source_title": title,
+                        "canvas_id": topic.get("id"),
+                        "posted_at": topic.get("posted_at"),
+                    },
+                )
         except Exception as exc:
             skipped.append(f"discussions: {exc}")
+
+    if "announcements" in ctypes:
+        try:
+            announcements = cc.list_announcements(cid)
+            for topic in announcements:
+                title = topic.get("title", topic["id"])
+                process(
+                    _build_announcement_text(topic),
+                    f"announcement:{title}",
+                    {
+                        "canvas_type": "announcement",
+                        "source_title": title,
+                        "canvas_id": topic.get("id"),
+                        "posted_at": topic.get("posted_at"),
+                    },
+                )
+        except Exception as exc:
+            skipped.append(f"announcements: {exc}")
 
     if "files" in ctypes:
         try:
@@ -608,7 +869,16 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
                         file_meta.get("content-type") or "",
                         file_bytes,
                     )
-                    process(text_content, label)
+                    process(
+                        text_content,
+                        label,
+                        {
+                            "canvas_type": "file",
+                            "source_title": fname,
+                            "canvas_id": file_meta.get("id"),
+                            "content_type": file_meta.get("content-type"),
+                        },
+                    )
                 except Exception as exc:
                     skipped.append(f"{label}: {exc}")
         except Exception as exc:
@@ -653,12 +923,13 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
             cid = payload.course_id
             ctypes = set(payload.content_types)
 
-            def process(raw_text: str, label: str) -> None:
+            def process(raw_text: str, label: str, source_meta: dict | None = None) -> None:
                 nonlocal nodes_created, nodes_updated, documents_ingested
                 imported = _process_document(
                     raw_text,
                     payload.course_id,
                     label,
+                    source_meta,
                     payload.dataset_id,
                     payload.max_nodes_per_doc,
                     payload.min_prob,
@@ -692,9 +963,42 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                                     "nodes_updated": nodes_updated,
                                 }
                             )
-                            process(body, f"syllabus:{cid}")
+                            process(
+                                _build_syllabus_text(cid, body),
+                                f"syllabus:{cid}",
+                                {"canvas_type": "syllabus", "source_title": f"Course {cid}"},
+                            )
                     except Exception as exc:
                         skipped.append(f"syllabus: {exc}")
+
+                if "modules" in ctypes:
+                    yield _sse({"type": "stage", "stage": "modules", "label": "Модули курса"}, pad=True)
+                    try:
+                        modules = cc.list_modules(cid)
+                        total = len(modules)
+                        for i, module in enumerate(modules, 1):
+                            name = module.get("name", f"#{module['id']}")
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "current": documents_ingested + 1,
+                                    "label": f"Модуль {i}/{total}: {name}",
+                                    "nodes_created": nodes_created,
+                                    "nodes_updated": nodes_updated,
+                                }
+                            )
+                            process(
+                                _build_module_text(module),
+                                f"module:{name}",
+                                {
+                                    "canvas_type": "module",
+                                    "source_title": name,
+                                    "canvas_id": module.get("id"),
+                                    "item_count": len(module.get("items") or []),
+                                },
+                            )
+                    except Exception as exc:
+                        skipped.append(f"modules: {exc}")
 
                 if "pages" in ctypes:
                     yield _sse({"type": "stage", "stage": "pages", "label": "Страницы курса"}, pad=True)
@@ -714,7 +1018,16 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                             )
                             try:
                                 full = cc.get_page(cid, page["url"])
-                                process(_html_to_text(full.get("body") or ""), f"page:{page_title}")
+                                process(
+                                    _build_page_text(page_title, _html_to_text(full.get("body") or "")),
+                                    f"page:{page_title}",
+                                    {
+                                        "canvas_type": "page",
+                                        "source_title": page_title,
+                                        "canvas_id": full.get("page_id") or page.get("page_id"),
+                                        "page_url": page.get("url"),
+                                    },
+                                )
                             except Exception as exc:
                                 skipped.append(f"page {page.get('url')}: {exc}")
                     except Exception as exc:
@@ -736,8 +1049,16 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                                     "nodes_updated": nodes_updated,
                                 }
                             )
-                            desc = _html_to_text(assignment.get("description") or "")
-                            process(f"{name}\n\n{desc}".strip(), f"assignment:{name}")
+                            process(
+                                _build_assignment_text(assignment),
+                                f"assignment:{name}",
+                                {
+                                    "canvas_type": "assignment",
+                                    "source_title": name,
+                                    "canvas_id": assignment.get("id"),
+                                    "due_at": assignment.get("due_at"),
+                                },
+                            )
                     except Exception as exc:
                         skipped.append(f"assignments: {exc}")
 
@@ -759,12 +1080,16 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                             )
                             try:
                                 questions = cc.list_quiz_questions(cid, quiz["id"])
-                                parts = [title]
-                                for question in questions:
-                                    parts.append(_html_to_text(question.get("question_text") or ""))
-                                    for answer in question.get("answers") or []:
-                                        parts.append(_html_to_text(answer.get("text") or answer.get("html") or ""))
-                                process("\n".join(p for p in parts if p.strip()), f"quiz:{title}")
+                                process(
+                                    _build_quiz_text(quiz, questions),
+                                    f"quiz:{title}",
+                                    {
+                                        "canvas_type": "quiz",
+                                        "source_title": title,
+                                        "canvas_id": quiz.get("id"),
+                                        "question_count": len(questions),
+                                    },
+                                )
                             except Exception as exc:
                                 skipped.append(f"quiz {quiz.get('id')}: {exc}")
                     except Exception as exc:
@@ -786,10 +1111,47 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                                     "nodes_updated": nodes_updated,
                                 }
                             )
-                            msg = _html_to_text(topic.get("message") or "")
-                            process(f"{title}\n\n{msg}".strip(), f"discussion:{title}")
+                            process(
+                                _build_discussion_text(topic),
+                                f"discussion:{title}",
+                                {
+                                    "canvas_type": "discussion",
+                                    "source_title": title,
+                                    "canvas_id": topic.get("id"),
+                                    "posted_at": topic.get("posted_at"),
+                                },
+                            )
                     except Exception as exc:
                         skipped.append(f"discussions: {exc}")
+
+                if "announcements" in ctypes:
+                    yield _sse({"type": "stage", "stage": "announcements", "label": "Объявления"}, pad=True)
+                    try:
+                        announcements = cc.list_announcements(cid)
+                        total = len(announcements)
+                        for i, topic in enumerate(announcements, 1):
+                            title = topic.get("title", f"#{topic['id']}")
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "current": documents_ingested + 1,
+                                    "label": f"Объявление {i}/{total}: {title}",
+                                    "nodes_created": nodes_created,
+                                    "nodes_updated": nodes_updated,
+                                }
+                            )
+                            process(
+                                _build_announcement_text(topic),
+                                f"announcement:{title}",
+                                {
+                                    "canvas_type": "announcement",
+                                    "source_title": title,
+                                    "canvas_id": topic.get("id"),
+                                    "posted_at": topic.get("posted_at"),
+                                },
+                            )
+                    except Exception as exc:
+                        skipped.append(f"announcements: {exc}")
 
                 if "files" in ctypes:
                     yield _sse({"type": "stage", "stage": "files", "label": "Файлы курса"}, pad=True)
@@ -842,7 +1204,16 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                                     file_meta.get("content-type") or "",
                                     file_bytes,
                                 )
-                                process(text_content, label)
+                                process(
+                                    text_content,
+                                    label,
+                                    {
+                                        "canvas_type": "file",
+                                        "source_title": fname,
+                                        "canvas_id": file_meta.get("id"),
+                                        "content_type": file_meta.get("content-type"),
+                                    },
+                                )
                             except Exception as exc:
                                 skipped.append(f"{label}: {exc}")
                     except Exception as exc:

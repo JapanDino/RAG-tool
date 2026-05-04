@@ -1,50 +1,109 @@
 import re
 
-try:
-    from razdel import sentenize as _razdel_sentenize  # type: ignore
-    _HAS_RAZDEL = True
-except ImportError:
-    _HAS_RAZDEL = False
-
-# Fallback: split only on hard punctuation followed by whitespace, with a
-# negative lookbehind that skips single-letter abbreviations (т., д., е.)
-# and common Russian abbreviation roots.
-_ABBREV_ROOT_RE = re.compile(
-    r"\b(?:рис|табл|стр|проф|доц|акад|ул|пр|кв|гл|разд|см|ср|напр|д-р|mr|dr|no|vs)$",
-    re.IGNORECASE,
-)
-_FALLBACK_SPLIT_RE = re.compile(r"[!?]\s+|\.{3,}\s+")
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+WHITESPACE_RE = re.compile(r"\s+")
+STRUCTURED_LINE_RE = re.compile(r"^(#{1,6}\s+|[-*\u2022]\s+|\d+[.)]\s+)")
+HEADING_LIKE_RE = re.compile(r"^[A-Z0-9\u0400-\u04FF][^.!?]{0,80}:$")
 
 
-def _split_sentences(text: str) -> list[str]:
-    """Split text into sentences, Russian-abbreviation-aware."""
-    if _HAS_RAZDEL:
-        return [s.text.strip() for s in _razdel_sentenize(text) if s.text.strip()]
-    # Fallback: split on ! and ? unconditionally; split on . only when not
-    # preceded by a single Cyrillic/Latin letter or a known abbreviation root.
-    parts: list[str] = []
-    buf_start = 0
-    for m in re.finditer(r"[.!?]+", text):
-        punct_start = m.start()
-        after = text[m.end():]
-        if not re.match(r"\s", after):
-            continue  # no whitespace after punct → not a sentence boundary
-        punct_char = m.group()[0]
-        if punct_char == ".":
-            before = text[:punct_start]
-            word_m = re.search(r"(\w+)$", before)
-            if word_m:
-                word = word_m.group(1)
-                if len(word) == 1 and word.isalpha():
-                    continue  # initial / single-letter abbreviation
-                if _ABBREV_ROOT_RE.search(word):
-                    continue  # known abbreviation root
-        parts.append(text[buf_start:m.end()].strip())
-        buf_start = m.end()
-    tail = text[buf_start:].strip()
-    if tail:
-        parts.append(tail)
-    return [p for p in parts if p]
+def _normalize_line(line: str) -> str:
+    return WHITESPACE_RE.sub(" ", line.strip())
+
+
+def _is_structured_line(line: str) -> bool:
+    if not line:
+        return False
+    return bool(STRUCTURED_LINE_RE.match(line) or HEADING_LIKE_RE.match(line))
+
+
+def _structured_units(text: str) -> list[str]:
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    units: list[str] = []
+    paragraph_parts: list[str] = []
+
+    def flush_paragraph() -> None:
+        if paragraph_parts:
+            units.append(" ".join(paragraph_parts))
+            paragraph_parts.clear()
+
+    for raw_line in lines:
+        line = _normalize_line(raw_line)
+        if not line:
+            flush_paragraph()
+            continue
+        if _is_structured_line(line):
+            flush_paragraph()
+            units.append(line)
+            continue
+        paragraph_parts.append(line)
+
+    flush_paragraph()
+    return units
+
+
+def _split_long_unit(unit: str, min_len: int, max_chars: int) -> list[str]:
+    if len(unit) <= max_chars:
+        if len(unit) >= min_len or _is_structured_line(unit):
+            return [unit]
+        return []
+
+    sentences = [s.strip() for s in SENTENCE_SPLIT_RE.split(unit) if s.strip()]
+    if len(sentences) <= 1:
+        sentences = unit.split()
+        if not sentences:
+            return []
+
+    pieces: list[str] = []
+    current_parts: list[str] = []
+    current_len = 0
+
+    for part in sentences:
+        trial_len = current_len + len(part) + (1 if current_parts else 0)
+        if trial_len <= max_chars:
+            current_parts.append(part)
+            current_len = trial_len
+            continue
+
+        if current_parts:
+            joined = " ".join(current_parts)
+            if len(joined) >= min_len:
+                pieces.append(joined)
+        current_parts = []
+        current_len = 0
+
+        if len(part) <= max_chars:
+            current_parts = [part]
+            current_len = len(part)
+            continue
+
+        sub_parts: list[str] = []
+        sub_len = 0
+        for word in part.split():
+            word_len = sub_len + len(word) + (1 if sub_parts else 0)
+            if word_len <= max_chars:
+                sub_parts.append(word)
+                sub_len = word_len
+            else:
+                joined = " ".join(sub_parts)
+                if len(joined) >= min_len:
+                    pieces.append(joined)
+                sub_parts = [word]
+                sub_len = len(word)
+        if sub_parts:
+            joined = " ".join(sub_parts)
+            if len(joined) >= min_len:
+                pieces.append(joined)
+
+    if current_parts:
+        joined = " ".join(current_parts)
+        if len(joined) >= min_len:
+            pieces.append(joined)
+
+    return pieces
+
+
+def _join_chunk(parts: list[str]) -> str:
+    return "\n\n".join(parts).strip()
 
 
 def split_into_chunks(
@@ -60,78 +119,65 @@ def split_into_chunks(
     next one so that concepts straddling a boundary stay visible in both.
     Uses razdel for Russian-aware sentence splitting when available.
     """
-    cleaned = " ".join(text.strip().split())
+    cleaned = text.strip()
     if not cleaned:
         return []
 
-    sentences = [s for s in _split_sentences(cleaned) if len(s) >= min_len]
-    if not sentences:
-        # Text is shorter than min_len or has no sentence boundaries —
-        # return it as a single chunk (don't apply min_len to the whole text).
-        part = cleaned[:max_chars]
-        return [part] if part else []
+    units = _structured_units(cleaned)
+    if not units:
+        part = _normalize_line(cleaned)[:max_chars]
+        return [part] if len(part) >= min_len else []
 
     chunks: list[str] = []
     current_parts: list[str] = []
     current_len = 0
 
     def flush() -> str:
-        joined = " ".join(current_parts)
+        joined = _join_chunk(current_parts)
         if len(joined) >= min_len:
             chunks.append(joined)
         return joined
 
-    for sent in sentences:
-        # A single sentence longer than max_chars is word-split.
-        if len(sent) > max_chars:
-            if current_parts:
-                flush()
-            sub_parts: list[str] = []
-            sub_len = 0
-            for word in sent.split():
-                trial_len = sub_len + len(word) + (1 if sub_parts else 0)
-                if trial_len <= max_chars:
-                    sub_parts.append(word)
-                    sub_len = trial_len
-                else:
-                    if sub_parts:
-                        chunk = " ".join(sub_parts)
-                        if len(chunk) >= min_len:
-                            chunks.append(chunk)
-                    sub_parts = [word]
-                    sub_len = len(word)
-            if sub_parts:
-                chunk = " ".join(sub_parts)
-                if len(chunk) >= min_len:
-                    chunks.append(chunk)
-            current_parts = []
-            current_len = 0
-            # Seed overlap from the last appended sub-chunk.
-            if overlap_chars > 0 and chunks:
-                seed = chunks[-1][-overlap_chars:].strip()
-                if seed:
-                    current_parts = [seed]
-                    current_len = len(seed)
+    for unit in units:
+        split_units = _split_long_unit(unit, min_len=min_len, max_chars=max_chars)
+        if not split_units:
             continue
 
-        added_len = current_len + len(sent) + (1 if current_parts else 0)
-        if added_len > max_chars and current_parts:
-            prev = flush()
-            current_parts = []
-            current_len = 0
-            # Seed overlap from the end of the flushed chunk.
-            if overlap_chars > 0 and prev:
-                seed = prev[-overlap_chars:].strip()
-                if seed:
-                    current_parts = [seed]
-                    current_len = len(seed)
+        for split_unit in split_units:
+            separator_len = 2 if current_parts else 0
+            added_len = current_len + len(split_unit) + separator_len
+            if added_len > max_chars and current_parts:
+                prev = flush()
+                current_parts = []
+                current_len = 0
+                if overlap_chars > 0 and prev:
+                    seed = prev[-overlap_chars:].strip()
+                    if seed:
+                        current_parts = [seed]
+                        current_len = len(seed)
 
-        current_parts.append(sent)
-        current_len = len(" ".join(current_parts))
+            if len(split_unit) > max_chars:
+                # Defensive fallback for pathological inputs.
+                if current_parts:
+                    flush()
+                    current_parts = []
+                    current_len = 0
+                chunk = split_unit[:max_chars].strip()
+                if len(chunk) >= min_len:
+                    chunks.append(chunk)
+                continue
+
+            current_parts.append(split_unit)
+            current_len = len(_join_chunk(current_parts))
 
     if current_parts:
-        remaining = " ".join(current_parts)
+        remaining = _join_chunk(current_parts)
         if len(remaining) >= min_len:
             chunks.append(remaining)
 
-    return chunks if chunks else ([cleaned[:max_chars]] if len(cleaned) >= min_len else [])
+    # If no chunks were produced (e.g. the whole text is shorter than min_len),
+    # return the full text as one chunk rather than silently discarding it.
+    if not chunks:
+        fallback = _normalize_line(cleaned)[:max_chars]
+        return [fallback] if fallback else []
+    return chunks

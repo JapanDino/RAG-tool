@@ -50,6 +50,14 @@ def _l2_normalize(vecs: np.ndarray) -> np.ndarray:
 _TOK_RE = re.compile(r"[\w-]+", re.UNICODE)
 
 
+def _allow_hash_fallback() -> bool:
+    return os.getenv("EMBEDDING_ALLOW_HASH_FALLBACK", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 class HashingProvider(EmbeddingProvider):
     """
     Lightweight offline embeddings (no torch).
@@ -187,12 +195,18 @@ def get_embedding_provider() -> EmbeddingProvider:
         try:
             return LocalProvider(model)
         except Exception as exc:
-            warnings.warn(
-                f"Falling back to hash embeddings because local model '{model}' is unavailable: {exc}",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return HashingProvider()
+            if _allow_hash_fallback():
+                warnings.warn(
+                    f"Falling back to hash embeddings because local model '{model}' is unavailable: {exc}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                return HashingProvider()
+            raise RuntimeError(
+                "Local embeddings are unavailable and hash fallback is disabled. "
+                "Install the local embedding model dependencies or set "
+                "EMBEDDING_ALLOW_HASH_FALLBACK=1 for an explicit degraded mode."
+            ) from exc
     if name == "openai":
         model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
         return OpenAIProvider(model)
@@ -204,3 +218,24 @@ def get_embedding_provider() -> EmbeddingProvider:
 
 def current_embedding_model() -> str:
     return get_embedding_provider().embedding_model
+
+
+def provider_for_embedding_model(embedding_model: str) -> EmbeddingProvider:
+    model = (embedding_model or "").strip()
+    if not model:
+        raise RuntimeError("embedding_model is empty")
+    if model == current_embedding_model():
+        return get_embedding_provider()
+    if model == "hash:v1:1536":
+        return HashingProvider()
+    if model == "random:test-only":
+        seed = int(os.getenv("EMBEDDING_RANDOM_SEED", "42"))
+        return RandomProvider(seed=seed)
+    if model.startswith("openai:"):
+        return OpenAIProvider(model.split(":", 1)[1])
+    if model.startswith("local:") and model.endswith(":padded1536"):
+        local_model = model[len("local:") : -len(":padded1536")]
+        if not local_model:
+            raise RuntimeError(f"Invalid local embedding model identifier: {model}")
+        return LocalProvider(local_model)
+    raise RuntimeError(f"Unsupported embedding_model: {model}")

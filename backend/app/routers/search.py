@@ -19,14 +19,11 @@ def search(
 ):
     if dim != 1536:
         raise HTTPException(400, "dim must be 1536 for current storage")
-    current_model = current_embedding_model()
-    em = embedding_model or current_model
-    if em != current_model:
-        raise HTTPException(
-            400,
-            "query embedding model must match the active EMBEDDING_PROVIDER; switch provider or omit embedding_model",
-        )
-    qvec = embed_query(q, dim=dim)
+    em = embedding_model or current_embedding_model()
+    try:
+        qvec = embed_query(q, dim=dim, embedding_model=em)
+    except Exception as exc:
+        raise HTTPException(400, f"cannot build query embedding for model '{em}': {exc}")
     lit = vector_literal(qvec)
     sql = """
         WITH q AS (SELECT CAST(:qvec AS vector) AS v)

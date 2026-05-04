@@ -118,6 +118,7 @@ def _load_persisted_edges(
 def get_graph(
     dataset_id: int | None = None,
     document_id: int | None = None,
+    document_ids: list[int] | None = Query(None),
     embedding_model: str | None = None,
     top_k: int = Query(5, ge=1, le=50),
     min_score: float = Query(0.2, ge=0.0, le=1.0),
@@ -126,26 +127,16 @@ def get_graph(
     limit_nodes: int = Query(2000, ge=1, le=10000),
     db: Session = Depends(get_db),
 ):
-    filters = ["kn.vec IS NOT NULL"]
-    params: dict[str, object] = {"limit": limit_nodes}
+    document_scope = sorted({*(document_ids or []), *([document_id] if document_id is not None else [])})
+
+    node_ids_query = db.query(KnowledgeNode.id).filter(KnowledgeNode.vec.is_not(None))
     if dataset_id is not None:
-        filters.append("kn.dataset_id = :ds")
-        params["ds"] = dataset_id
-    if document_id is not None:
-        filters.append("kn.document_id = :doc")
-        params["doc"] = document_id
+        node_ids_query = node_ids_query.filter(KnowledgeNode.dataset_id == dataset_id)
+    if document_scope:
+        node_ids_query = node_ids_query.filter(KnowledgeNode.document_id.in_(document_scope))
     if embedding_model is not None:
-        filters.append("kn.embedding_model = :em")
-        params["em"] = embedding_model
-    where_clause = " AND ".join(filters)
-    ids_sql = f"""
-        SELECT kn.id
-        FROM knowledge_nodes kn
-        WHERE {where_clause}
-        ORDER BY kn.id ASC
-        LIMIT :limit
-    """
-    node_ids = [row[0] for row in db.execute(text(ids_sql), params).all()]
+        node_ids_query = node_ids_query.filter(KnowledgeNode.embedding_model == embedding_model)
+    node_ids = [row[0] for row in node_ids_query.order_by(KnowledgeNode.id.asc()).limit(limit_nodes).all()]
     if node_ids:
         nodes = (
             db.query(KnowledgeNode)
@@ -190,9 +181,12 @@ def get_graph(
         if dataset_id is not None:
             filters.append("kn2.dataset_id = :ds")
             params_base["ds"] = dataset_id
-        if document_id is not None:
+        if len(document_scope) == 1:
             filters.append("kn2.document_id = :doc")
-            params_base["doc"] = document_id
+            params_base["doc"] = document_scope[0]
+        elif document_scope:
+            filters.append("kn2.document_id = ANY(:doc_ids)")
+            params_base["doc_ids"] = document_scope
         if embedding_model is not None:
             filters.append("kn2.embedding_model = :em")
             params_base["em"] = embedding_model

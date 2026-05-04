@@ -17,7 +17,7 @@ RUN printf 'Acquire::https::Verify-Peer "false";\nAcquire::https::Verify-Host "f
        poppler-utils \
   && rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/99no-ssl-verify
 
-COPY backend/requirements.txt /tmp/requirements.txt
+COPY backend/requirements-docker.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --default-timeout=120 --retries 10 -r /tmp/requirements.txt
 
 COPY . /app

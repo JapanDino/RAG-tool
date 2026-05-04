@@ -107,6 +107,20 @@ class NodeLabel(Base):
     labels: Mapped[list] = mapped_column(JSON, default=list)
     annotator: Mapped[str] = mapped_column(String(200), default="default", index=True)
     source: Mapped[str] = mapped_column(String(50), default="human")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NodeLabelRevision(Base):
+    __tablename__ = "node_label_revisions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    node_label_id: Mapped[int] = mapped_column(ForeignKey("node_labels.id", ondelete="CASCADE"), index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True)
+    labels: Mapped[list] = mapped_column(JSON, default=list)
+    annotator: Mapped[str] = mapped_column(String(200), default="default", index=True)
+    source: Mapped[str] = mapped_column(String(50), default="human")
+    version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class Rubric(Base):
