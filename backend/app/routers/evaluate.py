@@ -128,11 +128,22 @@ def evaluate_multilabel(
     scorable_predictions = 0
     skipped_predictions = 0
 
+    missing_stored_predictions = 0
+
     for nl, kn in rows:
         if prediction_source == "stored":
+            pred_prob_vector = list(kn.prob_vector or [])
+            # A node with an empty prob_vector has never been run through the
+            # classifier — it has no cached prediction at all, not even a
+            # deliberate zero-signal result.  Including it as "predicts nothing"
+            # would silently skew Hamming/F1 metrics downward.  Skip it and
+            # surface the count in the report so callers know data is missing.
+            if not pred_prob_vector:
+                missing_stored_predictions += 1
+                skipped_predictions += 1
+                continue
             pred_levels = list(kn.top_levels or [])
             pred_rationale = ((kn.model_info or {}) if isinstance(kn.model_info, dict) else {}).get("rationale")
-            pred_prob_vector = list(kn.prob_vector or [])
             used_stored_predictions += 1
         elif prediction_source == "auto" and kn.top_levels:
             pred_levels = list(kn.top_levels or [])
@@ -188,6 +199,7 @@ def evaluate_multilabel(
             else "mixed"
         ),
         "stored_predictions": used_stored_predictions,
+        "missing_stored_predictions": missing_stored_predictions,
         "recomputed_predictions": used_recomputed_predictions,
         "review_needed_predictions": review_needed_predictions,
         "scorable_predictions": scorable_predictions,

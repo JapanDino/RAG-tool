@@ -1,11 +1,20 @@
 ALTER TABLE node_labels
   ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;
 
+-- Add updated_at WITHOUT a DEFAULT so pre-existing rows receive NULL rather
+-- than the migration execution timestamp.  Back-fill from created_at first,
+-- then attach the server default for new rows only.
+-- (Adding DEFAULT now() up-front populates every row with migration time,
+--  making the subsequent UPDATE a no-op — BUG 28 fix.)
 ALTER TABLE node_labels
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 
 UPDATE node_labels
-SET updated_at = COALESCE(updated_at, created_at, now());
+SET updated_at = COALESCE(created_at, now())
+WHERE updated_at IS NULL;
+
+ALTER TABLE node_labels
+  ALTER COLUMN updated_at SET DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS node_label_revisions (
   id SERIAL PRIMARY KEY,
@@ -26,6 +35,14 @@ CREATE INDEX IF NOT EXISTS idx_node_label_revisions_node_id
 
 CREATE INDEX IF NOT EXISTS idx_node_label_revisions_node_annotator
   ON node_label_revisions (node_id, annotator, version);
+
+-- Prevents duplicate revision rows from concurrent set_node_labels calls
+-- (matches the UniqueConstraint in NodeLabelRevision SQLAlchemy model).
+ALTER TABLE node_label_revisions
+  DROP CONSTRAINT IF EXISTS uq_node_label_revision_version;
+ALTER TABLE node_label_revisions
+  ADD CONSTRAINT uq_node_label_revision_version
+  UNIQUE (node_label_id, version);
 
 INSERT INTO node_label_revisions (node_label_id, node_id, labels, annotator, source, version, created_at)
 SELECT nl.id, nl.node_id, nl.labels, nl.annotator, nl.source, COALESCE(nl.version, 1), COALESCE(nl.created_at, now())

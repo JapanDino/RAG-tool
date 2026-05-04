@@ -114,6 +114,10 @@ class NodeLabel(Base):
 
 class NodeLabelRevision(Base):
     __tablename__ = "node_label_revisions"
+    __table_args__ = (
+        # Prevents duplicate revision rows from concurrent set_node_labels calls.
+        UniqueConstraint("node_label_id", "version", name="uq_node_label_revision_version"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     node_label_id: Mapped[int] = mapped_column(ForeignKey("node_labels.id", ondelete="CASCADE"), index=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True)
