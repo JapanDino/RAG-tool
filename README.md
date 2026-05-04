@@ -1,141 +1,90 @@
-# RAG-tool — Анализ образовательного контента по таксономии Блума
+# RAG-tool — Bloom's Taxonomy Knowledge Graph
 
-Инструмент для автоматической разметки учебных материалов по **пересмотренной таксономии Блума** (Anderson & Krathwohl, 2001). Импортирует курсы из **Canvas LMS**, разбивает тексты на смысловые узлы, классифицирует их по 6 когнитивным уровням и строит **граф знаний** с семантическими связями.
+> An educational content analysis pipeline that extracts concepts from text, classifies them across Bloom's six cognitive levels, and renders an interactive knowledge graph.
 
----
-
-## Содержание
-
-- [Что делает инструмент](#что-делает-инструмент)
-- [Уровни таксономии Блума](#уровни-таксономии-блума)
-- [Архитектура](#архитектура)
-- [Стек технологий](#стек-технологий)
-- [Быстрый старт](#быстрый-старт)
-- [Конфигурация](#конфигурация)
-- [API](#api)
-- [Тестирование](#тестирование)
-- [Структура проекта](#структура-проекта)
+![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green?logo=fastapi)
+![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-blue?logo=postgresql)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker)
+![Tests](https://img.shields.io/badge/tests-46%20passing-brightgreen)
 
 ---
 
-## Что делает инструмент
+## What it does
 
-```
-Canvas LMS ──► Импорт контента ──► Разбивка на чанки
-                                         │
-                    ┌────────────────────▼────────────────────┐
-                    │         Классификатор Блума              │
-                    │  keyword (offline) │ LLM (OpenAI GPT)   │
-                    └────────────────────┬────────────────────┘
-                                         │  prob_vector[6]
-                    ┌────────────────────▼────────────────────┐
-                    │          Узлы знаний (Knowledge Graph)   │
-                    │  title · context · top_levels · vec      │
-                    └────────────────────┬────────────────────┘
-                                         │
-                         pgvector HNSW (косинусное сходство)
-                                         │
-                    ┌────────────────────▼────────────────────┐
-                    │    Граф с рёбрами: similarity + co-occ   │
-                    │    Интерактивная визуализация в UI        │
-                    └─────────────────────────────────────────┘
-```
-
-**Основные возможности:**
-
-- 📥 **Импорт из Canvas LMS** — страницы, задания, тесты, обсуждения, файлы (PDF, DOCX, TXT)
-- 🧠 **Двухрежимная классификация** — быстрый keyword-классификатор (офлайн) и LLM-режим (GPT-4o-mini)
-- 📊 **Вектор вероятностей** `[p_remember, p_understand, p_apply, p_analyze, p_evaluate, p_create]` для каждого узла
-- 🕸️ **Граф знаний** — семантические рёбра (pgvector HNSW) + рёбра совместной встречаемости
-- 🔍 **Семантический поиск** по узлам курса
-- 🏷️ **Ручная разметка** — очередь узлов для верификации человеком
-- 📈 **Метрики качества** — Hamming loss, F1-micro, F1-macro по multi-label аннотациям
+1. **Upload or paste** educational text (lectures, syllabi, textbook chapters).
+2. **Extract knowledge nodes** — key concepts and terms using NER (natasha) or regex heuristics.
+3. **Classify each node** across Bloom's Taxonomy (Remember → Understand → Apply → Analyze → Evaluate → Create) using a fast keyword + morphology classifier (offline, no GPU required).
+4. **Visualise** the result as an interactive graph where node colour = Bloom level, node size = concept frequency, and split-pie nodes show multi-level concepts.
+5. **Evaluate** classifier quality with multilabel F1 / Hamming loss metrics via a built-in annotation queue.
 
 ---
 
-## Уровни таксономии Блума
+## Stack
 
-| Уровень | Ключевые глаголы | Пример задачи |
-|---|---|---|
-| **Remember** — Запомни | назовите, перечислите, определите | «Перечислите 5 алгоритмов классификации» |
-| **Understand** — Пойми | объясните, опишите, классифицируйте | «Объясните компромисс смещение-дисперсия» |
-| **Apply** — Примени | используйте, вычислите, решите | «Обучите KNN на датасете iris, вычислите F1» |
-| **Analyze** — Анализируй | сравните, выделите, разберите | «Сопоставьте XGBoost и случайный лес» |
-| **Evaluate** — Оценивай | оцените, аргументируйте, обоснуйте | «Докажите или опровергните утверждение» |
-| **Create** — Создавай | разработайте, спроектируйте, создайте | «Спроектируйте пайплайн детекции мошенничества» |
-
-Классификатор возвращает **нормированный вектор вероятностей** (сумма = 1.0) по всем 6 уровням одновременно — это позволяет работать с пограничными случаями (e.g. `analyze 0.58 + understand 0.19`).
-
----
-
-## Архитектура
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Docker Compose                            │
-│                                                                  │
-│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────────┐ │
-│  │ frontend │   │ backend  │   │  worker  │   │  db (pgvec)  │ │
-│  │ Next.js  │──►│ FastAPI  │──►│  Celery  │   │  PostgreSQL  │ │
-│  │ :3000    │   │ :8000    │   │          │   │  + pgvector  │ │
-│  └──────────┘   └────┬─────┘   └────┬─────┘   └──────────────┘ │
-│                       │              │          ┌──────────────┐ │
-│                       └──────────────┴─────────►│    Redis     │ │
-│                                                 │   (broker)   │ │
-│                                                 └──────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Слои бэкенда
-
-| Слой | Описание |
+| Layer | Technology |
 |---|---|
-| **Routers** (`/canvas`, `/nodes`, `/graph`, `/datasets`) | HTTP API — FastAPI |
-| **Tasks** (`index_dataset`, `annotate_dataset`, `rebuild_graph_edges`) | Async Celery tasks |
-| **Services** | `chunking`, `embedding_provider`, `node_extractor`, `bloom_multilabel` |
-| **Utils** | `bloom.py` — keyword classifier; `vector.py` — pgvector литерал |
-| **Models** | SQLAlchemy ORM: Dataset, Document, Chunk, KnowledgeNode, KnowledgeEdge |
+| **API** | FastAPI · Uvicorn · Pydantic v2 |
+| **NLP** | pymorphy3 · natasha NER · sentence-transformers (`intfloat/multilingual-e5-large`) |
+| **Database** | PostgreSQL 16 + pgvector extension |
+| **Queue / Cache** | Redis · Celery |
+| **Frontend** | Next.js 14 · React · Cytoscape.js |
+| **OCR** | Tesseract · pdf2image · pdfminer |
+| **Containerisation** | Docker Compose |
 
 ---
 
-## Стек технологий
+## Architecture
 
-### Backend
-| Технология | Версия | Роль |
-|---|---|---|
-| **FastAPI** | ≥0.110 | REST API |
-| **SQLAlchemy** | 2.0 | ORM |
-| **PostgreSQL + pgvector** | pg16 + pgvector | Хранение векторов, HNSW-индекс |
-| **Celery + Redis** | 5.3 / 7 | Очередь задач |
-| **sentence-transformers** | ≥3.0 | Локальные эмбеддинги (`multilingual-e5-large`, 1024-dim → pad до 1536) |
-| **natasha** | ≥1.6 | Русскоязычный NER для извлечения узлов |
-| **razdel** | любая | Русскоязычная сегментация предложений |
-| **OpenAI API** | — | LLM-классификация (опционально) |
-| **pypdf / pytesseract** | — | Извлечение текста из PDF (с OCR) |
+```
+┌─────────────────────────────────────────────────────────┐
+│                      Frontend (Next.js)                  │
+│  Upload → Analyze → Graph View → Label Queue → Metrics  │
+└────────────────────────┬────────────────────────────────┘
+                         │ HTTP / REST
+┌────────────────────────▼────────────────────────────────┐
+│                    FastAPI Backend                        │
+│                                                          │
+│  /analyze/content   ←──── NodeExtractor (natasha/regex) │
+│  /analyze/classify  ←──── BloomClassifier (keyword/llm) │
+│  /search            ←──── EmbeddingProvider (local/oai) │
+│  /datasets          ←──── DatasetManager                │
+│  /evaluate          ←──── MultilabelMetrics              │
+└───────┬──────────────────────────────┬──────────────────┘
+        │                              │
+   PostgreSQL + pgvector            Redis + Celery
+   (knowledge_nodes, docs)         (async jobs)
+```
 
-### Frontend
-| Технология | Роль |
-|---|---|
-| **Next.js** | React SSR фреймворк |
-| **TypeScript** | Типизация |
-| **vis-network** | Визуализация графа знаний |
+### Bloom classifier pipeline
 
-### Инфраструктура
-| Технология | Роль |
-|---|---|
-| **Docker Compose** | Оркестрация всех сервисов |
-| **pgvector HNSW** | Косинусный поиск ближайших соседей (m=16, ef_construction=64) |
-| **SQL-миграции** | Версионированные `.sql`-файлы, применяются при старте |
+```
+raw text
+   │
+   ▼
+_normalize_text()          ← pymorphy3 lemmatisation (Russian/mixed)
+   │
+   ├─ keyword matching     ← bloom_verbs_ru.json  (6 × ~30 lemmatised verbs)
+   │
+   └─ heuristic regex      ← HEURISTIC_PATTERNS   (structural cues: "семинар", "лабораторная"…)
+          │
+          ▼
+   Laplace-smoothed probability vector [6]
+          │
+          ▼
+   top_levels (≥ 0.20 threshold, max 2)
+```
 
 ---
 
-## Быстрый старт
+## Quick start
 
-### Требования
-- Docker + Docker Compose
-- 8 GB RAM (для `multilingual-e5-large`; можно переключиться на `hash`-провайдер)
+### Prerequisites
+- Docker Desktop ≥ 24 (with Compose v2)
+- 4 GB RAM free (the e5-large embedding model loads on first run)
 
-### 1. Клонировать и настроить
+### 1. Clone and configure
 
 ```bash
 git clone https://github.com/JapanDino/RAG-tool.git
@@ -143,200 +92,140 @@ cd RAG-tool
 cp backend/.env.example backend/.env
 ```
 
-Отредактируйте `backend/.env`:
+Edit `backend/.env` — only two keys are mandatory:
 
-```env
-# Обязательно для Canvas-импорта
-CANVAS_URL=https://your-canvas-instance.edu
-CANVAS_TOKEN=your_canvas_api_token
-
-# Эмбеддинги: local (семантические) | hash (быстро, без GPU) | openai
-EMBEDDING_PROVIDER=local
-EMBEDDING_MODEL_LOCAL=intfloat/multilingual-e5-large
-
-# LLM-классификация (опционально, по умолчанию — keyword)
-# BLOOM_CLASSIFIER=llm
-# OPENAI_API_KEY=sk-...
-# LLM_MODEL=gpt-4o-mini
-```
-
-### 2. Запустить
-
-```bash
-docker compose up -d
-```
-
-Сервисы поднимутся автоматически. Миграции БД применяются при старте backend-контейнера.
-
-| Сервис | URL |
-|---|---|
-| Frontend | http://localhost:3000 |
-| Backend API | http://localhost:8000 |
-| API Docs (Swagger) | http://localhost:8000/docs |
-
-### 3. Импортировать курс из Canvas
-
-В UI перейдите на вкладку **Canvas**, введите ID курса и нажмите **Импортировать**. Прогресс отображается в реальном времени через SSE-стрим.
-
-Или через API:
-
-```bash
-curl -X POST http://localhost:8000/canvas/ingest-stream \
-  -H "Content-Type: application/json" \
-  -d '{"course_id": 12345, "dataset_id": 1, "max_nodes_per_doc": 30}'
-```
-
----
-
-## Конфигурация
-
-### Переменные окружения
-
-| Переменная | По умолчанию | Описание |
+| Key | Default | Notes |
 |---|---|---|
-| `DATABASE_URL` | `postgresql+psycopg://rag:rag_pass@db:5432/rag_db` | Строка подключения к БД |
-| `REDIS_URL` | `redis://redis:6379/0` | Брокер Celery |
-| `EMBEDDING_PROVIDER` | `local` | `local` / `openai` / `hash` |
-| `EMBEDDING_MODEL_LOCAL` | `intfloat/multilingual-e5-large` | Модель sentence-transformers |
-| `BLOOM_CLASSIFIER` | `keyword` | `keyword` (офлайн) / `llm` (OpenAI) |
-| `ENABLE_CELERY` | `1` | `0` — синхронный режим без Redis |
-| `CANVAS_URL` | — | URL инстанса Canvas LMS |
-| `CANVAS_TOKEN` | — | API-токен Canvas |
-| `CANVAS_TEXT_MAX_CHARS` | `120000` | Лимит символов при извлечении текста |
-| `CANVAS_PDF_MAX_PAGES` | `25` | Макс. страниц PDF |
-| `NODE_EXTRACTOR` | `local_ner` | `local_ner` / `heuristic` / `llm` |
+| `DATABASE_URL` | `postgresql+psycopg://rag:rag_pass@db:5432/rag_db` | Change password in production |
+| `EMBEDDING_PROVIDER` | `local` | `local` needs no API key; `openai` needs `OPENAI_API_KEY` |
 
-### Режимы классификации
-
-**keyword** (по умолчанию) — офлайн, детерминированный:
-- Поиск Bloom-глаголов из `data/bloom_verbs_ru.json` + структурные паттерны
-- Сглаживание Лапласа: `p(level) = (hits + 1) / (total + 6)`
-- Точность ~75–83% на текстах с явными глаголами; деградирует на текстах без глаголов
-
-**llm** — через OpenAI API:
-- `BLOOM_CLASSIFIER=llm`, требует `OPENAI_API_KEY`
-- Модель: `OPENAI_LLM_MODEL=gpt-4o-mini`
-- Возвращает prob_vector + rationale; при ошибке API — fallback на keyword
-
----
-
-## API
-
-Полная документация: `http://localhost:8000/docs`
-
-### Ключевые эндпоинты
-
-```
-GET  /canvas/courses                    — список доступных курсов Canvas
-POST /canvas/ingest                     — импорт курса (sync)
-POST /canvas/ingest-stream              — импорт курса (SSE stream)
-
-GET  /datasets                          — список датасетов
-POST /datasets                          — создать датасет
-POST /datasets/{id}/index               — создать эмбеддинги чанков
-POST /datasets/{id}/annotate?level=...  — аннотировать чанки по уровню Блума
-
-GET  /nodes?dataset_id=...              — список узлов знаний
-GET  /nodes/search?q=...                — семантический поиск по узлам
-POST /nodes                             — создать узлы вручную
-
-GET  /graph?dataset_id=...              — граф узлов + рёбра
-POST /graph/rebuild                     — пересчитать рёбра (pgvector + co-occ)
-
-POST /evaluate/{dataset_id}             — метрики качества разметки
-```
-
----
-
-## Тестирование
+### 2. Start
 
 ```bash
-# Запустить все тесты
-python -m pytest tests/ -v
-
-# Только тесты классификатора
-python -m pytest tests/test_bloom_multilabel.py -v
-
-# Только тесты чанкинга
-python -m pytest tests/test_chunking.py -v
+docker compose up --build
 ```
 
-Покрытие тестами (46 тестов):
-- `test_bloom_multilabel.py` — keyword-классификатор, Bloom-уровни, drift-коррекция
-- `test_chunking.py` — разбивка текста, overlap, русские аббревиатуры
-- `test_evaluate_multilabel.py` — Hamming loss, F1-micro, F1-macro
-- `test_validation.py` — валидация аннотаций
-- `test_regressions.py` — регрессионные тесты API
+- Frontend: <http://localhost:3000>
+- API docs: <http://localhost:8000/docs>
+
+### 3. First use
+
+1. Open <http://localhost:3000>
+2. Create a dataset (e.g. "Алгоритмы")
+3. Paste or upload a lecture PDF
+4. Click **Analyze** — the knowledge graph appears in ~5 seconds
 
 ---
 
-## Структура проекта
+## Environment variables
+
+Full reference in [`backend/.env.example`](backend/.env.example).
+
+| Variable | Values | Description |
+|---|---|---|
+| `EMBEDDING_PROVIDER` | `local` · `hash` · `openai` | Embedding backend |
+| `EMBEDDING_MODEL_LOCAL` | `intfloat/multilingual-e5-large` | HuggingFace model ID |
+| `BLOOM_CLASSIFIER` | `keyword` · `llm` | Classifier mode |
+| `BLOOM_VERBS_PATH` | path | Override verb dictionary |
+| `NODE_EXTRACTOR` | `local_ner` · `heuristic` | Concept extractor |
+| `OPENAI_API_KEY` | `sk-…` | Required only for `openai` / `llm` modes |
+| `OCR_PAGE_TIMEOUT_S` | `30` | Tesseract timeout per page (0 = off) |
+
+---
+
+## Project structure
 
 ```
 RAG-tool/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                  # FastAPI app, CORS, роутеры
-│   │   ├── models/models.py         # SQLAlchemy ORM
-│   │   ├── schemas/schemas.py       # Pydantic schemas + валидация prob_vector
-│   │   ├── routers/
-│   │   │   ├── canvas.py            # Canvas LMS импорт (sync + SSE)
-│   │   │   ├── nodes.py             # CRUD узлов знаний
-│   │   │   ├── graph.py             # Граф + rebuild
-│   │   │   ├── datasets.py          # Датасеты, документы, индексация
-│   │   │   └── evaluate.py          # Метрики качества
+│   │   ├── routers/          # FastAPI route handlers
+│   │   │   ├── analyze.py    # /analyze — chunking, extraction, Bloom classification
+│   │   │   ├── datasets.py   # /datasets — CRUD, labelling queue
+│   │   │   ├── evaluate.py   # /evaluate — multilabel metrics
+│   │   │   └── search.py     # /search — vector similarity search
 │   │   ├── services/
-│   │   │   ├── chunking.py          # Разбивка текста (razdel-aware)
-│   │   │   ├── embedding_provider.py # Local / OpenAI / Hash провайдеры
-│   │   │   ├── node_extractor.py    # NER + heuristic + LLM экстракторы
-│   │   │   └── bloom_multilabel.py  # Гибридный классификатор (keyword + LLM)
-│   │   ├── tasks/
-│   │   │   ├── tasks.py             # Celery tasks: index, annotate, graph
-│   │   │   └── queue.py             # enqueue_or_mark (Celery / sync fallback)
+│   │   │   ├── bloom_multilabel.py   # thin wrapper (env-driven classifier dispatch)
+│   │   │   ├── chunking.py           # sentence-aware text splitter
+│   │   │   ├── embedding.py          # embedding pipeline
+│   │   │   ├── embedding_provider.py # local / hash / openai
+│   │   │   └── node_extractor.py     # natasha NER + heuristic fallback
 │   │   └── utils/
-│   │       ├── bloom.py             # Keyword classifier + Laplace smoothing
-│   │       └── prompt.py            # Bloom prompt templates (RU)
-│   ├── migrations/                  # SQL-миграции (0001–0017)
-│   └── requirements.txt
+│   │       └── bloom.py      # keyword classifier, heuristic patterns, annotate_bloom()
+│   ├── requirements.txt
+│   └── .env.example
 ├── frontend/
-│   ├── pages/index.tsx              # Главная страница: граф, узлы, Canvas
 │   ├── components/
-│   │   ├── GraphView.tsx            # vis-network граф
-│   │   └── JobStatus.tsx            # Статус async задач
-│   └── lib/bloom-constants.ts       # Цвета и метки уровней Блума
+│   │   ├── GraphView.tsx     # Cytoscape.js knowledge graph
+│   │   └── …
+│   ├── pages/
+│   │   └── index.tsx         # main SPA
+│   └── lib/
+│       └── bloom-constants.ts # level colours, shapes, labels
 ├── data/
-│   └── bloom_verbs_ru.json          # Словарь Bloom-глаголов (RU, ~200 слов)
-├── tests/                           # pytest (46 тестов)
+│   ├── bloom_verbs_ru.json   # Russian Bloom verb dictionary (6 levels, ~200 entries)
+│   └── bloom_dataset.jsonl   # labelled evaluation dataset
+├── tests/
+│   ├── test_bloom_classifier.py
+│   ├── test_bloom_tz.py
+│   ├── test_chunking.py
+│   ├── test_evaluate_multilabel.py
+│   └── test_smoke.py
 ├── scripts/
-│   ├── apply_migrations.sh          # Автоматическое применение миграций
-│   └── db/init/                     # Инициализация pgvector + HNSW индексов
-├── docs/
-│   └── REMEDIATION_PLAN.md         # История исправлений и технический долг
+│   └── seed_dataset.py
 └── docker-compose.yml
 ```
 
 ---
 
-## Технические решения
+## Running tests
 
-### Эмбеддинги
-- Модель по умолчанию: **`intfloat/multilingual-e5-large`** (1024 dim, мультиязычная)
-- Векторы zero-padding до 1536 dim — совместимость с OpenAI `text-embedding-3-small`
-- HNSW-индекс с `vector_cosine_ops` (m=16, ef_construction=64) для быстрого поиска
-
-### Классификатор Блума
-- **Keyword-режим**: Laplace smoothing по verb-hits + структурные regex-паттерны
-- **LLM-режим**: GPT-4o-mini возвращает `prob_vector[6]` + rationale; fallback на keyword при любой ошибке
-- Валидация prob_vector в Pydantic: ровно 6 элементов, каждый ∈ [0, 1], сумма ≈ 1.0 (±0.02)
-
-### Canvas-интеграция
-- Поддерживаемые типы: `syllabus`, `pages`, `assignments`, `quizzes`, `discussions`, `files`
-- SSE-стрим для real-time прогресса без таймаутов прокси
-- Идемпотентная повторная загрузка через `UPSERT` по `(dataset_id, document_id, title)`
-- Module-map: узлы обогащаются метаданными модуля Canvas (`module_name`, `module_position`)
+```bash
+cd backend
+pip install -r requirements.txt
+pytest ../tests/ -v
+# 46 passed in ~5 s (no network, no GPU required)
+```
 
 ---
 
-## Лицензия
+## Bloom's Taxonomy levels
+
+| Level | Russian label | Colour | Typical verbs |
+|---|---|---|---|
+| Remember | Факты | blue | назовите, перечислите, определите |
+| Understand | Понимание | green | объясните, сравните, почему |
+| Apply | Применение | amber | решите, вычислите, используйте |
+| Analyze | Анализ | orange | проанализируйте, выделите, структурируйте |
+| Evaluate | Оценивание | violet | оцените, аргументируйте, докажите |
+| Create | Создание | rose | создайте, разработайте, спроектируйте |
+
+Graph nodes with two dominant levels show a split-pie (proportional to probability share between the top two levels).
+
+---
+
+## Classifier accuracy
+
+Manual evaluation on 12 educational text fragments (mixed Russian):
+
+| Metric | Value |
+|---|---|
+| Exact match (top level) | 75 % (9/12) |
+| Partial match (level in top-2) | 83 % (10/12) |
+
+Known limitation: heuristic pattern `\bвычисл` can fire on the adjective _вычислительный_ (computational), occasionally boosting **Apply** in text that belongs to **Analyze**. This is documented in `HEURISTIC_PATTERNS` and can be narrowed by replacing the regex with a verb-only lemma match.
+
+---
+
+## Contributing
+
+1. Fork and create a feature branch.
+2. Add / extend tests in `tests/`.
+3. Run `pytest` — all 46 must pass.
+4. Open a PR against `main`.
+
+---
+
+## License
 
 MIT
