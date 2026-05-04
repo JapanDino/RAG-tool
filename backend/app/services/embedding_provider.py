@@ -10,8 +10,9 @@ from typing import Sequence
 
 import numpy as np
 
-# multilingual-e5-small produces 384-dim vectors; they are zero-padded to 1536 so that the
-# pgvector column type (vector(1536)) stays compatible with OpenAI text-embedding-3-small.
+# multilingual-e5-large produces 1024-dim vectors; zero-padded to 1536 so the pgvector
+# column type (vector(1536)) stays compatible with OpenAI text-embedding-3-small.
+# Override with EMBEDDING_MODEL_LOCAL env var to use a different local model.
 STORAGE_DIM = 1536
 
 
@@ -103,8 +104,7 @@ class LocalProvider(EmbeddingProvider):
 
     @property
     def embedding_model(self) -> str:
-        # Keep it stable for filtering; include base model name.
-        return f"local:{self._model_name}:padded1536"
+        return f"local:{self._model_name}:padded{STORAGE_DIM}"
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
@@ -183,7 +183,7 @@ def get_embedding_provider() -> EmbeddingProvider:
         )
         return HashingProvider()
     if name == "local":
-        model = os.getenv("EMBEDDING_MODEL_LOCAL", "intfloat/multilingual-e5-small")
+        model = os.getenv("EMBEDDING_MODEL_LOCAL", "intfloat/multilingual-e5-large")
         try:
             return LocalProvider(model)
         except Exception as exc:

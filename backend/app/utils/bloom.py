@@ -32,7 +32,13 @@ def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
         "evaluate": "Оценивание",
         "create": "Создание",
     }.get(level, "N/A")
-    return dict(level=level, label=label, rationale=result["rationale"], score=round(score, 3))
+    # Build a rationale that is specific to the requested level (not the global top level).
+    level_triggers = result.get("triggers", {}).get(level, [])
+    if level_triggers:
+        rationale = f"{level}: {', '.join(sorted(set(level_triggers))[:6])}"
+    else:
+        rationale = f"{level}: keyword-baseline (score={score:.3f})"
+    return dict(level=level, label=label, rationale=rationale, score=round(score, 3))
 
 
 def _default_verbs_path() -> Path:
@@ -116,7 +122,8 @@ def classify_bloom_multilabel(
     probs = [round(p, 3) for p in raw]
     drift = round(1.0 - sum(probs), 3)
     if drift != 0:
-        probs[-1] = round(probs[-1] + drift, 3)
+        max_idx = probs.index(max(probs))
+        probs[max_idx] = round(probs[max_idx] + drift, 3)
 
     sorted_levels = sorted(zip(LEVEL_ORDER, probs), key=lambda x: x[1], reverse=True)
     top_levels = [lvl for lvl, p in sorted_levels if p >= min_prob][:max_levels]

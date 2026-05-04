@@ -44,10 +44,13 @@ function getConfidenceMeta(node: Pick<AnalyzeNode, "prob_vector" | "top_levels">
   const runnerUp = sorted[1] || null;
   const gap = runnerUp ? primary.prob - runnerUp.prob : primary.prob;
 
+  // Thresholds calibrated for keyword classifier output (Laplace smoothing produces
+  // flat distributions: typical max prob 0.25–0.50). LLM mode will naturally land
+  // in "high" more often since it can reach 0.70+.
   let band: ConfidenceBand = "low";
-  if (primary.prob >= 0.72 && gap >= 0.18) {
+  if (primary.prob >= 0.45 && gap >= 0.15) {
     band = "high";
-  } else if (primary.prob >= 0.52 && gap >= 0.08) {
+  } else if (primary.prob >= 0.30 && gap >= 0.07) {
     band = "medium";
   }
 

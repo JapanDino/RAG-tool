@@ -12,7 +12,12 @@ def _validate_prob_vector(v):
     if v is None:
         return v
     if len(v) != 6:
-        raise ValueError("prob_vector must contain exactly 6 Bloom probabilities")
+        raise ValueError(f"prob_vector must have exactly 6 elements, got {len(v)}")
+    if any(not (0.0 <= x <= 1.0) for x in v):
+        raise ValueError("every element of prob_vector must be in [0.0, 1.0]")
+    total = sum(v)
+    if abs(total - 1.0) > 0.02:
+        raise ValueError(f"prob_vector must sum to ~1.0, got {total:.4f}")
     return v
 
 BloomLevel = Literal["remember","understand","apply","analyze","evaluate","create"]
@@ -154,8 +159,11 @@ class KnowledgeNodeIn(BaseModel):
     chunk_id: Optional[int] = None
     title: str
     context_text: str
-    prob_vector: List[float]
-    top_levels: List[BloomLevel]
+    # None → auto-compute via classify_bloom_multilabel in POST /nodes
+    prob_vector: Optional[List[float]] = None
+    top_levels: Optional[List[BloomLevel]] = None
+    # None → auto-compute via embed_texts in POST /nodes
+    vec: Optional[List[float]] = None
     embedding_dim: Optional[int] = 1536
     embedding_model: Optional[str] = None
     version: Optional[int] = 1
@@ -175,7 +183,7 @@ class KnowledgeNodeOut(BaseModel):
     prob_vector: List[float]
     top_levels: List[BloomLevel]
     embedding_dim: int
-    embedding_model: str
+    embedding_model: Optional[str] = None
     version: int
     model_info: dict
     created_at: Optional[Union[datetime, str]] = None
@@ -297,7 +305,7 @@ class GraphRebuildIn(BaseModel):
     min_score: float = 0.2
     max_edges: int = 200
     include_cooccurrence: bool = True
-    limit_nodes: int = 500
+    limit_nodes: int = 2000
     co_window: int = 2
 
 class GraphRebuildOut(BaseModel):

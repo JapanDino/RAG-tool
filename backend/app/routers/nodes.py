@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -11,16 +13,26 @@ from ..schemas.schemas import (
     KnowledgeNodeSearchHit,
     KnowledgeNodeUpdateIn,
 )
+from ..services.embedding import embed_texts
 from ..services.embedding_provider import current_embedding_model
 from ..services.query_embed import embed_query
+from ..services.bloom_multilabel import classify_bloom_multilabel
 from ..utils.vector import vector_literal
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
 
 @router.post("", response_model=KnowledgeNodeListOut)
 def create_nodes(payload: KnowledgeNodeBulkIn, db: Session = Depends(get_db)):
+    embedding_model = current_embedding_model()
     items: list[KnowledgeNode] = []
+
+    # Collect nodes that need prob_vector or vec computed.
+    needs_classify: list[int] = []   # index into items
+    needs_embed: list[int] = []      # index into items
+
     for node in payload.nodes:
         obj = KnowledgeNode(
             dataset_id=node.dataset_id,
@@ -28,17 +40,47 @@ def create_nodes(payload: KnowledgeNodeBulkIn, db: Session = Depends(get_db)):
             chunk_id=node.chunk_id,
             title=node.title,
             context_text=node.context_text,
-            prob_vector=node.prob_vector,
-            top_levels=node.top_levels,
-            embedding_dim=(
-                node.embedding_dim if node.embedding_dim is not None else 1536
-            ),
-            embedding_model=node.embedding_model or "text-embedding-3-small",
+            prob_vector=node.prob_vector or [],
+            top_levels=node.top_levels or [],
+            embedding_dim=node.embedding_dim if node.embedding_dim is not None else 1536,
+            embedding_model=node.embedding_model or embedding_model,
             version=node.version if node.version is not None else 1,
             model_info=node.model_info or {},
         )
         db.add(obj)
+        idx = len(items)
         items.append(obj)
+
+        if node.prob_vector is None:
+            needs_classify.append(idx)
+        if node.vec is None:
+            needs_embed.append(idx)
+
+    # Compute Bloom prob_vector for nodes that don't have it.
+    for idx in needs_classify:
+        node_obj = items[idx]
+        text_for_classify = node_obj.context_text or node_obj.title
+        try:
+            cls = classify_bloom_multilabel(text_for_classify)
+            node_obj.prob_vector = cls["prob_vector"]
+            node_obj.top_levels = cls.get("top_levels", [])
+        except Exception as exc:
+            logger.warning("classify_bloom_multilabel failed for node %r: %s", node_obj.title, exc)
+
+    # Compute semantic embeddings for nodes that don't have vec.
+    if needs_embed:
+        texts_to_embed = [
+            f"{items[i].title}. {items[i].context_text}".strip()
+            for i in needs_embed
+        ]
+        try:
+            vecs = embed_texts(texts_to_embed, dim=1536)
+            for i, vec in zip(needs_embed, vecs):
+                items[i].vec = vec
+                items[i].embedding_model = embedding_model
+        except Exception as exc:
+            logger.warning("embed_texts failed during create_nodes: %s", exc)
+
     db.commit()
     for obj in items:
         db.refresh(obj)

@@ -4,12 +4,12 @@ import os
 from .celery_app import celery_app
 from ..services.chunking import split_into_chunks
 from ..db.session import SessionLocal
-from ..models.models import Chunk, Document
+from ..models.models import Chunk, Document, KnowledgeNode
 from ..services.embedding import embed_texts
 from ..services.text_extract import extract_text as _extract_text
 from ..services.embedding_provider import current_embedding_model
 from ..services.validation import validate_annotation
-from ..utils.bloom import annotate_bloom
+from ..utils.bloom import annotate_bloom, LEVEL_ORDER
 from ..utils.rubrics import get_active_rubric
 from ..services.llm import llm_annotate, ENABLE_LLM
 from sqlalchemy import text
@@ -17,6 +17,69 @@ from datetime import datetime
 from ..utils.vector import vector_literal
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_prob_vectors(db, dataset_id: int, chunk_ids: list[int]) -> None:
+    """Recompute KnowledgeNode.prob_vector from bloom_annotations for the given chunks."""
+    nodes = (
+        db.query(KnowledgeNode)
+        .filter(
+            KnowledgeNode.dataset_id == dataset_id,
+            KnowledgeNode.chunk_id.in_(chunk_ids),
+        )
+        .all()
+    )
+    if not nodes:
+        return
+
+    node_chunk_ids = [n.chunk_id for n in nodes if n.chunk_id is not None]
+    if not node_chunk_ids:
+        return
+
+    rows = db.execute(
+        text("SELECT chunk_id, level, score FROM bloom_annotations WHERE chunk_id = ANY(:ids)"),
+        {"ids": node_chunk_ids},
+    ).mappings().all()
+
+    # Build {chunk_id: {level: score}} map.
+    scores_by_chunk: dict[int, dict[str, float]] = {}
+    for row in rows:
+        scores_by_chunk.setdefault(int(row["chunk_id"]), {})[row["level"]] = float(row["score"])
+
+    for node in nodes:
+        if node.chunk_id is None:
+            continue
+        level_scores = scores_by_chunk.get(node.chunk_id, {})
+
+        # Only update if all 6 levels have been annotated; otherwise the
+        # renormalization of a partial vector produces a misleading spike
+        # (e.g. annotating only "analyze" yields prob_vector=[0,0,0,1,0,0]).
+        annotated_levels = set(level_scores.keys())
+        all_levels = set(LEVEL_ORDER)
+        if annotated_levels < all_levels:
+            missing = all_levels - annotated_levels
+            logger.debug(
+                "_sync_prob_vectors: chunk %d missing annotations for %s — skipping node %d",
+                node.chunk_id, missing, node.id,
+            )
+            continue
+
+        raw = [level_scores.get(lvl, 0.0) for lvl in LEVEL_ORDER]
+        total = sum(raw)
+        if total > 0:
+            probs = [round(p / total, 3) for p in raw]
+        else:
+            probs = [round(1.0 / 6.0, 3)] * 6
+        # Fix rounding drift on the highest-probability element.
+        drift = round(1.0 - sum(probs), 3)
+        if drift != 0:
+            max_idx = probs.index(max(probs))
+            probs[max_idx] = round(probs[max_idx] + drift, 3)
+
+        top = [lvl for lvl, p in sorted(zip(LEVEL_ORDER, probs), key=lambda x: x[1], reverse=True) if p >= 0.2]
+        node.prob_vector = probs
+        node.top_levels = top[:2] if top else [LEVEL_ORDER[probs.index(max(probs))]]
+
 
 @celery_app.task
 def index_dataset(dataset_id: int, job_id: int | None = None, dim: int = 1536):
@@ -54,6 +117,39 @@ def index_dataset(dataset_id: int, job_id: int | None = None, dim: int = 1536):
                 dict(cid=chunk.id, dim=dim, model=model_name, v=vector_literal(vec)),
             )
         db.commit()
+
+        # Also fill knowledge_nodes.vec for this dataset so the graph and
+        # semantic search work immediately — without requiring a separate
+        # reindex_dataset_nodes call.
+        try:
+            nodes = (
+                db.execute(
+                    text(
+                        "SELECT id, title, context_text FROM knowledge_nodes "
+                        "WHERE dataset_id = :ds ORDER BY id"
+                    ),
+                    {"ds": dataset_id},
+                )
+                .mappings()
+                .all()
+            )
+            if nodes:
+                node_texts = [f"{n['title']}. {n['context_text']}".strip() for n in nodes]
+                node_vecs = embed_texts(node_texts, dim=dim)
+                for node, vec in zip(nodes, node_vecs):
+                    db.execute(
+                        text(
+                            "UPDATE knowledge_nodes "
+                            "SET vec = CAST(:v AS vector), embedding_model = :m "
+                            "WHERE id = :id"
+                        ),
+                        {"v": vector_literal(vec), "m": model_name, "id": node["id"]},
+                    )
+                db.commit()
+                logger.info("index_dataset: embedded %d nodes for dataset %d", len(nodes), dataset_id)
+        except Exception as node_exc:
+            logger.warning("index_dataset: node embedding failed for dataset %d: %s", dataset_id, node_exc)
+
         if job_id is not None:
             db.execute(
                 text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"),
@@ -113,6 +209,13 @@ def annotate_dataset(dataset_id: int, level: str, job_id: int | None = None):
                               created_at = now()
             """), records)
         db.commit()
+
+        # Sync prob_vector into KnowledgeNodes linked to annotated chunks.
+        annotated_chunk_ids = [r["cid"] for r in records]
+        if annotated_chunk_ids:
+            _sync_prob_vectors(db, dataset_id, annotated_chunk_ids)
+            db.commit()
+
         if job_id is not None:
             db.execute(
                 text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"),
@@ -141,7 +244,7 @@ def rebuild_graph_edges(
     min_score: float = 0.2,
     max_edges: int = 200,
     include_cooccurrence: bool = True,
-    limit_nodes: int = 500,
+    limit_nodes: int = 2000,
     co_window: int = 2,
 ):
     """

@@ -173,6 +173,46 @@ def _safe_list_pages(course_id: int) -> list[dict]:
         raise
 
 
+def _fetch_module_map(course_id: int) -> dict[str, dict]:
+    """
+    Build a mapping from ingestion source_label → Canvas module metadata.
+    Used to enrich KnowledgeNode.model_info with module_name/position so the
+    frontend can group nodes by course module without extra API calls.
+    Returns an empty dict if modules are unavailable or the API fails.
+    """
+    try:
+        modules = cc.list_modules(course_id)
+    except Exception as exc:
+        logger.info("Canvas modules unavailable for course %s: %s", course_id, exc)
+        return {}
+
+    mapping: dict[str, dict] = {}
+    for mod in modules:
+        mod_meta = {
+            "module_id": mod.get("id"),
+            "module_name": mod.get("name", ""),
+            "module_position": mod.get("position", 0),
+        }
+        for item in mod.get("items") or []:
+            item_type = (item.get("type") or "").lower()
+            item_title = (item.get("title") or "").strip()
+            if not item_title:
+                continue
+            item_meta = {**mod_meta, "item_position": item.get("position", 0)}
+            # Match the source_label patterns used during ingestion
+            if item_type == "page":
+                mapping[f"page:{item_title}"] = item_meta
+            elif item_type == "assignment":
+                mapping[f"assignment:{item_title}"] = item_meta
+            elif item_type in ("quiz", "quizzes"):
+                mapping[f"quiz:{item_title}"] = item_meta
+            elif item_type in ("discussion", "discussion_topic"):
+                mapping[f"discussion:{item_title}"] = item_meta
+            elif item_type == "file":
+                mapping[f"file:{item_title}"] = item_meta
+    return mapping
+
+
 def _ensure_canvas_document_and_chunks(
     raw_text: str,
     course_id: int,
@@ -250,6 +290,7 @@ def _process_document(
     embedding_model: str,
     db: Session,
     skipped: list[str],
+    module_map: dict[str, dict] | None = None,
 ) -> ImportedDocumentOut | None:
     raw_text = raw_text.strip()
     if not raw_text:
@@ -289,10 +330,11 @@ def _process_document(
         best_chunk = _pick_chunk_for_node(node, chunks)
 
         cls = classify_bloom_multilabel(
-            f"{source_label}\n\n{ctx}".strip(),
+            ctx,
             min_prob=min_prob,
             max_levels=2,
         )
+        module_meta = (module_map or {}).get(source_label)
         model_info = {
             "extractor": extractor.name,
             "source": {
@@ -304,6 +346,7 @@ def _process_document(
             "frequency": node.get("frequency"),
             "node_type": node.get("node_type"),
             "rationale": cls.get("rationale"),
+            **({"module": module_meta} if module_meta else {}),
         }
 
         existing = existing_map.get(title)
@@ -439,6 +482,7 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
 
     extractor = get_node_extractor()
     embedding_model = current_embedding_model()
+    module_map = _fetch_module_map(payload.course_id)
     documents_ingested = 0
     nodes_created = 0
     nodes_updated = 0
@@ -458,6 +502,7 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
             embedding_model,
             db,
             skipped,
+            module_map=module_map,
         )
         if imported and (imported.nodes_created > 0 or imported.nodes_updated > 0):
             documents.append(imported)
@@ -593,6 +638,7 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
 
     extractor = get_node_extractor()
     embedding_model = current_embedding_model()
+    module_map = _fetch_module_map(payload.course_id)
 
     def generate():
         # Open a dedicated session whose lifetime is tied to the generator,
@@ -620,6 +666,7 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                     embedding_model,
                     gen_db,
                     skipped,
+                    module_map=module_map,
                 )
                 if imported and (imported.nodes_created > 0 or imported.nodes_updated > 0):
                     documents.append(imported)
