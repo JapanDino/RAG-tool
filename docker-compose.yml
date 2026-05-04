@@ -44,7 +44,10 @@ services:
         bash ../scripts/apply_migrations.sh &&
         uvicorn app.main:app --host 0.0.0.0 --port 8000
       "
-    volumes: [ ".:/app" ]
+    volumes:
+      - ".:/app"
+      - uploads:/app/uploads
+      - hf_cache:/root/.cache/huggingface
 
   worker:
     build:
@@ -60,7 +63,10 @@ services:
     depends_on: [ backend, redis ]
     working_dir: /app/backend
     command: bash -lc "celery -A app.celery_app:celery_app worker -l INFO"
-    volumes: [ ".:/app" ]
+    volumes:
+      - ".:/app"
+      - uploads:/app/uploads
+      - hf_cache:/root/.cache/huggingface
 
   frontend:
     build: ./frontend
@@ -76,10 +82,12 @@ services:
       - frontend_node_modules:/app/node_modules
     command: >
       sh -lc "
-        test -d node_modules || npm install &&
+        test -f node_modules/.bin/next || npm install &&
         npm run dev
       "
 
 volumes:
   dbdata:
   frontend_node_modules:
+  uploads:
+  hf_cache:
