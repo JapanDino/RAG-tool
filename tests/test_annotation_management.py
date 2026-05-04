@@ -72,18 +72,21 @@ def test_annotation_management_endpoints():
 
     db = Session()
     dataset, document, chunk, annotation = _seed_data(db)
+    dataset_id = dataset.id
+    chunk_id = chunk.id
+    annotation_id = annotation.id
     db.close()
 
-    resp = client.get(f"/annotate/chunks/{chunk.id}")
+    resp = client.get(f"/annotate/chunks/{chunk_id}")
     assert resp.status_code == 200
     assert len(resp.json()) == 1
 
-    resp = client.get(f"/annotate/chunks/{chunk.id}/levels/apply")
+    resp = client.get(f"/annotate/chunks/{chunk_id}/levels/apply")
     assert resp.status_code == 200
-    assert resp.json()["id"] == annotation.id
+    assert resp.json()["id"] == annotation_id
 
     resp = client.put(
-        f"/annotate/chunks/{chunk.id}/levels/apply",
+        f"/annotate/chunks/{chunk_id}/levels/apply",
         json={"score": 0.8},
     )
     assert resp.status_code == 200
@@ -91,17 +94,17 @@ def test_annotation_management_endpoints():
     assert resp.json()["version"] == 2
 
     resp = client.put(
-        f"/annotate/chunks/{chunk.id}/levels/remember",
+        f"/annotate/chunks/{chunk_id}/levels/remember",
         json={"label": "x", "rationale": "y", "score": 0.2},
     )
     assert resp.status_code == 200
     assert resp.json()["level"] == "remember"
 
-    resp = client.get(f"/annotate/datasets/{dataset.id}/annotations")
+    resp = client.get(f"/annotate/datasets/{dataset_id}/annotations")
     assert resp.status_code == 200
     assert resp.json()["total"] == 2
 
-    resp = client.delete(f"/annotate/chunks/{chunk.id}/levels/apply")
+    resp = client.delete(f"/annotate/chunks/{chunk_id}/levels/apply")
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 

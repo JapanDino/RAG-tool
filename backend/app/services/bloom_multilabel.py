@@ -29,7 +29,9 @@ def _normalize_probs(probs: list[float]) -> list[float]:
     return [p / s for p in probs]
 
 
-def classify_bloom_multilabel(text: str, min_prob: float = 0.2, max_levels: int = 2) -> dict[str, Any]:
+def classify_bloom_multilabel(
+    text: str, min_prob: float = 0.2, max_levels: int = 2, rubric: str | None = None
+) -> dict[str, Any]:
     """
     Hybrid bloom multi-label classifier.
     - keyword (default): offline baseline using `data/bloom_verbs_ru.json`
@@ -44,7 +46,7 @@ def classify_bloom_multilabel(text: str, min_prob: float = 0.2, max_levels: int 
     if not api_key:
         return keyword_classify(text, min_prob=min_prob, max_levels=max_levels)
 
-    prompt = build_bloom_multilabel_prompt(text)
+    prompt = build_bloom_multilabel_prompt(text, rubric=rubric)
     try:
         js = chat_completion_json(model, prompt, max_tokens=450)
     except Exception:
@@ -60,7 +62,8 @@ def classify_bloom_multilabel(text: str, min_prob: float = 0.2, max_levels: int 
     probs = [round(p, 3) for p in probs]
     drift = round(1.0 - sum(probs), 3)
     if drift != 0:
-        probs[-1] = round(probs[-1] + drift, 3)
+        max_idx = probs.index(max(probs))
+        probs[max_idx] = round(probs[max_idx] + drift, 3)
 
     sorted_levels = sorted(zip(LEVEL_ORDER, probs), key=lambda x: x[1], reverse=True)
     top_levels = [lvl for lvl, p in sorted_levels if p >= min_prob][:max_levels]

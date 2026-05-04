@@ -2,7 +2,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import datasets, search, export, annotate, jobs, status, rubrics, analyze, taxonomy, nodes, graph, labeling, evaluate
+from .routers import datasets, search, export, annotate, jobs, status, rubrics, analyze, taxonomy, nodes, graph, labeling, evaluate, canvas
 from .routers.labeling import nodes_router as labeling_nodes_router
 
 app = FastAPI(title="RAG Bloom API", version="0.2.0")
@@ -37,6 +37,7 @@ app.include_router(graph.router)
 app.include_router(labeling.router)
 app.include_router(labeling_nodes_router)
 app.include_router(evaluate.router)
+app.include_router(canvas.router)
 
 @app.get("/health")
 def health():

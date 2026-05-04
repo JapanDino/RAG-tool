@@ -15,6 +15,15 @@ from ..tasks.queue import enqueue_or_mark
 router = APIRouter(prefix="/graph", tags=["graph"])
 
 
+def _node_meta(node: KnowledgeNode) -> tuple[int | None, str | None]:
+    model_info = node.model_info or {}
+    if not isinstance(model_info, dict):
+        return None, None
+    frequency = model_info.get("frequency")
+    rationale = model_info.get("rationale")
+    return (int(frequency) if isinstance(frequency, (int, float)) else None, str(rationale) if rationale else None)
+
+
 @router.post("/rebuild", response_model=GraphRebuildOut)
 def rebuild_graph(payload: GraphRebuildIn, db: Session = Depends(get_db)):
     job = Job(
@@ -114,7 +123,7 @@ def get_graph(
     min_score: float = Query(0.2, ge=0.0, le=1.0),
     max_edges: int = Query(200, ge=1, le=5000),
     include_cooccurrence: bool = True,
-    limit_nodes: int = Query(500, ge=1, le=5000),
+    limit_nodes: int = Query(2000, ge=1, le=10000),
     db: Session = Depends(get_db),
 ):
     filters = ["kn.vec IS NOT NULL"]
@@ -166,6 +175,8 @@ def get_graph(
                 context_text=n.context_text,
                 prob_vector=n.prob_vector,
                 top_levels=n.top_levels,
+                frequency=_node_meta(n)[0],
+                rationale=_node_meta(n)[1],
             )
             for n in nodes
         ]
@@ -237,6 +248,8 @@ def get_graph(
             context_text=n.context_text,
             prob_vector=n.prob_vector,
             top_levels=n.top_levels,
+            frequency=_node_meta(n)[0],
+            rationale=_node_meta(n)[1],
         )
         for n in nodes
     ]

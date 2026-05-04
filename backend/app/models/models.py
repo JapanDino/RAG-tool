@@ -1,8 +1,16 @@
-from sqlalchemy import String, Integer, Text, JSON, DateTime, ForeignKey, Enum, Float, Boolean
+from sqlalchemy import String, Integer, Text, JSON, DateTime, ForeignKey, Enum, Float, Boolean, UniqueConstraint, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 import enum
+from typing import Optional
+
+try:
+    from pgvector.sqlalchemy import Vector as _Vector
+    _PGVECTOR = True
+except ImportError:
+    _Vector = None
+    _PGVECTOR = False
 
 class JobType(str, enum.Enum): index="index"; annotate="annotate"; export="export"; graph="graph"; parse="parse"
 class JobStatus(str, enum.Enum): queued="queued"; running="running"; done="done"; failed="failed"
@@ -37,15 +45,31 @@ class Chunk(Base):
 
 class Embedding(Base):
     __tablename__="embeddings"
+    __table_args__ = (UniqueConstraint("chunk_id", name="uq_embeddings_chunk_id"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), index=True)
     dim: Mapped[int] = mapped_column(Integer, default=1536)
-    # vec: vector(dim) — создадим колонку и индексы в SQL-миграции
-    model: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
+    # 1536-dim storage: local model (default: multilingual-e5-large, 1024-dim) is zero-padded for OpenAI compatibility
+    vec: Mapped[Optional[list]] = mapped_column(_Vector(1536) if _PGVECTOR else JSON, nullable=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class KnowledgeNode(Base):
     __tablename__ = "knowledge_nodes"
+    __table_args__ = (
+        # Prevents duplicate nodes from concurrent Canvas ingestions.
+        # Covers the non-NULL document_id case (all Canvas-ingested nodes).
+        # A separate partial index (see migration 0016) covers document_id IS NULL.
+        UniqueConstraint("dataset_id", "document_id", "title", name="uq_kn_dataset_doc_title"),
+        # HNSW index for fast cosine similarity search over node embeddings.
+        # Requires pgvector >= 0.5. Alembic autogenerate won't handle this —
+        # create manually or via a migration:
+        #   CREATE INDEX ix_knode_vec_hnsw ON knowledge_nodes
+        #   USING hnsw (vec vector_cosine_ops) WITH (m=16, ef_construction=64);
+        Index("ix_knode_vec_hnsw", "vec", postgresql_using="hnsw",
+              postgresql_with={"m": 16, "ef_construction": 64},
+              postgresql_ops={"vec": "vector_cosine_ops"}),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
     document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -55,13 +79,19 @@ class KnowledgeNode(Base):
     prob_vector: Mapped[list] = mapped_column(JSON, default=list)
     top_levels: Mapped[list] = mapped_column(JSON, default=list)
     embedding_dim: Mapped[int] = mapped_column(Integer, default=1536)
-    embedding_model: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
+    embedding_model: Mapped[str] = mapped_column(String(100), nullable=True)
+    # 1536-dim storage: local model (default: multilingual-e5-large, 1024-dim) is zero-padded for OpenAI compatibility
+    vec: Mapped[Optional[list]] = mapped_column(_Vector(1536) if _PGVECTOR else JSON, nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     model_info: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class KnowledgeEdge(Base):
     __tablename__ = "knowledge_edges"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "from_node_id", "to_node_id", "method",
+                         name="uq_kedge_ds_from_to_method"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
     from_node_id: Mapped[int] = mapped_column(ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True)
@@ -92,6 +122,7 @@ class Rubric(Base):
 
 class BloomAnnotation(Base):
     __tablename__="bloom_annotations"
+    __table_args__ = (UniqueConstraint("chunk_id", "level", name="uq_bloom_chunk_level"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), index=True)
     level: Mapped[str] = mapped_column(Enum(BloomLevel), index=True)

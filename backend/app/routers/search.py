@@ -19,9 +19,15 @@ def search(
 ):
     if dim != 1536:
         raise HTTPException(400, "dim must be 1536 for current storage")
+    current_model = current_embedding_model()
+    em = embedding_model or current_model
+    if em != current_model:
+        raise HTTPException(
+            400,
+            "query embedding model must match the active EMBEDDING_PROVIDER; switch provider or omit embedding_model",
+        )
     qvec = embed_query(q, dim=dim)
     lit = vector_literal(qvec)
-    em = embedding_model or current_embedding_model()
     sql = """
         WITH q AS (SELECT CAST(:qvec AS vector) AS v)
         SELECT c.id as chunk_id, c.text,

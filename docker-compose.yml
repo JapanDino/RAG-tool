@@ -42,7 +42,7 @@ services:
     command: >
       bash -lc "
         bash ../scripts/apply_migrations.sh &&
-        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+        uvicorn app.main:app --host 0.0.0.0 --port 8000
       "
     volumes:
       - ".:/app"
@@ -71,7 +71,7 @@ services:
   frontend:
     build: ./frontend
     environment:
-      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-/api-proxy}
     depends_on: [ backend ]
     ports:
       - "${FRONTEND_PORT:-3000}:3000"

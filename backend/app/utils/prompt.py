@@ -39,24 +39,52 @@ def build_bloom_prompt(chunk: str, level: str, rubric: str | None = None) -> str
     )
 
 
-def build_bloom_multilabel_prompt(text: str) -> str:
+_MULTILABEL_LEVEL_DESCRIPTIONS = """
+Уровни пересмотренной таксономии Блума (Anderson & Krathwohl, 2001):
+  remember   — узнавание и припоминание фактов, определений, формул
+  understand — интерпретация, объяснение, перефразирование, классификация
+  apply      — исполнение процедур в знакомой ситуации, решение типовых задач
+  analyze    — различение частей, выявление связей, причин и структуры
+  evaluate   — критическая оценка на основе критериев, обоснованный вывод
+  create     — генерация нового: плана, гипотезы, решения, продукта
+""".strip()
+
+_MULTILABEL_EXAMPLES = """
+Примеры:
+  Текст: "Назовите основные органеллы клетки и их функции."
+  → {{"prob_vector":[0.7,0.2,0.05,0.03,0.01,0.01],"top_levels":["remember","understand"],"rationale":"Задание на воспроизведение фактов (органеллы) с элементом объяснения (функции)."}}
+
+  Текст: "Сравните причины Французской и Английской революций и оцените их влияние на демократию."
+  → {{"prob_vector":[0.05,0.1,0.05,0.4,0.35,0.05],"top_levels":["analyze","evaluate"],"rationale":"Требует выделения причин (анализ) и аргументированной оценки влияния (оценивание)."}}
+
+  Текст: "Разработайте эксперимент для проверки гипотезы о влиянии света на фотосинтез."
+  → {{"prob_vector":[0.05,0.05,0.15,0.2,0.1,0.45],"top_levels":["create","analyze"],"rationale":"Создание нового плана эксперимента (создание) с опорой на понимание процесса (анализ)."}}
+""".strip()
+
+
+def build_bloom_multilabel_prompt(text: str, rubric: str | None = None) -> str:
+    text = text[:2000]
+    rubric_part = f"\nДополнительные критерии оценки: {rubric}\n" if rubric else ""
     return (
         dedent(
             f"""
-            Вы — эксперт-методист. Определите уровни таксономии Блума для фрагмента.
-            Нужно вернуть вероятности по 6 уровням пересмотренной таксономии (Remember..Create).
+            Вы — эксперт-методист по таксономии Блума. Определите вероятности принадлежности фрагмента к каждому из 6 уровней.
 
-            Требуемый формат JSON (без пояснений вне JSON):
+            {_MULTILABEL_LEVEL_DESCRIPTIONS}
+            {rubric_part}
+            {_MULTILABEL_EXAMPLES}
+
+            Требуемый формат JSON (строго, без пояснений вне JSON):
             {{
               "prob_vector": [p_remember, p_understand, p_apply, p_analyze, p_evaluate, p_create],
-              "top_levels": ["remember", "analyze"],
-              "rationale": "<кратко почему>"
+              "top_levels": ["<уровень>", ...],
+              "rationale": "<1-2 предложения: почему выбраны эти уровни>"
             }}
 
             Ограничения:
-            - prob_vector ровно 6 чисел, каждое в [0,1]
-            - сумма prob_vector должна быть 1.0 (или очень близко)
-            - top_levels: 1+ уровней из: remember/understand/apply/analyze/evaluate/create
+            - prob_vector: ровно 6 чисел от 0 до 1, сумма ≈ 1.0
+            - top_levels: только уровни с вероятностью ≥ 0.2, от 1 до 3 штук
+            - значения из: remember / understand / apply / analyze / evaluate / create
 
             Фрагмент:
             ---

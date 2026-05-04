@@ -1,65 +1,19 @@
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import JobStatus from "../components/JobStatus";
+import ErrorBoundary from "../components/ErrorBoundary";
 import styles from "../styles/home.module.css";
 
-type BloomLevel = "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
-
-const BLOOM_LEVELS: BloomLevel[] = [
-  "remember",
-  "understand",
-  "apply",
-  "analyze",
-  "evaluate",
-  "create",
-];
-
-const LEVEL_LABELS: Record<BloomLevel, string> = {
-  remember: "Знать",
-  understand: "Понимать",
-  apply: "Применять",
-  analyze: "Анализировать",
-  evaluate: "Оценивать",
-  create: "Создавать",
-};
-
-// Vivid colors for dark theme
-const LEVEL_COLORS: Record<BloomLevel, string> = {
-  remember:   "#60a5fa",
-  understand: "#34d399",
-  apply:      "#fb923c",
-  analyze:    "#c084fc",
-  evaluate:   "#f87171",
-  create:     "#2dd4bf",
-};
-
-const LEVEL_BG: Record<BloomLevel, string> = {
-  remember:   "rgba(96,165,250,0.14)",
-  understand: "rgba(52,211,153,0.14)",
-  apply:      "rgba(251,146,60,0.14)",
-  analyze:    "rgba(192,132,252,0.14)",
-  evaluate:   "rgba(248,113,113,0.14)",
-  create:     "rgba(45,212,191,0.14)",
-};
-
-const LEVEL_BORDER: Record<BloomLevel, string> = {
-  remember:   "rgba(96,165,250,0.28)",
-  understand: "rgba(52,211,153,0.28)",
-  apply:      "rgba(251,146,60,0.28)",
-  analyze:    "rgba(192,132,252,0.28)",
-  evaluate:   "rgba(248,113,113,0.28)",
-  create:     "rgba(45,212,191,0.28)",
-};
-
-type AnalyzeNode = {
-  id: number;
-  title: string;
-  context_text: string;
-  prob_vector: number[];
-  top_levels: BloomLevel[];
-  frequency?: number | null;
-  rationale?: string | null;
-};
+const GraphView = dynamic(() => import("../components/GraphView"), { ssr: false });
+import {
+  BloomLevel,
+  BLOOM_LEVELS,
+  LEVEL_LABELS,
+  LEVEL_COLORS,
+  LEVEL_BG,
+  LEVEL_BORDER,
+  AnalyzeNode,
+} from "../lib/bloom-constants";
 
 type SearchResult = {
   chunk_id: number;
@@ -70,6 +24,7 @@ type SearchResult = {
 };
 
 type Toast = { id: number; msg: string; type: "success" | "error" | "info" };
+type CanvasAlert = { title: string; message: string };
 
 type GraphEdge = {
   from_id: number;
@@ -89,10 +44,13 @@ function getConfidenceMeta(node: Pick<AnalyzeNode, "prob_vector" | "top_levels">
   const runnerUp = sorted[1] || null;
   const gap = runnerUp ? primary.prob - runnerUp.prob : primary.prob;
 
+  // Thresholds calibrated for keyword classifier output (Laplace smoothing produces
+  // flat distributions: typical max prob 0.25–0.50). LLM mode will naturally land
+  // in "high" more often since it can reach 0.70+.
   let band: ConfidenceBand = "low";
-  if (primary.prob >= 0.72 && gap >= 0.18) {
+  if (primary.prob >= 0.45 && gap >= 0.15) {
     band = "high";
-  } else if (primary.prob >= 0.52 && gap >= 0.08) {
+  } else if (primary.prob >= 0.30 && gap >= 0.07) {
     band = "medium";
   }
 
@@ -261,6 +219,15 @@ function IconSparkle() {
   );
 }
 
+function IconCanvas() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+      <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+    </svg>
+  );
+}
+
 // ── BloomBadge component ──────────────────────────────────────
 
 function BloomBadge({ level }: { level: BloomLevel }) {
@@ -386,7 +353,7 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [lastJob, setLastJob] = useState<number | undefined>();
-  const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling" | "search" | "dashboard">("analysis");
+  const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling" | "search" | "dashboard" | "canvas">("analysis");
   const [textInput, setTextInput] = useState("");
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [analyzeFileName, setAnalyzeFileName] = useState<string | null>(null);
@@ -396,6 +363,8 @@ export default function Home() {
   const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const [analyzeStatusMsg, setAnalyzeStatusMsg] = useState("");
   const analyzeProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const analyzeAbortRef = useRef<AbortController | null>(null);
+  const loadGraphAbortRef = useRef<AbortController | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [maxNodes, setMaxNodes] = useState(30);
   const [maxNodesAuto, setMaxNodesAuto] = useState(false);
@@ -435,7 +404,7 @@ export default function Home() {
     create: false,
   });
 
-  const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE || "/api-proxy";
   const [apiBase, setApiBase] = useState(DEFAULT_API);
   const [apiStatus, setApiStatus] = useState<"unknown" | "ok" | "down">("unknown");
   const [embeddingSemantic, setEmbeddingSemantic] = useState<boolean | null>(null);
@@ -450,7 +419,7 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [minProb, setMinProb] = useState(0.2);
-  const [maxLevels, setMaxLevels] = useState(2);
+  const [maxLevels, setMaxLevels] = useState(6);
   const [embeddingModel, setEmbeddingModel] = useState("");
 
   // ── Node detail modal ─────────────────────────────────────────
@@ -488,11 +457,11 @@ export default function Home() {
   // ── Toast system ────────────────────────────────────────────
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastCounter = useRef(0);
-  const addToast = (msg: string, type: Toast["type"] = "info") => {
+  const addToast = useCallback((msg: string, type: Toast["type"] = "info") => {
     const id = ++toastCounter.current;
     setToasts(p => [...p, { id, msg, type }]);
     setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3800);
-  };
+  }, []);
 
   // ── Search tab ───────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
@@ -509,18 +478,32 @@ export default function Home() {
   const [textHistory, setTextHistory] = useState<string[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  const GraphView = useMemo(
-    () => dynamic(() => import("../components/GraphView"), { ssr: false }),
-    []
-  );
+  // ── Canvas LMS ───────────────────────────────────────────────
+  type CanvasCourse = { id: number; name: string; course_code: string | null; workflow_state: string };
+  const [canvasCourses, setCanvasCourses] = useState<CanvasCourse[]>([]);
+  const [canvasCoursesLoading, setCanvasCoursesLoading] = useState(false);
+  const [canvasSelectedCourse, setCanvasSelectedCourse] = useState<number | null>(null);
+  const [canvasContentTypes, setCanvasContentTypes] = useState<string[]>(["syllabus", "pages", "assignments", "quizzes", "discussions", "files"]);
+  const [canvasMaxNodes, setCanvasMaxNodes] = useState(30);
+  const [canvasMaxFiles, setCanvasMaxFiles] = useState(20);
+  const [canvasIngesting, setCanvasIngesting] = useState(false);
+const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
+const [canvasProgress, setCanvasProgress] = useState<{ label: string; stage: string; nodes_created: number; nodes_updated: number; elapsedSec?: number } | null>(null);
+const [canvasAlert, setCanvasAlert] = useState<CanvasAlert | null>(null);
+const [canvasCourseSearch, setCanvasCourseSearch] = useState("");
+const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
 
   // Restore persisted values on mount
   useEffect(() => {
     if (typeof window === "undefined") return;
     const savedApi = localStorage.getItem("bloom_api");
-    const resolvedApi = savedApi
-      ? (savedApi.includes("://backend:") && window.location.hostname === "localhost" ? "http://localhost:8000" : savedApi)
-      : (DEFAULT_API.includes("://backend:") && window.location.hostname === "localhost" ? "http://localhost:8000" : DEFAULT_API);
+    const shouldUseProxy =
+      !savedApi ||
+      savedApi === "http://localhost:8000" ||
+      savedApi === "http://127.0.0.1:8000" ||
+      savedApi.includes("://backend:");
+    const resolvedApi = shouldUseProxy ? DEFAULT_API : savedApi;
     setApiBase(resolvedApi);
 
     const savedDs = localStorage.getItem("bloom_ds");
@@ -576,12 +559,35 @@ export default function Home() {
     localStorage.setItem("bloom_api", apiBase);
   }, [apiBase]);
 
+  const checkApiStatus = useCallback(async () => {
+    try {
+      const controller = new AbortController();
+      // 8 s — Docker Desktop + WSL2 relay can be slow on first request
+      const t = setTimeout(() => controller.abort(), 8000);
+      const r = await fetch(`${apiBase}/health`, { signal: controller.signal });
+      clearTimeout(t);
+      setApiStatus(r.ok ? "ok" : "down");
+    } catch {
+      setApiStatus("down");
+    }
+  }, [apiBase]);
+
+  const getDirectBackendBase = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "http://127.0.0.1:8000";
+    }
+    return null;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
+      if (cancelled) return;
       try {
         const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 2000);
+        const t = setTimeout(() => controller.abort(), 8000);
         const r = await fetch(`${apiBase}/health`, { signal: controller.signal });
         clearTimeout(t);
         if (!cancelled) {
@@ -599,14 +605,11 @@ export default function Home() {
     };
     setApiStatus("unknown");
     check();
-    const it = setInterval(check, 6000);
-    return () => {
-      cancelled = true;
-      clearInterval(it);
-    };
-  }, [apiBase]);
+    const it = setInterval(check, 8000);
+    return () => { cancelled = true; clearInterval(it); };
+  }, [checkApiStatus]);
 
-  const apiFetchJson = async (path: string, init?: RequestInit): Promise<any | null> => {
+  const apiFetchJson = useCallback(async (path: string, init?: RequestInit): Promise<any | null> => {
     try {
       setError(null);
       const r = await fetch(`${apiBase}${path}`, init);
@@ -634,7 +637,7 @@ export default function Home() {
       setError(msg);
       return null;
     }
-  };
+  }, [apiBase]);
 
   const createDataset = async () => {
     if (!name.trim()) {
@@ -695,6 +698,10 @@ export default function Home() {
   const analyzeText = async () => {
     if (!textInput.trim()) return;
 
+    analyzeAbortRef.current?.abort();
+    analyzeAbortRef.current = new AbortController();
+    const signal = analyzeAbortRef.current.signal;
+
     // Auto-create dataset if none is selected yet
     let datasetId = ds;
     if (!datasetId) {
@@ -737,6 +744,7 @@ export default function Home() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (analyzeProgressRef.current) { clearInterval(analyzeProgressRef.current); analyzeProgressRef.current = null; }
@@ -858,7 +866,7 @@ export default function Home() {
 
   const saveInlineEdit = async (nodeId: number) => {
     const ok = await apiFetchJson(`/nodes/${nodeId}`, {
-      method: "PATCH",
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: editTitle, context_text: editContext }),
     });
@@ -889,32 +897,48 @@ export default function Home() {
 
   const batchUploadAll = async () => {
     if (!ds) { addToast("Выбери dataset перед загрузкой", "error"); return; }
-    for (let i = 0; i < batchFiles.length; i++) {
-      const item = batchFiles[i];
-      if (item.status === "done") continue;
-      setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: "uploading" } : x));
+    const pending = batchFiles.map((item, i) => ({ item, i })).filter(({ item }) => item.status !== "done");
+    pending.forEach(({ i }) =>
+      setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: "uploading" } : x))
+    );
+    const uploadOne = async ({ item, i }: { item: typeof batchFiles[0]; i: number }) => {
       const fd = new FormData();
       fd.append("file", item.file);
       try {
         const r = await fetch(`${apiBase}/datasets/${ds}/documents`, { method: "POST", body: fd });
-        const ok = r.ok;
-        setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: ok ? "done" : "error" } : x));
-        if (ok) { const j = await r.json(); if (j.job_id) setLastJob(j.job_id); }
+        setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: r.ok ? "done" : "error" } : x));
+        if (r.ok) {
+          const j = await r.json();
+          if (j.job_id) setLastJob(j.job_id);
+          return true;
+        }
       } catch {
         setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, status: "error" } : x));
       }
+      return false;
+    };
+    const maxConcurrent = 3;
+    let successCount = 0;
+    let errorCount = 0;
+    for (let i = 0; i < pending.length; i += maxConcurrent) {
+      const slice = pending.slice(i, i + maxConcurrent);
+      const results = await Promise.all(slice.map(uploadOne));
+      successCount += results.filter(Boolean).length;
+      errorCount += results.length - results.filter(Boolean).length;
     }
-    addToast("✓ Batch загрузка завершена", "success");
+    if (errorCount === 0) addToast(`✓ Batch загрузка завершена: ${successCount}`, "success");
+    else if (successCount === 0) addToast(`Batch загрузка завершилась с ошибками: ${errorCount}`, "error");
+    else addToast(`Batch загрузка: ${successCount} успешно, ${errorCount} с ошибкой`, "info");
   };
 
-  const undoLabel = () => {
+  const undoLabel = useCallback(() => {
     const last = undoStack[undoStack.length - 1];
     if (!last) return;
     setUndoStack(s => s.slice(0, -1));
     setLabelQueue(q => [last.node, ...q]);
     setCurrentLabels(last.labels);
     addToast("↩ Отменено", "info");
-  };
+  }, [addToast, undoStack]);
 
   const searchNodes = async () => {
     if (!searchQuery.trim()) return;
@@ -935,8 +959,146 @@ export default function Home() {
     navigator.clipboard.writeText(text).then(() => addToast("Скопировано в буфер", "success"));
   };
 
+  const loadCanvasCourses = useCallback(async () => {
+    setCanvasCoursesLoading(true);
+    setCanvasCourses([]);
+    setCanvasAlert(null);
+    const json = await apiFetchJson("/canvas/courses");
+    setCanvasCoursesLoading(false);
+    if (!json) {
+      setCanvasAlert({
+        title: "Не удалось загрузить курсы",
+        message: apiStatus === "down"
+          ? "Backend недоступен — проверь, что Docker запущен и backend-контейнер поднят."
+          : "Ошибка запроса к Canvas. Возможно, CANVAS_TOKEN неверный, URL недоступен или нет курсов. Детали — во вкладке «Анализ» (красная строка ошибки).",
+      });
+      return;
+    }
+    setCanvasCourses(Array.isArray(json) ? json : []);
+  }, [apiFetchJson, apiStatus]);
+
+  const ingestCanvasCourse = useCallback(async () => {
+    if (!canvasSelectedCourse || !ds) return;
+    setCanvasIngesting(true);
+    setCanvasIngestResult(null);
+    setCanvasAlert(null);
+    setCanvasProgress({ label: "Подключение к Canvas…", stage: "start", nodes_created: 0, nodes_updated: 0, elapsedSec: 0 });
+    if (canvasProgressTimerRef.current) clearInterval(canvasProgressTimerRef.current);
+    const startedAt = Date.now();
+    canvasProgressTimerRef.current = setInterval(() => {
+      const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+      setCanvasProgress((prev) => {
+        if (!prev) return prev;
+        let label = prev.label;
+        if (prev.stage === "start") {
+          if (elapsedSec >= 15) {
+            label = "Canvas отвечает медленно, но анализ продолжается…";
+          } else if (elapsedSec >= 8) {
+            label = "Запрашиваем структуру курса и список материалов…";
+          } else if (elapsedSec >= 4) {
+            label = "Открываем поток событий и готовим импорт…";
+          }
+        }
+        return { ...prev, label, elapsedSec };
+      });
+    }, 1000);
+
+    try {
+      const directBackendBase = getDirectBackendBase();
+      const streamApiBase =
+        apiBase === "/api-proxy" && directBackendBase ? directBackendBase : apiBase;
+      const response = await fetch(`${streamApiBase}/canvas/ingest-stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          course_id: canvasSelectedCourse,
+          dataset_id: ds,
+          content_types: canvasContentTypes,
+          max_nodes_per_doc: canvasMaxNodes,
+          max_files: canvasMaxFiles,
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        // HTTP error ≠ backend down — read actual message from server
+        let errDetail = `HTTP ${response.status}`;
+        try {
+          const body = await response.text();
+          const j = JSON.parse(body);
+          errDetail = j.detail || j.message || errDetail;
+        } catch { /* ignore parse errors */ }
+        setCanvasAlert({
+          title: "Анализ не запущен",
+          message: `Ошибка: ${errDetail}. Проверь, что датасет выбран и Canvas настроен.`,
+        });
+        addToast(`Canvas: ${errDetail}`, "error");
+        setCanvasIngesting(false);
+        setCanvasProgress(null);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // SSE lines end with \n\n
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          for (const line of part.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const ev = JSON.parse(line.slice(6));
+              if (ev.type === "start" || ev.type === "stage") {
+                setCanvasProgress(p => ({ ...p!, label: ev.label, stage: ev.stage ?? ev.type }));
+              } else if (ev.type === "progress") {
+                setCanvasProgress(p => ({ ...(p || { elapsedSec: 0 }), label: ev.label, stage: "processing", nodes_created: ev.nodes_created ?? 0, nodes_updated: ev.nodes_updated ?? 0 }));
+              } else if (ev.type === "done") {
+                setCanvasIngestResult(ev.result);
+                setCanvasAlert(null);
+                addToast(`Canvas: создано ${ev.result.nodes_created} узлов, обновлено ${ev.result.nodes_updated}`, "success");
+              } else if (ev.type === "error") {
+                setCanvasAlert({
+                  title: "Анализ курса остановлен",
+                  message: String(ev.message || "Во время обработки Canvas-курса произошла ошибка. Проверь backend и повтори запуск."),
+                });
+                addToast(`Ошибка Canvas: ${ev.message}`, "error");
+              }
+            } catch { /* skip malformed SSE line */ }
+          }
+        }
+      }
+    } catch (err: unknown) {
+      // Only a true network error (connection refused, timeout) means backend is down
+      const isNetwork = err instanceof TypeError && String(err.message).toLowerCase().includes("fetch");
+      if (isNetwork) setApiStatus("down");
+      setCanvasAlert({
+        title: isNetwork ? "Анализ курса прерван" : "Ошибка выполнения",
+        message: isNetwork
+          ? "Backend недоступен — проверь, что Docker запущен и backend-контейнер поднят, затем нажми «Проверить backend» или запусти анализ еще раз."
+          : `Ошибка: ${String(err instanceof Error ? err.message : err)}`,
+      });
+      addToast(isNetwork ? "Нет связи с backend" : `Canvas: ${String(err instanceof Error ? err.message : err)}`, "error");
+    } finally {
+      if (canvasProgressTimerRef.current) {
+        clearInterval(canvasProgressTimerRef.current);
+        canvasProgressTimerRef.current = null;
+      }
+      setCanvasIngesting(false);
+      setCanvasProgress(null);
+    }
+  }, [addToast, apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles, getDirectBackendBase]);
+
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
+    result = result.filter((n) => {
+      const levels = (n.top_levels || []) as BloomLevel[];
+      return levels.length ? levels.some((lvl) => filters[lvl]) : true;
+    });
     if (nodeSearch.trim()) {
       const q = nodeSearch.toLowerCase();
       result = result.filter(n =>
@@ -951,10 +1113,35 @@ export default function Home() {
       result.sort((a, b) => BLOOM_LEVELS.indexOf(a.top_levels[0]) - BLOOM_LEVELS.indexOf(b.top_levels[0]));
     }
     return result;
-  }, [nodes, nodeSearch, nodeSort]);
+  }, [nodes, nodeSearch, nodeSort, filters]);
 
-  const loadGraph = async () => {
+  useEffect(() => {
+    setHoveredNode(null);
+    setSelectedNode(null);
+  }, [ds, filters, graphNodesData, graphEdgesData]);
+
+  useEffect(() => {
+    if (activeTab !== "canvas") return;
+    if (apiStatus === "down") {
+      setCanvasAlert((prev) => prev ?? {
+        title: "Canvas сейчас недоступен",
+        message: "Backend недоступен — проверь, что Docker запущен и backend-контейнер поднят. После восстановления backend можно снова загрузить курсы или запустить анализ курса.",
+      });
+      return;
+    }
+    if (apiStatus === "ok") {
+      setCanvasAlert((prev) => {
+        if (!prev) return prev;
+        if (!prev.message.includes("Backend недоступен")) return prev;
+        return null;
+      });
+    }
+  }, [activeTab, apiStatus]);
+
+  const loadGraph = useCallback(async () => {
     if (!ds) return;
+    loadGraphAbortRef.current?.abort();
+    loadGraphAbortRef.current = new AbortController();
     const params = new URLSearchParams({
       dataset_id: String(ds),
       source: "db",
@@ -963,11 +1150,25 @@ export default function Home() {
       include_cooccurrence: graphIncludeCo ? "true" : "false",
       limit_nodes: String(graphLimitNodes),
     });
-    const json = await apiFetchJson(`/graph?${params.toString()}`);
+    const json = await apiFetchJson(`/graph?${params.toString()}`, { signal: loadGraphAbortRef.current.signal });
     if (!json) return;
     setGraphNodesData(json.nodes || []);
     setGraphEdgesData(json.edges || []);
-  };
+  }, [apiFetchJson, ds, graphTopK, graphMinScore, graphIncludeCo, graphLimitNodes]);
+
+  const openGraphForCurrentDataset = useCallback(async () => {
+    if (!ds) {
+      addToast("Выбери dataset перед открытием графа", "error");
+      return;
+    }
+    setActiveTab("graph");
+    setHoveredNode(null);
+    setSelectedNode(null);
+    setGraphSearch("");
+    setGraphNodesData([]);
+    setGraphEdgesData([]);
+    await loadGraph();
+  }, [ds, loadGraph, addToast]);
 
   const rebuildGraph = async () => {
     if (!ds) return;
@@ -987,6 +1188,14 @@ export default function Home() {
     if (!json) return;
     setLastJob(json.job_id);
   };
+
+  useEffect(() => {
+    setHoveredNode(null);
+    setSelectedNode(null);
+    setGraphSearch("");
+    setGraphNodesData([]);
+    setGraphEdgesData([]);
+  }, [ds]);
 
   const loadMetrics = async () => {
     if (!ds) return;
@@ -1062,8 +1271,7 @@ export default function Home() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, undoStack]);
+  }, [activeTab, undoLabel]);
 
   useEffect(() => {
     if (activeTab !== "labeling") return;
@@ -1286,6 +1494,15 @@ const analysisFlowSteps = [
               </span>
               <span className={styles.navLabel}>Поиск</span>
               <span className={styles.navHint}>RAG</span>
+            </button>
+
+            <button
+              className={[styles.navBtn, activeTab === "canvas" ? styles.navBtnActive : ""].join(" ")}
+              onClick={() => { setActiveTab("canvas"); if (!canvasCourses.length) loadCanvasCourses(); }}
+            >
+              <span className={styles.navIcon}><IconCanvas /></span>
+              <span className={styles.navLabel}>Canvas</span>
+              <span className={styles.navHint}>LMS</span>
             </button>
           </div>
         </nav>
@@ -1825,7 +2042,7 @@ const analysisFlowSteps = [
                     <span className={styles.emptyIcon}><IconBrain /></span>
                     <div className={styles.emptyTitle}>Нет результатов</div>
                     <div className={styles.emptyText}>
-                      Вставь текст выше и нажми "Анализировать" (нужен активный dataset).
+                      Вставь текст выше и нажми &quot;Анализировать&quot; (нужен активный dataset).
                     </div>
                   </div>
                 )}
@@ -2165,34 +2382,53 @@ const analysisFlowSteps = [
               )}
 
               {/* Graph canvas */}
-              <GraphView
-                nodes={graphNodesData}
-                edges={graphEdgesData}
-                filters={filters}
-                threshold={threshold}
-                searchQuery={graphSearch}
-                onHover={(n: AnalyzeNode | null) => {
-                  setHoveredNode(n);
-                  if (n) setSelectedNode(n);
-                }}
-              />
+              <ErrorBoundary>
+                <GraphView
+                  nodes={graphNodesData}
+                  edges={graphEdgesData}
+                  filters={filters}
+                  threshold={threshold}
+                  searchQuery={graphSearch}
+                  onHover={(n: AnalyzeNode | null) => setHoveredNode(n)}
+                  onSelect={(n: AnalyzeNode | null) => setSelectedNode(n)}
+                />
+              </ErrorBoundary>
 
-              {/* Node detail card */}
+              {/* Node detail card — fixed overlay, sticky on click */}
               {(selectedNode || hoveredNode) && (() => {
-                const n = (hoveredNode || selectedNode)!;
+                const n = (selectedNode || hoveredNode)!;
                 const sorted = getSortedLevels(n.prob_vector);
                 const confidence = getConfidenceMeta(n);
                 return (
-                  <div className={styles.cardSm} style={{ marginTop: 12 }}>
+                  <div
+                    className={styles.cardSm}
+                    style={{
+                      position: "fixed",
+                      bottom: 24,
+                      right: 24,
+                      width: 340,
+                      maxWidth: "calc(100vw - 48px)",
+                      zIndex: 200,
+                      boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                    }}
+                  >
                     <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
-                      <div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
                         <div className={styles.cardTitle}>{n.title}</div>
                         {n.rationale && (
                           <div className={styles.muted} style={{ marginTop: 4 }}>{n.rationale}</div>
                         )}
                       </div>
-                      <div style={{ marginLeft: "auto", display: "flex", gap: 5, flexWrap: "wrap", flexShrink: 0 }}>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", flexShrink: 0, alignItems: "center" }}>
                         {n.top_levels.map((lvl) => <BloomBadge key={lvl} level={lvl} />)}
+                        <button
+                          onClick={() => { setSelectedNode(null); setHoveredNode(null); }}
+                          style={{
+                            marginLeft: 4, background: "none", border: "none", cursor: "pointer",
+                            color: "var(--text-muted)", fontSize: 16, lineHeight: 1, padding: "0 2px",
+                          }}
+                          title="Закрыть"
+                        >×</button>
                       </div>
                     </div>
                     <div className={styles.muted}>{n.context_text}</div>
@@ -2645,6 +2881,256 @@ const analysisFlowSteps = [
             </div>
           )}
 
+          {/* ── Canvas LMS tab ──────────────────────── */}
+          {activeTab === "canvas" && (
+            <div className={styles.card}>
+
+              <SectionHero
+                eyebrow="Интеграция"
+                title="Canvas LMS"
+                description="Загрузи содержимое курса Canvas в датасет Bloom RAG Studio. Страницы, задания, тесты и обсуждения будут автоматически размечены по уровням Блума."
+                stats={[
+                  { label: "Курсов", value: canvasCourses.length || "—", tone: canvasCourses.length ? "accent" : "neutral" },
+                  { label: "Датасет", value: ds ? `#${ds}` : "Не выбран", tone: ds ? "success" : "warning" },
+                  { label: "Выбран курс", value: canvasSelectedCourse
+                      ? (canvasCourses.find(c => c.id === canvasSelectedCourse)?.name?.slice(0, 22) ?? `#${canvasSelectedCourse}`)
+                      : "—", tone: canvasSelectedCourse ? "info" : "neutral" },
+                ]}
+                actions={
+                  <button
+                    className={[styles.btn, styles.btnGhost].join(" ")}
+                    onClick={loadCanvasCourses}
+                    disabled={canvasCoursesLoading}
+                    type="button"
+                  >
+                    {canvasCoursesLoading ? <span className={styles.spinner} /> : <IconRefresh />}
+                    Обновить список
+                  </button>
+                }
+              />
+
+              <div className={styles.grid}>
+                {/* Course search + list */}
+                <div>
+                  <label className={styles.fieldLabel}>
+                    Поиск курса
+                    <input
+                      className={styles.input}
+                      placeholder="Введи название курса..."
+                      value={canvasCourseSearch}
+                      onChange={e => setCanvasCourseSearch(e.target.value)}
+                    />
+                  </label>
+
+                  {canvasCoursesLoading && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 0", color: "var(--text-muted)", fontSize: 13 }}>
+                      <span className={styles.spinner} /> Загружаем курсы из Canvas...
+                    </div>
+                  )}
+
+                  {!canvasCoursesLoading && canvasCourses.length === 0 && (
+                    <div className={styles.emptyState} style={{ padding: "24px 0" }}>
+                      <span className={styles.emptyIcon}><IconCanvas /></span>
+                      <div className={styles.emptyTitle}>Курсы не загружены</div>
+                      <div className={styles.emptyText}>Нажми «Обновить список» или проверь CANVAS_TOKEN в backend/.env</div>
+                    </div>
+                  )}
+
+                  {canvasCourses.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 340, overflowY: "auto", marginTop: 8 }}>
+                      {canvasCourses
+                        .filter(c => !canvasCourseSearch || c.name.toLowerCase().includes(canvasCourseSearch.toLowerCase()) || (c.course_code || "").toLowerCase().includes(canvasCourseSearch.toLowerCase()))
+                        .map(course => (
+                          <div
+                            key={course.id}
+                            onClick={() => setCanvasSelectedCourse(course.id)}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10,
+                              padding: "9px 12px", borderRadius: 8, cursor: "pointer",
+                              border: `1.5px solid ${canvasSelectedCourse === course.id ? "var(--text-accent)" : "var(--border-1)"}`,
+                              background: canvasSelectedCourse === course.id ? "rgba(99,102,241,0.08)" : "var(--bg-card)",
+                              transition: "all 0.12s",
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {course.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
+                                {course.course_code || ""} · id: {course.id}
+                              </div>
+                            </div>
+                            {canvasSelectedCourse === course.id && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12"/>
+                              </svg>
+                            )}
+                          </div>
+                        ))
+                      }
+                    </div>
+                  )}
+                </div>
+
+                {/* Ingest settings */}
+                <div>
+                  {canvasAlert && (
+                    <div className={styles.canvasAlert} role="alert" aria-live="assertive">
+                      <div className={styles.canvasAlertTitle}>
+                        <IconAlert />
+                        {canvasAlert.title}
+                      </div>
+                      <div className={styles.canvasAlertText}>{canvasAlert.message}</div>
+                      <div className={styles.canvasAlertActions}>
+                        <button
+                          className={[styles.btn, styles.btnWarn].join(" ")}
+                          onClick={() => { setApiStatus("unknown"); checkApiStatus(); }}
+                          type="button"
+                        >
+                          <IconRefresh />
+                          Проверить backend
+                        </button>
+                        <button
+                          className={[styles.btn, styles.btnGhost].join(" ")}
+                          onClick={() => setCanvasAlert(null)}
+                          type="button"
+                        >
+                          Скрыть
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <label className={styles.fieldLabel}>
+                    Типы контента
+                  </label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                    {[
+                      { id: "syllabus",     label: "Силлабус" },
+                      { id: "pages",        label: "Страницы" },
+                      { id: "assignments",  label: "Задания" },
+                      { id: "quizzes",      label: "Тесты" },
+                      { id: "discussions",  label: "Обсуждения" },
+                      { id: "files",        label: "📎 Файлы" },
+                    ].map(({ id: ct, label }) => (
+                      <label key={ct} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "5px 10px", borderRadius: 6, border: `1px solid ${canvasContentTypes.includes(ct) ? "var(--text-accent)" : "var(--border-1)"}`, background: canvasContentTypes.includes(ct) ? "rgba(99,102,241,0.08)" : "var(--bg-card)", transition: "all 0.12s" }}>
+                        <input
+                          type="checkbox"
+                          checked={canvasContentTypes.includes(ct)}
+                          onChange={e => setCanvasContentTypes(prev => e.target.checked ? [...prev, ct] : prev.filter(x => x !== ct))}
+                          style={{ accentColor: "var(--text-accent)" }}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className={styles.paramField} style={{ marginBottom: 10 }}>
+                    <span>Макс. узлов на документ</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input className={styles.paramSlider} type="range" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ flex: 1 }} />
+                      <input className={styles.paramInput} type="number" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ width: 56 }} />
+                    </div>
+                  </div>
+
+                  {canvasContentTypes.includes("files") && (
+                    <div className={styles.paramField} style={{ marginBottom: 16 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        Макс. файлов
+                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>PDF, TXT, MD, DOCX (до 20 МБ)</span>
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input className={styles.paramSlider} type="range" min={1} max={100} step={1} value={canvasMaxFiles} onChange={e => setCanvasMaxFiles(Number(e.target.value))} style={{ flex: 1 }} />
+                        <input className={styles.paramInput} type="number" min={1} max={100} step={1} value={canvasMaxFiles} onChange={e => setCanvasMaxFiles(Number(e.target.value))} style={{ width: 56 }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {!ds && (
+                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.3)", fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>
+                      ⚠️ Выбери датасет в боковой панели, прежде чем запускать ингест
+                    </div>
+                  )}
+
+                  <button
+                    className={[styles.btn, styles.btnPrimaryLg].join(" ")}
+                    onClick={ingestCanvasCourse}
+                    disabled={!canvasSelectedCourse || !ds || canvasIngesting || canvasContentTypes.length === 0}
+                    style={{ width: "100%" }}
+                    type="button"
+                  >
+                    {canvasIngesting
+                      ? <><span className={styles.spinner} /> Анализируем...</>
+                      : <><IconCanvas /> Запустить анализ курса</>
+                    }
+                  </button>
+
+                  {/* Streaming progress block */}
+                  {canvasIngesting && canvasProgress && (
+                    <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <span className={styles.spinner} style={{ flexShrink: 0 }} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 500, lineHeight: 1.4 }}>
+                            {canvasProgress.label}
+                          </div>
+                          <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)" }}>
+                            Шаг: {canvasProgress.stage} · прошло {canvasProgress.elapsedSec ?? 0} c
+                          </div>
+                        </div>
+                      </div>
+                      {/* Indeterminate progress bar */}
+                      <div style={{ height: 4, borderRadius: 4, background: "rgba(99,102,241,0.15)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: "40%", borderRadius: 4, background: "var(--accent)", animation: "canvasSlide 1.4s ease-in-out infinite" }} />
+                      </div>
+                      {(canvasProgress.nodes_created > 0 || canvasProgress.nodes_updated > 0) && (
+                        <div style={{ marginTop: 8, display: "flex", gap: 12, fontSize: 11, color: "var(--text-muted)" }}>
+                          <span>✦ создано: <strong style={{ color: "var(--success)" }}>{canvasProgress.nodes_created}</strong></span>
+                          <span>↺ обновлено: <strong style={{ color: "var(--accent)" }}>{canvasProgress.nodes_updated}</strong></span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Result */}
+                  {canvasIngestResult && (
+                    <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 10, background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.25)" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--success)", marginBottom: 8 }}>Готово!</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                        {[
+                          { label: "Документов", value: canvasIngestResult.documents_ingested },
+                          { label: "Узлов создано", value: canvasIngestResult.nodes_created },
+                          { label: "Обновлено", value: canvasIngestResult.nodes_updated },
+                        ].map(s => (
+                          <div key={s.label} style={{ textAlign: "center", padding: "8px", borderRadius: 8, background: "var(--bg-card)" }}>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: "var(--text-primary)" }}>{s.value}</div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{s.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {canvasIngestResult.skipped.length > 0 && (
+                        <details style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                          <summary style={{ cursor: "pointer" }}>Пропущено: {canvasIngestResult.skipped.length}</summary>
+                          <ul style={{ margin: "6px 0 0 16px", lineHeight: 1.6 }}>
+                            {canvasIngestResult.skipped.map((s, i) => <li key={i}>{s}</li>)}
+                          </ul>
+                        </details>
+                      )}
+                      <button
+                        className={[styles.btn, styles.btnPrimary].join(" ")}
+                        onClick={openGraphForCurrentDataset}
+                        style={{ marginTop: 10, width: "100%" }}
+                        type="button"
+                      >
+                        <IconGraph /> Открыть граф знаний
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
         </main>
 
         {/* ── Aside (right sidebar) ────────────────────── */}
@@ -2654,7 +3140,12 @@ const analysisFlowSteps = [
           <div className={styles.asideCard}>
             <div className={styles.asideCardHeader}>
               <span className={styles.asideCardTitle}>Подключение</span>
-              <div className={[styles.dot, apiStatusDotClass].join(" ")} />
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div className={[styles.dot, apiStatusDotClass].join(" ")} />
+                <span style={{ fontSize: 11, color: apiStatus === "ok" ? "var(--success)" : apiStatus === "down" ? "var(--error, #f87171)" : "var(--text-muted)" }}>
+                  {apiStatus === "ok" ? "online" : apiStatus === "down" ? "offline" : "…"}
+                </span>
+              </div>
             </div>
             <div className={styles.asideCardBody}>
               <label className={styles.fieldLabel}>
@@ -2663,15 +3154,20 @@ const analysisFlowSteps = [
                   className={styles.input}
                   value={apiBase}
                   onChange={(e) => setApiBase(e.target.value)}
-                  placeholder="http://localhost:8000"
+                  placeholder="/api-proxy"
                 />
               </label>
+              {apiStatus === "down" && (
+                <div style={{ padding: "8px 10px", borderRadius: 7, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", fontSize: 12, color: "#f87171", marginBottom: 6 }}>
+                  Backend недоступен — проверь что Docker запущен и backend-контейнер поднят
+                </div>
+              )}
               <div className={styles.row}>
                 <button
                   className={styles.btnCompact}
-                  onClick={() => setApiBase("http://localhost:8000")}
+                  onClick={() => setApiBase("/api-proxy")}
                 >
-                  localhost
+                  proxy
                 </button>
                 <button
                   className={styles.btnCompact}
@@ -2680,10 +3176,11 @@ const analysisFlowSteps = [
                   /docs
                 </button>
                 <button
-                  className={styles.btnCompact}
-                  onClick={() => window.open(`${apiBase}/health`, "_blank")}
+                  className={[styles.btnCompact, apiStatus === "down" ? styles.btnCompactPrimary : ""].join(" ")}
+                  onClick={() => { setApiStatus("unknown"); checkApiStatus(); }}
+                  title="Проверить соединение с бэкендом"
                 >
-                  /health
+                  ↺ Проверить
                 </button>
               </div>
             </div>
@@ -3299,9 +3796,9 @@ const analysisFlowSteps = [
               Ресурсы
             </div>
             {[
-              { label: "API Docs", href: "http://localhost:8000/docs", icon: "📄" },
-              { label: "Health Check", href: "http://localhost:8000/health", icon: "🟢" },
-              { label: "OpenAPI JSON", href: "http://localhost:8000/openapi.json", icon: "⚙️" },
+              { label: "API Docs", href: `${apiBase}/docs`, icon: "📄" },
+              { label: "Health Check", href: `${apiBase}/health`, icon: "🟢" },
+              { label: "OpenAPI JSON", href: `${apiBase}/openapi.json`, icon: "⚙️" },
             ].map(({ label, href, icon }) => (
               <a key={label} href={href} target="_blank" rel="noopener noreferrer" style={{
                 display: "flex", alignItems: "center", gap: 7,

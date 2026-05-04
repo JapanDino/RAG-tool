@@ -9,6 +9,18 @@ from pathlib import Path
 
 LEVEL_ORDER = ["remember", "understand", "apply", "analyze", "evaluate", "create"]
 
+# Structural regex patterns — fired on raw lowercase text (no lemmatisation needed).
+# Complements the verb dictionary for content pages that lack explicit task verbs.
+HEURISTIC_PATTERNS = {
+    "remember": [r"\bформул", r"\bопределен", r"\bтермин", r"\bсвойств", r"\bтаблиц"],
+    "understand": [r"\bобъясн", r"\bпонят", r"\bтеор", r"\bпринцип", r"\bзакон"],
+    "apply": [r"\bсеминар", r"\bлаборатор", r"\bпрактичес", r"\bзадач", r"\bупражнен", r"\bрасчет", r"\bвычисл"],
+    "analyze": [r"\bанализ", r"\bразбор", r"\bсравнен", r"\bструктур", r"\bпричин", r"\bследств"],
+    "evaluate": [r"\bоцен", r"\bкритич", r"\bаргумент", r"\bдоказ", r"\bвывод"],
+    "create": [r"\bпроект", r"\bсозда", r"\bразработ", r"\bмодел", r"\bсформулир"],
+}
+DEFAULT_CONTENT_PRIORS = [0.17, 0.24, 0.22, 0.16, 0.11, 0.10]
+
 _WORD_RE = re.compile(r"[А-Яа-яЁёA-Za-z]+(?:-[А-Яа-яЁёA-Za-z]+)?")
 
 
@@ -23,7 +35,7 @@ def _get_morph():
 
 
 def _normalize_text(text: str) -> str:
-    """Tokenise text, lemmatise each word with pymorphy3 (if available)."""
+    """Tokenise + lemmatise with pymorphy3 (if available), else lowercase."""
     morph = _get_morph()
     if morph is None:
         return text.lower()
@@ -38,18 +50,24 @@ def _normalize_text(text: str) -> str:
 
 
 def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
-    # Placeholder deterministic annotator (без LLM): простая эвристика
-    score = min(1.0, 0.5 + len(chunk.strip())/2000.0)
+    result = classify_bloom_multilabel(chunk)
+    level_index = LEVEL_ORDER.index(level) if level in LEVEL_ORDER else 0
+    score = float(result["prob_vector"][level_index])
     label = {
-        "remember":"Факты",
-        "understand":"Понимание",
-        "apply":"Применение",
-        "analyze":"Анализ",
-        "evaluate":"Оценивание",
-        "create":"Создание"
+        "remember": "Факты",
+        "understand": "Понимание",
+        "apply": "Применение",
+        "analyze": "Анализ",
+        "evaluate": "Оценивание",
+        "create": "Создание",
     }.get(level, "N/A")
-    rationale = f"Эвристика: длина текста={len(chunk)}; уровень={level}"
-    return dict(level=level, label=label, rationale=rationale, score=round(score,3))
+    # Build a rationale specific to the requested level (not the global top level).
+    level_triggers = result.get("triggers", {}).get(level, [])
+    if level_triggers:
+        rationale = f"{level}: {', '.join(sorted(set(level_triggers))[:6])}"
+    else:
+        rationale = f"{level}: keyword-baseline (score={score:.3f})"
+    return dict(level=level, label=label, rationale=rationale, score=round(score, 3))
 
 
 def _default_verbs_path() -> Path:
@@ -61,7 +79,6 @@ def _default_verbs_path() -> Path:
 def _load_keywords() -> dict[str, list[str]]:
     path = Path(os.getenv("BLOOM_VERBS_PATH", str(_default_verbs_path())))
     if not path.exists():
-        # Safe fallback: minimal built-in keywords.
         return {
             "remember": ["назовите", "перечислите", "определите"],
             "understand": ["объясните", "почему", "сравните"],
@@ -76,9 +93,10 @@ def _load_keywords() -> dict[str, list[str]]:
         out[lvl] = [str(x).lower() for x in data.get(lvl, []) if str(x).strip()]
     return out
 
+
 @lru_cache(maxsize=1)
 def _load_normalized_keywords() -> dict[str, list[str]]:
-    """Load keywords pre-lemmatised so matching is morphology-aware."""
+    """Return keywords pre-lemmatised via pymorphy3 for morphology-aware matching."""
     morph = _get_morph()
     raw = _load_keywords()
     if morph is None:
@@ -97,13 +115,36 @@ def _load_normalized_keywords() -> dict[str, list[str]]:
     return out
 
 
+@lru_cache(maxsize=1)
+def _compiled_heuristics() -> dict[str, list[re.Pattern[str]]]:
+    return {
+        lvl: [re.compile(pat, re.IGNORECASE) for pat in patterns]
+        for lvl, patterns in HEURISTIC_PATTERNS.items()
+    }
+
+
+def _heuristic_counts(text: str) -> tuple[list[int], dict[str, list[str]]]:
+    compiled = _compiled_heuristics()
+    counts: list[int] = []
+    triggers: dict[str, list[str]] = {lvl: [] for lvl in LEVEL_ORDER}
+    for lvl in LEVEL_ORDER:
+        hits = 0
+        for pat in compiled.get(lvl, []):
+            if pat.search(text):
+                hits += 1
+                triggers[lvl].append(pat.pattern)
+        counts.append(hits)
+    return counts, triggers
+
+
 def classify_bloom_multilabel(
     text: str,
     min_prob: float = 0.2,
     max_levels: int = 2,
 ):
-    normalized = _normalize_text(text)
-    counts = []
+    normalized = _normalize_text(text)   # lemmatised — for keyword matching
+    lowered = text.lower()               # raw lowercase — for heuristic regex
+    keyword_counts = []
     triggers: dict[str, list[str]] = {lvl: [] for lvl in LEVEL_ORDER}
     norm_keywords = _load_normalized_keywords()
     raw_keywords = _load_keywords()
@@ -113,18 +154,28 @@ def classify_bloom_multilabel(
             if norm_kw in normalized:
                 hits += 1
                 triggers[level].append(raw_kw)
-        counts.append(hits)
+        keyword_counts.append(hits)
+
+    heuristic_counts, heuristic_triggers = _heuristic_counts(lowered)
+    counts = []
+    for i, level in enumerate(LEVEL_ORDER):
+        # Structural cues ("семинар", "лабораторная", "формулы") add signal for
+        # content pages that do not contain explicit task verbs.
+        counts.append(keyword_counts[i] + heuristic_counts[i])
+        if heuristic_triggers[level]:
+            triggers[level].extend(heuristic_triggers[level])
 
     total = sum(counts)
     if total == 0:
-        raw = [1.0 / 6.0] * 6
+        raw = DEFAULT_CONTENT_PRIORS[:]
     else:
         raw = [(c + 1) / (total + 6) for c in counts]
 
     probs = [round(p, 3) for p in raw]
     drift = round(1.0 - sum(probs), 3)
     if drift != 0:
-        probs[-1] = round(probs[-1] + drift, 3)
+        max_idx = probs.index(max(probs))
+        probs[max_idx] = round(probs[max_idx] + drift, 3)
 
     sorted_levels = sorted(zip(LEVEL_ORDER, probs), key=lambda x: x[1], reverse=True)
     top_levels = [lvl for lvl, p in sorted_levels if p >= min_prob][:max_levels]

@@ -1,3 +1,4 @@
+import os
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,10 +19,10 @@ from ..schemas.schemas import (
     ExtractNodesIn,
     ExtractNodesOut,
 )
-from ..services.bloom_classifier import bloom_probabilities
 from ..services.chunking import split_into_chunks
 from ..services.embedding import embed_texts
 from ..services.bloom_multilabel import classify_bloom_multilabel
+from ..utils.bloom import LEVEL_ORDER
 from ..services.embedding_provider import current_embedding_model
 from ..services.node_extractor import get_node_extractor
 from ..utils.vector import vector_literal
@@ -48,11 +49,13 @@ def analyze(payload: AnalyzeIn):
     chunks = split_into_chunks(payload.text)
     results = []
     for idx, chunk in enumerate(chunks):
+        cls = classify_bloom_multilabel(chunk)
+        bloom = dict(zip(LEVEL_ORDER, cls["prob_vector"]))
         results.append(
             AnalyzeChunkOut(
                 idx=idx,
                 text=chunk,
-                bloom=bloom_probabilities(chunk),
+                bloom=bloom,
             )
         )
     edges = []
@@ -108,7 +111,8 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     text_stripped = (payload.text or "").strip()
     if len(text_stripped) < 10:
         raise HTTPException(422, "Текст слишком короткий (минимум 10 символов). Введите фрагмент образовательного контента.")
-    nodes = get_node_extractor().extract(
+    extractor = get_node_extractor()
+    nodes = extractor.extract(
         payload.text,
         max_nodes=payload.max_nodes or 30,
         min_freq=payload.min_freq or 1,
@@ -123,36 +127,54 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
         raise HTTPException(400, "embedding_dim must be 1536 for current storage")
     actual_embedding_model = current_embedding_model()
     requested_embedding_model = (payload.embedding_model or "").strip() or None
+    actual_classifier = os.getenv("BLOOM_CLASSIFIER", "keyword").strip().lower()
     min_prob = payload.min_prob or 0.2
     max_levels = payload.max_levels or 2
 
+    node_titles = [n["title"] for n in nodes]
+    q = (
+        db.query(KnowledgeNode)
+        .filter(
+            KnowledgeNode.dataset_id == payload.dataset_id,
+            KnowledgeNode.title.in_(node_titles),
+        )
+    )
+    if payload.document_id is not None:
+        q = q.filter(KnowledgeNode.document_id == payload.document_id)
+    existing_rows = q.all()
+    # Key by title only — context_text in DB may differ from extractor's context_snippet
+    existing_map: dict[str, KnowledgeNode] = {kn.title: kn for kn in existing_rows}
+
     for node in nodes:
-        text_for_cls = node.get("context_snippet") or node["title"]
+        # Use a 800-char window around the node position for richer Bloom classification context.
+        source = node.get("source") or {}
+        char_start = source.get("char_start") if isinstance(source, dict) else None
+        char_end = source.get("char_end") if isinstance(source, dict) else None
+        if char_start is not None and char_end is not None:
+            win_start = max(0, char_start - 300)
+            win_end = min(len(payload.text), char_end + 300)
+            text_for_cls = payload.text[win_start:win_end]
+        else:
+            text_for_cls = node.get("context_snippet") or node["title"]
         cls = classify_bloom_multilabel(text_for_cls, min_prob=min_prob, max_levels=max_levels)
         rationale = cls.get("rationale")
         node_rationales.append(rationale)
 
-        # Avoid collapsing nodes from different documents or contexts into one record.
-        existing = (
-            db.query(KnowledgeNode)
-            .filter(
-                KnowledgeNode.dataset_id == payload.dataset_id,
-                KnowledgeNode.document_id == payload.document_id,
-                KnowledgeNode.title == node["title"],
-                KnowledgeNode.context_text == node["context_snippet"],
-            )
-            .first()
-        )
+        existing = existing_map.get(node["title"])
         if existing:
             existing.context_text = node["context_snippet"]
             existing.prob_vector = cls["prob_vector"]
             existing.top_levels = cls["top_levels"]
             existing.embedding_model = actual_embedding_model
             existing.model_info = {
-                "extractor": payload.extractor or "heuristic-v1",
-                "classifier": payload.classifier or "keyword-v1",
+                "extractor": extractor.name,
+                "classifier": actual_classifier,
                 "node_type": node.get("node_type"),
+                "frequency": node.get("frequency"),
+                "source": node.get("source"),
                 "rationale": rationale,
+                "requested_extractor": payload.extractor,
+                "requested_classifier": payload.classifier,
                 "requested_embedding_model": requested_embedding_model,
             }
             kn = existing
@@ -167,10 +189,14 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
                 embedding_dim=embedding_dim,
                 embedding_model=actual_embedding_model,
                 model_info={
-                    "extractor": payload.extractor or "heuristic-v1",
-                    "classifier": payload.classifier or "keyword-v1",
+                    "extractor": extractor.name,
+                    "classifier": actual_classifier,
                     "node_type": node.get("node_type"),
+                    "frequency": node.get("frequency"),
+                    "source": node.get("source"),
                     "rationale": rationale,
+                    "requested_extractor": payload.extractor,
+                    "requested_classifier": payload.classifier,
                     "requested_embedding_model": requested_embedding_model,
                 },
             )
@@ -200,6 +226,7 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
                 "context_text": kn.context_text,
                 "prob_vector": kn.prob_vector,
                 "top_levels": kn.top_levels,
+                "frequency": (kn.model_info or {}).get("frequency"),
                 "rationale": rationale,
             }
             for kn, rationale in zip(stored_nodes, node_rationales)

@@ -7,19 +7,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from ..db.session import get_db
-from ..models.models import Dataset, Document, Job, JobType, JobStatus, KnowledgeNode
+from ..models.models import Dataset, Document, Job, JobType, JobStatus
 from ..tasks.queue import enqueue_or_mark
 from ..schemas.schemas import DatasetIn, DatasetOut
 from ..services.text_extract import extract_text
-from ..services.embedding import embed_texts
-from ..services.embedding_provider import current_embedding_model
-from ..utils.vector import vector_literal
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/app/uploads")
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_SIZE", str(20 * 1024 * 1024)))  # 20 MB default
 
 
 @router.get("", response_model=list[DatasetOut])
@@ -56,7 +54,9 @@ def upload_document(dataset_id: int, file: UploadFile = File(...), db: Session =
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     file_path = f"{UPLOAD_DIR}/{file_uuid}{ext}"
-    data = file.file.read()
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_BYTES // (1024*1024)} MB)")
     with open(file_path, "wb") as f:
         f.write(data)
 
@@ -106,33 +106,15 @@ def start_annotate(dataset_id: int, level: str = Query(..., pattern="^(remember|
 @router.post("/{dataset_id}/reindex-nodes")
 def reindex_nodes(dataset_id: int, db: Session = Depends(get_db)):
     """Re-embed all KnowledgeNodes in the dataset using the current EMBEDDING_PROVIDER.
-    Useful after switching from hash to local (sentence-transformers) embeddings.
-    Runs synchronously — may take a while for large datasets.
+    Enqueues an async Celery task and returns the job_id immediately.
     """
     ds = db.get(Dataset, dataset_id)
     if not ds:
         raise HTTPException(404, "dataset not found")
 
-    nodes = (
-        db.query(KnowledgeNode)
-        .filter(KnowledgeNode.dataset_id == dataset_id)
-        .order_by(KnowledgeNode.id)
-        .all()
-    )
-    if not nodes:
-        return {"ok": True, "reindexed": 0}
-
-    model_name = current_embedding_model()
-    texts = [f"{n.title}. {n.context_text}".strip() for n in nodes]
-    vecs = embed_texts(texts, dim=1536)
-
-    for node, vec in zip(nodes, vecs):
-        db.execute(
-            text(
-                "UPDATE knowledge_nodes SET vec = CAST(:v AS vector), embedding_model = :m WHERE id = :id"
-            ),
-            {"v": vector_literal(vec), "m": model_name, "id": node.id},
-        )
+    job = Job(type=JobType.graph, status=JobStatus.queued, payload={"dataset_id": dataset_id, "action": "reindex"})
+    db.add(job)
     db.commit()
-    logger.info("Reindexed %d nodes for dataset %d with model %s", len(nodes), dataset_id, model_name)
-    return {"ok": True, "reindexed": len(nodes), "model": model_name}
+    db.refresh(job)
+    enqueue_or_mark(db, job)
+    return {"job_id": job.id}

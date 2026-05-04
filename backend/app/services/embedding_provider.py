@@ -10,7 +10,10 @@ from typing import Sequence
 
 import numpy as np
 
-STORAGE_DIM = 1536  # pgvector storage is fixed to vector(1536)
+# multilingual-e5-large produces 1024-dim vectors; zero-padded to 1536 so the pgvector
+# column type (vector(1536)) stays compatible with OpenAI text-embedding-3-small.
+# Override with EMBEDDING_MODEL_LOCAL env var to use a different local model.
+STORAGE_DIM = 1536
 
 
 class EmbeddingProvider(ABC):
@@ -101,8 +104,7 @@ class LocalProvider(EmbeddingProvider):
 
     @property
     def embedding_model(self) -> str:
-        # Keep it stable for filtering; include base model name.
-        return f"local:{self._model_name}:padded1536"
+        return f"local:{self._model_name}:padded{STORAGE_DIM}"
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
@@ -172,11 +174,16 @@ class RandomProvider(EmbeddingProvider):
 
 @lru_cache(maxsize=1)
 def get_embedding_provider() -> EmbeddingProvider:
-    name = os.getenv("EMBEDDING_PROVIDER", "hash").strip().lower()
+    name = os.getenv("EMBEDDING_PROVIDER", "local").strip().lower()
     if name == "hash":
+        import logging
+        logging.getLogger(__name__).warning(
+            "EMBEDDING_PROVIDER=hash produces semantically meaningless embeddings. "
+            "Set EMBEDDING_PROVIDER=local or EMBEDDING_PROVIDER=openai for real semantic search."
+        )
         return HashingProvider()
     if name == "local":
-        model = os.getenv("EMBEDDING_MODEL_LOCAL", "intfloat/multilingual-e5-small")
+        model = os.getenv("EMBEDDING_MODEL_LOCAL", "intfloat/multilingual-e5-large")
         try:
             return LocalProvider(model)
         except Exception as exc:
