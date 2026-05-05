@@ -380,6 +380,9 @@ def _ensure_canvas_document_and_chunks(
         db.execute(text("DELETE FROM chunks WHERE document_id = :did"), {"did": doc.id})
         db.flush()
 
+    # Accept either a pre-cleaned dict (from _process_document) or raw source_meta
+    # from direct callers (e.g. tests).  Always clean here so the function is
+    # self-contained; cleaning is idempotent so no data is lost.
     canvas_meta = _clean_canvas_meta(source_meta)
     parts = split_into_chunks(raw_text, max_chars=1500, overlap_chars=150) or [raw_text[:1500]]
     chunks: list[Chunk] = []

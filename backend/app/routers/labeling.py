@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -223,7 +223,7 @@ def set_node_labels(
         if list(nl.labels or []) != new_labels:
             nl.labels = new_labels
             nl.version = (nl.version or 1) + 1
-            nl.updated_at = func.now()
+            nl.updated_at = datetime.now(timezone.utc)
             db.flush()
             _append_label_revision(db, nl)
     else:
