@@ -3,34 +3,31 @@
    ============================================================ */
 
 .page {
-  position: relative;
-  min-height: 100vh;
+  position: fixed;
+  inset: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-base);
 }
 
 /* ── Header ─────────────────────────────────────────────── */
 
 .header {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 50;
-  background: rgba(15, 17, 23, 0.88);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(11,12,17,0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .headerInner {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 18px;
   height: 56px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
 }
 
 .brand {
@@ -41,43 +38,41 @@
 }
 
 .brandIcon {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-sm);
-  background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #818cf8, #a78bfa 50%, #c084fc);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--accent-glow);
+  box-shadow: 0 4px 16px rgba(129,140,248,.35);
   flex-shrink: 0;
 }
 
 .brandIconSvg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   color: #fff;
 }
 
 .brandText {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
+  line-height: 1.1;
 }
 
 .title {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.2px;
   color: var(--text-primary);
-  background: linear-gradient(135deg, #e8eaf0, #818cf8);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 .subtitle {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-muted);
+  letter-spacing: 0.2px;
   letter-spacing: 0.1px;
 }
 
@@ -85,8 +80,151 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  margin-left: auto;
+}
+
+/* ── Header dataset selector ──────────────────────────────── */
+.headerDataset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: var(--transition-fast);
+}
+.headerDataset:hover { border-color: var(--border-2); }
+.headerDatasetLabel {
+  font-size: 9px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+.headerDatasetVal {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+/* ── Global search bar ────────────────────────────────────── */
+.headerSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  max-width: 380px;
+  padding: 7px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: var(--transition-fast);
+}
+.headerSearch:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(129,140,248,0.12);
+}
+.headerSearchPlaceholder {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.headerSearchKbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 1px 6px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+}
+
+/* ── Header icon button ───────────────────────────────────── */
+.iconBtn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  flex-shrink: 0;
+}
+.iconBtn:hover { border-color: var(--border-2); color: var(--text-primary); }
+
+/* ── Lang toggle ──────────────────────────────────────────── */
+.langToggle {
+  display: inline-flex;
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 2px;
+  background: rgba(255,255,255,0.04);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.langOption {
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+  color: rgba(232,234,240,0.7);
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+  transition: var(--transition-fast);
+}
+.langOptionActive {
+  background: #fff;
+  color: #0d0e12;
+}
+
+/* ── Avatar ───────────────────────────────────────────────── */
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #a78bfa, #fb923c);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ── Health chip ──────────────────────────────────────────── */
+.healthChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.healthChipOk  { color: #86efac; background: rgba(52,211,153,0.10); border-color: rgba(52,211,153,0.25); }
+.healthChipErr { color: #fca5a5; background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.28); }
+
+/* ── Separator ────────────────────────────────────────────── */
+.headerSep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
 /* ── Status pills ────────────────────────────────────────── */
@@ -138,85 +276,83 @@
 
 .shell {
   flex: 1;
-  max-width: 1400px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 20px 24px 32px;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 300px;
-  grid-template-rows: auto;
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: 232px minmax(0, 1fr) 260px;
+  overflow: hidden;
+  min-height: 0;
 }
 
 /* ── Sidebar nav ─────────────────────────────────────────── */
 
 .nav {
-  position: sticky;
-  top: 72px;
-  align-self: start;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  padding: 14px 10px;
+  gap: 4px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  background: rgba(255,255,255,0.01);
+  height: 100%;
 }
 
 .navCard {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  overflow: hidden;
-  box-shadow: var(--shadow-md);
+  /* kept for backward compat but visually transparent */
+  background: transparent;
+  border: none;
 }
 
 .navSectionTitle {
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 1px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
   text-transform: uppercase;
   color: var(--text-muted);
-  padding: 14px 14px 8px;
+  padding: 12px 8px 6px;
+  margin-top: 6px;
 }
 
 .navBtn {
   width: 100%;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
-  padding: 10px 14px;
+  padding: 7px 10px;
+  border-radius: 7px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
   transition: var(--transition-fast);
-  border-left: 2px solid transparent;
+  text-align: left;
+  font-family: inherit;
 }
 
 .navBtn:hover {
-  background: var(--bg-hover);
+  background: rgba(255,255,255,0.04);
   color: var(--text-primary);
 }
 
 .navBtnActive {
-  background: var(--accent-light);
-  color: var(--text-accent);
-  border-left-color: var(--accent);
+  background: rgba(129,140,248,0.13);
+  color: #c7d2fe;
+  border-color: rgba(129,140,248,0.28);
 }
 
 .navBtnActive:hover {
-  background: rgba(99, 102, 241, 0.2);
-  color: var(--text-accent);
+  background: rgba(129,140,248,0.18);
+  color: #c7d2fe;
 }
 
 .navIcon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 .navBtnActive .navIcon {
@@ -225,22 +361,21 @@
 
 .navLabel {
   flex: 1;
+  text-align: left;
 }
 
 .navHint {
-  font-size: 10px;
+  font-size: 9.5px;
   font-family: var(--font-mono);
   color: var(--text-muted);
-  background: var(--bg-card);
-  padding: 2px 6px;
-  border-radius: var(--r-xs);
+  background: transparent;
+  padding: 1px 5px;
+  border-radius: 4px;
   border: 1px solid var(--border);
 }
 
 .navBtnActive .navHint {
-  background: var(--accent-light);
-  border-color: var(--accent-border);
-  color: var(--text-accent);
+  opacity: 0;
 }
 
 /* nav count badge */
@@ -248,14 +383,89 @@
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 700;
-  color: #fff;
-  background: var(--accent);
-  padding: 2px 7px;
+  color: #fcd34d;
+  background: rgba(251,191,36,0.16);
+  padding: 1px 7px;
   border-radius: var(--r-pill);
-  min-width: 20px;
+  min-width: 22px;
   text-align: center;
-  box-shadow: 0 0 8px rgba(99,102,241,0.5);
-  animation: fadeIn 0.2s ease-out;
+}
+
+.navBtnActive .navCount {
+  background: rgba(129,140,248,0.30);
+  color: #fff;
+}
+
+/* "New analysis" primary action button in sidebar */
+.navPrimaryBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #818cf8, #a78bfa);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(129,140,248,.30);
+  font-family: inherit;
+  margin-bottom: 4px;
+  transition: var(--transition-fast);
+}
+
+.navPrimaryBtn:hover {
+  box-shadow: 0 4px 20px rgba(129,140,248,.45);
+  transform: translateY(-1px);
+}
+
+/* providers panel */
+.navProviders {
+  margin-top: auto;
+  padding: 12px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.navProviderHeader {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.navProviderRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.navProviderDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.navProviderLabel {
+  flex: 1;
+  font-size: 11px;
+}
+
+.navProviderVal {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
 }
 
 /* ── Main content ────────────────────────────────────────── */
@@ -265,17 +475,20 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  overflow-y: auto;
+  padding: 16px 18px;
 }
 
 /* ── Aside (right panel) ─────────────────────────────────── */
 
 .aside {
-  position: sticky;
-  top: 72px;
-  align-self: start;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 14px 12px;
+  border-left: 1px solid var(--border);
+  background: rgba(255,255,255,0.008);
 }
 
 /* ── Card ────────────────────────────────────────────────── */
@@ -2735,55 +2948,12 @@
 .searchModeBtnActive { background: var(--accent-light); color: var(--text-accent); }
 
 /* ============================================================
-   2026 Redesign Overrides
+   Dark theme refinements (2026)
    ============================================================ */
 
-.page {
-  background: transparent;
-}
+/* headerInner: managed by Mission Control header styles above */
 
-.header {
-  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border-bottom: 1px solid var(--border);
-  box-shadow: none;
-}
-
-.headerInner {
-  max-width: 1540px;
-  height: 68px;
-  padding: 0 28px;
-}
-
-.brandIcon {
-  width: 40px;
-  height: 40px;
-  border-radius: 14px;
-  background: var(--accent-light);
-  box-shadow: none;
-}
-
-.brandIconSvg {
-  color: var(--accent);
-}
-
-.title {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.04em;
-  color: var(--text-primary);
-  background: none;
-  -webkit-text-fill-color: currentColor;
-}
-
-.subtitle {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
+/* brandIcon/title/subtitle: managed by Mission Control brand styles above */
 
 .metaRow {
   gap: 10px;
@@ -2839,17 +3009,7 @@
   box-shadow: none;
 }
 
-.shell {
-  max-width: 1540px;
-  padding: 22px 28px 36px;
-  grid-template-columns: 252px minmax(0, 1fr) 320px;
-  gap: 18px;
-}
-
-.nav,
-.aside {
-  top: 88px;
-}
+/* shell/nav/aside: Mission Control full-bleed fixed-height layout — no overrides needed here */
 
 .navCard,
 .card,
@@ -2878,27 +3038,7 @@
   letter-spacing: 0.12em;
 }
 
-.navBtn {
-  min-height: 44px;
-  border-left: none;
-  border-radius: 12px;
-  margin: 0 10px 6px;
-  width: calc(100% - 20px);
-}
-
-.navBtn:hover {
-  background: var(--bg-hover);
-}
-
-.navBtnActive {
-  background: var(--accent-light);
-  color: var(--text-accent);
-  border-left-color: transparent;
-}
-
-.navBtnActive:hover {
-  background: var(--accent-light);
-}
+/* navBtn: managed by Mission Control nav styles above */
 
 .navHint,
 .nodeId,
@@ -3213,27 +3353,18 @@
 @media (max-width: 920px) {
   .headerInner {
     height: auto;
-    padding: 16px 18px;
-    align-items: flex-start;
+    padding: 12px 14px;
+    flex-wrap: wrap;
   }
 
   .shell {
     grid-template-columns: 1fr;
-    padding: 18px;
-  }
-
-  .nav,
-  .aside {
-    position: static;
-  }
-
-  .navBtn {
-    margin: 0 0 6px;
-    width: 100%;
   }
 
   .aside {
     grid-template-columns: 1fr;
+    border-left: none;
+    border-top: 1px solid var(--border);
   }
 }
 
@@ -3241,11 +3372,7 @@
    2026 Redesign Overrides
    ============================================================ */
 
-.page {
-  position: relative;
-  min-height: 100vh;
-  color: var(--text-primary);
-}
+/* .page: managed by Mission Control layout (position: fixed) */
 
 .header {
   background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
@@ -3255,38 +3382,7 @@
   box-shadow: none;
 }
 
-.headerInner {
-  max-width: 1500px;
-  height: 72px;
-  padding: 0 28px;
-}
-
-.brandIcon {
-  width: 40px;
-  height: 40px;
-  border-radius: 14px;
-  background: var(--accent-light);
-  color: var(--accent);
-  box-shadow: none;
-}
-
-.brandText {
-  gap: 2px;
-}
-
-.title {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: var(--text-primary);
-  background: none;
-  -webkit-text-fill-color: initial;
-}
-
-.subtitle {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
+/* header/brand: managed by Mission Control header styles */
 
 .metaRow {
   gap: 10px;
@@ -3338,17 +3434,7 @@
   transform: none;
 }
 
-.shell {
-  max-width: 1500px;
-  padding: 20px 28px 40px;
-  grid-template-columns: 250px minmax(0, 1fr) 320px;
-  gap: 18px;
-}
-
-.nav,
-.aside {
-  top: 92px;
-}
+/* shell/nav/aside: managed by Mission Control layout — no overrides needed */
 
 .navCard,
 .card,
@@ -3374,29 +3460,7 @@
   color: var(--text-secondary);
 }
 
-.navBtn {
-  margin: 0 8px 6px;
-  width: calc(100% - 16px);
-  border-left: none;
-  border-radius: 14px;
-  color: var(--text-secondary);
-}
-
-.navBtn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.navBtnActive {
-  background: var(--accent-light);
-  color: var(--text-accent);
-  border-left: none;
-}
-
-.navBtnActive:hover {
-  background: var(--accent-light);
-  color: var(--text-accent);
-}
+/* navBtn: managed by Mission Control nav styles */
 
 .navHint,
 .navCount,
@@ -3415,21 +3479,7 @@
   gap: 18px;
 }
 
-.card,
-.asideCard {
-  border-radius: 24px;
-}
-
-.cardSm,
-.nodeCard,
-.searchResultCard,
-.dashCard,
-.dashDatasetRow,
-.onboardStep,
-.alertCard,
-.alertCardSoft {
-  border-radius: 18px;
-}
+/* card border-radius: managed by Mission Control tokens (--r-lg: 12px) */
 
 .cardHeader {
   margin-bottom: 18px;

@@ -417,7 +417,7 @@ export default function Home() {
 
   // ── Settings ─────────────────────────────────────────────────
   const [showSettings, setShowSettings] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [minProb, setMinProb] = useState(0.2);
   const [maxLevels, setMaxLevels] = useState(6);
   const [embeddingModel, setEmbeddingModel] = useState("");
@@ -456,6 +456,12 @@ export default function Home() {
 
   // ── Toast system ────────────────────────────────────────────
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<{role: "user"|"assistant"; content: string}[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const [pendingIngest, setPendingIngest] = useState(false);
+  const ingestCanvasCourseRef = useRef<(() => void) | null>(null);
   const toastCounter = useRef(0);
   const addToast = useCallback((msg: string, type: Toast["type"] = "info") => {
     const id = ++toastCounter.current;
@@ -485,6 +491,9 @@ export default function Home() {
   const [canvasSelectedCourse, setCanvasSelectedCourse] = useState<number | null>(null);
   const [canvasContentTypes, setCanvasContentTypes] = useState<string[]>(["syllabus", "pages", "assignments", "quizzes", "discussions", "files"]);
   const [canvasMaxNodes, setCanvasMaxNodes] = useState(30);
+  const [canvasMaxNodesAuto, setCanvasMaxNodesAuto] = useState(false);
+  const [canvasTopicMode, setCanvasTopicMode] = useState<"none" | "auto" | "guided">("none");
+  const [canvasTopicTree, setCanvasTopicTree] = useState("");
   const [canvasMaxFiles, setCanvasMaxFiles] = useState(20);
   const [canvasIngesting, setCanvasIngesting] = useState(false);
 const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
@@ -525,10 +534,9 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     const savedTheme = localStorage.getItem("bloom_theme");
     if (savedTheme === "dark" || savedTheme === "light") {
       setTheme(savedTheme);
-      document.documentElement.setAttribute("data-theme", savedTheme);
-    } else {
-      document.documentElement.setAttribute("data-theme", "light");
+      if (savedTheme === "light") document.documentElement.setAttribute("data-theme", "light");
     }
+    // dark is the default (no attribute needed since :root is dark)
 
     // Onboarding
     if (!localStorage.getItem("bloom_visited")) {
@@ -550,7 +558,11 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
   useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem("bloom_theme", theme);
-    document.documentElement.setAttribute("data-theme", theme);
+    if (theme === "light") {
+      document.documentElement.setAttribute("data-theme", "light");
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
   }, [theme]);
   useEffect(() => { localStorage.setItem("bloom_annotator", annotator); }, [annotator]);
 
@@ -573,11 +585,6 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
   }, [apiBase]);
 
   const getDirectBackendBase = useCallback(() => {
-    if (typeof window === "undefined") return null;
-    const host = window.location.hostname;
-    if (host === "localhost" || host === "127.0.0.1") {
-      return "http://127.0.0.1:8000";
-    }
     return null;
   }, []);
 
@@ -1015,7 +1022,10 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
           dataset_id: ds,
           content_types: canvasContentTypes,
           max_nodes_per_doc: canvasMaxNodes,
+          max_nodes_auto: canvasMaxNodesAuto,
           max_files: canvasMaxFiles,
+          topic_mode: canvasTopicMode,
+          topic_tree: canvasTopicMode === "guided" ? canvasTopicTree : undefined,
         }),
       });
 
@@ -1091,7 +1101,36 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
       setCanvasIngesting(false);
       setCanvasProgress(null);
     }
-  }, [addToast, apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles, getDirectBackendBase]);
+  }, [addToast, apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxNodesAuto, canvasMaxFiles, getDirectBackendBase]);
+
+  // Keep a stable ref so the chat action handler can call ingestCanvasCourse without stale closure
+  useEffect(() => { ingestCanvasCourseRef.current = ingestCanvasCourse; }, [ingestCanvasCourse]);
+
+  // Execute pending ingest after course + dataset are set
+  useEffect(() => {
+    if (pendingIngest && canvasSelectedCourse && ds) {
+      setPendingIngest(false);
+      ingestCanvasCourseRef.current?.();
+    }
+  }, [pendingIngest, canvasSelectedCourse, ds]);
+
+  const executeUiAction = useCallback((action: {type: string; tab?: string; course_id?: number}) => {
+    if (action.type === "switchTab") {
+      const tab = action.tab as "analysis" | "graph" | "labeling" | "search" | "dashboard" | "canvas";
+      setActiveTab(tab);
+      if (tab === "canvas" && canvasCourses.length === 0) loadCanvasCourses();
+      addToast(`→ Вкладка: ${tab}`, "info");
+    } else if (action.type === "selectCourse") {
+      if (action.course_id) {
+        setCanvasSelectedCourse(action.course_id);
+        const name = canvasCourses.find(c => c.id === action.course_id)?.name;
+        addToast(`→ Курс: ${name ?? action.course_id}`, "info");
+      }
+    } else if (action.type === "startIngest") {
+      addToast("→ Запускаю анализ курса…", "info");
+      setPendingIngest(true);
+    }
+  }, [addToast, canvasCourses, loadCanvasCourses]);
 
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
@@ -1355,70 +1394,81 @@ const analysisFlowSteps = [
       {/* ── Header ─────────────────────────────────────── */}
       <header className={styles.header}>
         <div className={styles.headerInner}>
+          {/* Brand */}
           <div className={styles.brand}>
             <div className={styles.brandIcon}>
-              <span className={styles.brandIconSvg}>
-                <IconSparkle />
-              </span>
+              <span className={styles.brandIconSvg}><IconBrain /></span>
             </div>
             <div className={styles.brandText}>
               <span className={styles.title}>Bloom RAG Studio</span>
-              <span className={styles.subtitle}>multi-label knowledge taxonomy</span>
+              <span className={styles.subtitle}>Граф знаний · Таксономия Блума</span>
             </div>
           </div>
 
+          {/* Dataset selector */}
+          <div className={styles.headerDataset} title="Сменить датасет">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-muted)", flexShrink: 0 }}>
+              <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>
+            </svg>
+            <div>
+              <div className={styles.headerDatasetLabel}>Датасет</div>
+              <div className={styles.headerDatasetVal}>{ds ? `#${ds}` : "— не выбран"}</div>
+            </div>
+            <span style={{ color: "var(--text-muted)", fontSize: 10, marginLeft: 4 }}>▾</span>
+          </div>
+
+          {/* Global search */}
+          <div className={styles.headerSearch}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-muted)", flexShrink: 0 }}>
+              <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+            </svg>
+            <span className={styles.headerSearchPlaceholder}>Поиск по узлам, документам, датасетам…</span>
+            <span className={styles.headerSearchKbd}>⌘K</span>
+          </div>
+
           <div className={styles.metaRow}>
-            {/* API status */}
-            <div className={styles.pill}>
-              <span className={[styles.dot, apiStatusDotClass].join(" ")} />
-              <span>API</span>
-              <span className={styles.kbd}>{apiStatus}</span>
+            {/* API health */}
+            <div className={[styles.healthChip, apiStatus === "ok" ? styles.healthChipOk : styles.healthChipErr].join(" ")}>
+              <span className={[styles.dot, apiStatus === "ok" ? styles.dotOk : styles.dotBad].join(" ")} />
+              {apiStatus === "ok" ? "API · работает" : "API недоступен"}
             </div>
 
-            {/* Dataset badge */}
-            <div className={styles.pill}>
-              <span style={{ color: "var(--text-muted)" }}>dataset</span>
-              <span className={styles.kbd} style={{ color: ds ? "var(--text-accent)" : undefined }}>
-                {ds ?? "—"}
-              </span>
-            </div>
+            {/* Version */}
+            <span className={styles.kbd} style={{ fontSize: 10.5 }}>v0.9.3</span>
 
-            {/* Job badge */}
+            {/* Job indicator */}
             {lastJob && (
-              <div className={styles.pill}>
-                <span style={{ color: "var(--text-muted)" }}>job</span>
-                <span className={styles.kbd}>{lastJob}</span>
-              </div>
+              <span className={styles.kbd} style={{ fontSize: 10.5, color: "var(--warning)" }}>
+                job #{lastJob}
+              </span>
             )}
 
-            <button
-              className={styles.themeToggle}
-              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              title="Переключить тему"
-              type="button"
-            >
-              {theme === "light" ? "Тёмная" : "Светлая"}
-            </button>
+            <span className={styles.headerSep} />
 
-            {/* Settings gear */}
-            <button
-              className={styles.gearBtn}
-              onClick={() => setShowSettings(true)}
-              title="Настройки (Settings)"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            {/* Export */}
+            <button className={styles.iconBtn} title="Экспорт" type="button">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
             </button>
 
-            {/* Help button */}
-            <button
-              className={styles.helpBtn}
-              onClick={() => setShowGuide(true)}
-              title="Инструкция по использованию"
-            >
-              ?
+            {/* Settings */}
+            <button className={styles.iconBtn} onClick={() => setShowSettings(true)} title="Настройки" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3h.1a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8v.1a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/>
+              </svg>
             </button>
+
+            <span className={styles.headerSep} />
+
+            {/* Lang toggle */}
+            <div className={styles.langToggle}>
+              <button className={[styles.langOption, theme === "dark" ? styles.langOptionActive : ""].join(" ")} onClick={() => setTheme("dark")} type="button">RU</button>
+              <button className={[styles.langOption, theme === "light" ? styles.langOptionActive : ""].join(" ")} onClick={() => setTheme("light")} type="button">EN</button>
+            </div>
+
+            {/* Avatar */}
+            <div className={styles.avatar}>БР</div>
           </div>
         </div>
       </header>
@@ -1428,82 +1478,143 @@ const analysisFlowSteps = [
 
         {/* ── Sidebar nav ──────────────────────────────── */}
         <nav className={styles.nav}>
-          <div className={styles.navCard}>
-            <div className={styles.navSectionTitle}>Инструменты</div>
+          {/* New Analysis CTA */}
+          <button className={styles.navPrimaryBtn} onClick={() => setActiveTab("analysis")} type="button">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Новый анализ
+            <span style={{ marginLeft: "auto", opacity: 0.85, fontSize: 10, fontFamily: "var(--font-mono)" }}>⌘N</span>
+          </button>
 
-            <button
-              className={[styles.navBtn, activeTab === "analysis" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => setActiveTab("analysis")}
-            >
-              <span className={styles.navIcon}><IconBrain /></span>
-              <span className={styles.navLabel}>Анализ</span>
-              {nodes.length > 0
-                ? <span className={styles.navCount}>{nodes.length}</span>
-                : <span className={styles.navHint}>content</span>
-              }
-            </button>
+          <div className={styles.navSectionTitle}>РАБОТА</div>
 
-            <button
-              className={[styles.navBtn, activeTab === "graph" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => setActiveTab("graph")}
-            >
-              <span className={styles.navIcon}><IconGraph /></span>
-              <span className={styles.navLabel}>Граф</span>
-              <span className={styles.navHint}>cyto</span>
-            </button>
+          <button
+            className={[styles.navBtn, activeTab === "analysis" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => setActiveTab("analysis")}
+          >
+            <span className={styles.navIcon}><IconBrain /></span>
+            <span className={styles.navLabel}>Анализ контента</span>
+            {nodes.length > 0
+              ? <span className={styles.navCount}>{nodes.length}</span>
+              : <span className={styles.navHint}>A</span>
+            }
+          </button>
 
-            <button
-              className={[styles.navBtn, activeTab === "labeling" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => setActiveTab("labeling")}
-            >
-              <span className={styles.navIcon}><IconTag /></span>
-              <span className={styles.navLabel}>Разметка</span>
-              {labelProgress && labelProgress.total > 0 ? (
-                <div className={styles.navProgressChip}>
-                  <span className={styles.navProgressText}>{labelProgress.labeled}/{labelProgress.total}</span>
-                  <div className={styles.navProgressMini}>
-                    <div className={styles.navProgressMiniFill} style={{ width: `${progressPct}%` }} />
-                  </div>
-                </div>
-              ) : (
-                <span className={styles.navHint}>queue</span>
-              )}
-            </button>
+          <button
+            className={[styles.navBtn, activeTab === "graph" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => setActiveTab("graph")}
+          >
+            <span className={styles.navIcon}><IconGraph /></span>
+            <span className={styles.navLabel}>Граф знаний</span>
+            <span className={styles.navHint}>G</span>
+          </button>
 
-            <button
-              className={[styles.navBtn, activeTab === "dashboard" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => { setActiveTab("dashboard"); loadDashboard(); }}
-            >
-              <span className={styles.navIcon}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-                </svg>
-              </span>
-              <span className={styles.navLabel}>Дашборд</span>
-              <span className={styles.navHint}>stats</span>
-            </button>
+          <button
+            className={[styles.navBtn, activeTab === "labeling" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => setActiveTab("labeling")}
+          >
+            <span className={styles.navIcon}><IconTag /></span>
+            <span className={styles.navLabel}>Разметка</span>
+            {labelProgress && labelProgress.total > 0 ? (
+              <span className={styles.navCount}>{labelProgress.total - labelProgress.labeled}</span>
+            ) : (
+              <span className={styles.navHint}>L</span>
+            )}
+          </button>
 
-            <button
-              className={[styles.navBtn, activeTab === "search" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => setActiveTab("search")}
-            >
-              <span className={styles.navIcon}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                </svg>
-              </span>
-              <span className={styles.navLabel}>Поиск</span>
-              <span className={styles.navHint}>RAG</span>
-            </button>
+          <button
+            className={[styles.navBtn, activeTab === "search" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => setActiveTab("search")}
+          >
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Векторный поиск</span>
+            <span className={styles.navHint}>S</span>
+          </button>
 
-            <button
-              className={[styles.navBtn, activeTab === "canvas" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => { setActiveTab("canvas"); if (!canvasCourses.length) loadCanvasCourses(); }}
-            >
-              <span className={styles.navIcon}><IconCanvas /></span>
-              <span className={styles.navLabel}>Canvas</span>
-              <span className={styles.navHint}>LMS</span>
-            </button>
+          <button
+            className={[styles.navBtn, activeTab === "dashboard" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => { setActiveTab("dashboard"); loadDashboard(); }}
+          >
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Обзор / Метрики</span>
+            <span className={styles.navHint}>D</span>
+          </button>
+
+          <button
+            className={[styles.navBtn, activeTab === "canvas" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => { setActiveTab("canvas"); if (!canvasCourses.length) loadCanvasCourses(); }}
+          >
+            <span className={styles.navIcon}><IconCanvas /></span>
+            <span className={styles.navLabel}>Canvas LMS</span>
+            <span className={styles.navHint}>C</span>
+          </button>
+
+          <div className={styles.navSectionTitle}>ДАННЫЕ</div>
+
+          <button className={styles.navBtn} onClick={() => setActiveTab("dashboard")} type="button">
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Датасеты</span>
+            <span className={styles.navHint} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>4</span>
+          </button>
+
+          <button className={styles.navBtn} type="button">
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Документы</span>
+            <span className={styles.navHint} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>{nodes.length > 0 ? "✓" : "—"}</span>
+          </button>
+
+          <button className={styles.navBtn} type="button">
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2L3 14h7l-1 8 11-14h-7z"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Очередь задач</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", padding: "1px 6px", border: "1px solid var(--border)", borderRadius: 4 }}>2/4</span>
+          </button>
+
+          <button className={styles.navBtn} onClick={() => setShowSettings(true)} type="button">
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3h.1a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8v.1a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Настройки</span>
+          </button>
+
+          {/* Providers panel */}
+          <div className={styles.navProviders}>
+            <div className={styles.navProviderHeader}>ПРОВАЙДЕРЫ</div>
+            <div className={styles.navProviderRow}>
+              <span className={styles.navProviderDot} style={{ color: "var(--success)" }} />
+              <span className={styles.navProviderLabel}>Эмбеддинги</span>
+              <span className={styles.navProviderVal}>e5-large</span>
+            </div>
+            <div className={styles.navProviderRow}>
+              <span className={styles.navProviderDot} style={{ color: apiStatus === "ok" ? "var(--success)" : "var(--error)" }} />
+              <span className={styles.navProviderLabel}>LLM</span>
+              <span className={styles.navProviderVal}>qwen3:14b</span>
+            </div>
+            <div className={styles.navProviderRow}>
+              <span className={styles.navProviderDot} style={{ color: "var(--success)" }} />
+              <span className={styles.navProviderLabel}>База данных</span>
+              <span className={styles.navProviderVal}>pgvector</span>
+            </div>
           </div>
         </nav>
 
@@ -3026,11 +3137,74 @@ const analysisFlowSteps = [
                   </div>
 
                   <div className={styles.paramField} style={{ marginBottom: 10 }}>
-                    <span>Макс. узлов на документ</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input className={styles.paramSlider} type="range" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ flex: 1 }} />
-                      <input className={styles.paramInput} type="number" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ width: 56 }} />
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      Узлов на документ
+                      <button
+                        onClick={() => setCanvasMaxNodesAuto(v => !v)}
+                        style={{
+                          fontSize: 10, padding: "2px 8px", borderRadius: 4, cursor: "pointer", border: "none",
+                          background: canvasMaxNodesAuto ? "var(--text-accent)" : "var(--bg-hover)",
+                          color: canvasMaxNodesAuto ? "#fff" : "var(--text-muted)",
+                          fontWeight: 600, letterSpacing: "0.04em",
+                        }}
+                        title="LLM сама решит, сколько узлов извлечь из каждого документа"
+                      >
+                        {canvasMaxNodesAuto ? "⚡ авто (LLM)" : "авто"}
+                      </button>
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: canvasMaxNodesAuto ? 0.35 : 1 }}>
+                      <input className={styles.paramSlider} type="range" min={5} max={100} step={5} value={canvasMaxNodes}
+                        disabled={canvasMaxNodesAuto}
+                        onChange={e => { setCanvasMaxNodes(Number(e.target.value)); setCanvasMaxNodesAuto(false); }}
+                        style={{ flex: 1 }} />
+                      <input className={styles.paramInput} type="number" min={5} max={100} step={5} value={canvasMaxNodesAuto ? "—" : canvasMaxNodes}
+                        disabled={canvasMaxNodesAuto}
+                        onChange={e => { setCanvasMaxNodes(Number(e.target.value)); setCanvasMaxNodesAuto(false); }}
+                        style={{ width: 56 }} />
                     </div>
+                    {canvasMaxNodesAuto && (
+                      <div style={{ fontSize: 11, color: "var(--text-accent)", marginTop: 3 }}>
+                        Qwen3 определит количество узлов по содержанию каждого документа
+                      </div>
+                    )}
+                  </div>
+
+                  <div className={styles.paramField} style={{ marginBottom: 10 }}>
+                    <span style={{ fontWeight: 600 }}>Тематическая разметка</span>
+                    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                      {(["none", "auto", "guided"] as const).map(mode => (
+                        <button key={mode} onClick={() => setCanvasTopicMode(mode)} style={{
+                          padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 12,
+                          background: canvasTopicMode === mode ? "var(--text-accent)" : "var(--bg-hover)",
+                          color: canvasTopicMode === mode ? "#fff" : "var(--text-muted)",
+                          fontWeight: canvasTopicMode === mode ? 600 : 400,
+                        }}>
+                          {mode === "none" ? "Выкл" : mode === "auto" ? "⚡ Авто" : "📋 По дереву"}
+                        </button>
+                      ))}
+                    </div>
+                    {canvasTopicMode === "auto" && (
+                      <div style={{ fontSize: 11, color: "var(--text-accent)", marginTop: 4 }}>
+                        Qwen3 определит предмет, тему и подтему для каждого узла
+                      </div>
+                    )}
+                    {canvasTopicMode === "guided" && (
+                      <div style={{ marginTop: 6 }}>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                          Вставь дерево тем — каждый уровень с новой строки, дочерние темы с отступом:
+                        </div>
+                        <textarea
+                          value={canvasTopicTree}
+                          onChange={e => setCanvasTopicTree(e.target.value)}
+                          placeholder={"Физика\n  Механика\n    Кинематика\n    Динамика\n  Оптика\n    Геометрическая оптика"}
+                          style={{
+                            width: "100%", minHeight: 120, fontFamily: "var(--font-mono)", fontSize: 12,
+                            background: "var(--bg-input)", color: "var(--text-primary)", border: "1px solid var(--border)",
+                            borderRadius: 4, padding: "6px 8px", resize: "vertical", boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {canvasContentTypes.includes("files") && (
@@ -3857,6 +4031,138 @@ const analysisFlowSteps = [
           </div>
         </div>
       </footer>
+
+      {/* ── RAG Chat ──────────────────────────────────────────────── */}
+      <button
+        onClick={() => setChatOpen(v => !v)}
+        title="RAG-чат"
+        style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 9999,
+          width: 52, height: 52, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.15)", cursor: "pointer",
+          background: chatOpen ? "#6366f1" : "#6366f1",
+          boxShadow: "0 4px 20px rgba(99,102,241,0.5)",
+          fontSize: 22, display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#fff",
+          transition: "transform 0.15s",
+        }}
+      >
+        {chatOpen ? "✕" : "💬"}
+      </button>
+
+      {chatOpen && (
+        <div style={{
+          position: "fixed", bottom: 88, right: 24, zIndex: 999,
+          width: 380, height: 520, display: "flex", flexDirection: "column",
+          background: "var(--bg-card)", border: "1px solid var(--border)",
+          borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.3)", overflow: "hidden",
+        }}>
+          <div style={{
+            padding: "10px 14px", borderBottom: "1px solid var(--border)",
+            fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 8,
+          }}>
+            💬 RAG-чат
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 400, marginLeft: "auto" }}>
+              {ds ? `dataset #${ds}` : "без датасета"}
+            </span>
+            {chatHistory.length > 0 && (
+              <button onClick={() => setChatHistory([])} style={{
+                fontSize: 10, padding: "2px 6px", borderRadius: 4, border: "none",
+                background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer",
+              }}>очистить</button>
+            )}
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {chatHistory.length === 0 && (
+              <div style={{ color: "var(--text-muted)", fontSize: 12, textAlign: "center", marginTop: 40 }}>
+                Спроси про разметку, курс или инструмент.<br/>
+                Я ищу по базе знаний и отвечаю с контекстом.
+              </div>
+            )}
+            {chatHistory.map((msg, i) => (
+              <div key={i} style={{
+                alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
+                maxWidth: "85%",
+                background: msg.role === "user" ? "var(--text-accent)" : "var(--bg-hover)",
+                color: msg.role === "user" ? "#fff" : "var(--text-primary)",
+                borderRadius: msg.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
+                padding: "8px 12px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap",
+              }}>
+                {msg.content}
+              </div>
+            ))}
+            {chatStreaming && (
+              <div style={{
+                alignSelf: "flex-start", color: "var(--text-muted)", fontSize: 12, fontStyle: "italic",
+              }}>печатает…</div>
+            )}
+          </div>
+
+          <div style={{ padding: "8px 10px", borderTop: "1px solid var(--border)", display: "flex", gap: 6 }}>
+            <textarea
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (chatInput.trim() && !chatStreaming) {
+                    const userMsg = chatInput.trim();
+                    setChatInput("");
+                    const newHistory = [...chatHistory, { role: "user" as const, content: userMsg }];
+                    setChatHistory(newHistory);
+                    setChatStreaming(true);
+                    let assistantText = "";
+                    const uiCtx = {
+                      courses: canvasCourses.map(c => ({ id: c.id, name: c.name })),
+                      active_tab: activeTab,
+                      dataset_id: ds ?? null,
+                    };
+                    fetch(`${apiBase}/chat/stream`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ message: userMsg, dataset_id: ds ?? null, history: chatHistory, ui_context: uiCtx }),
+                    }).then(async resp => {
+                      const reader = resp.body!.getReader();
+                      const decoder = new TextDecoder();
+                      let buf = "";
+                      while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buf += decoder.decode(value, { stream: true });
+                        const lines = buf.split("\n");
+                        buf = lines.pop()!;
+                        for (const line of lines) {
+                          if (!line.startsWith("data: ")) continue;
+                          try {
+                            const ev = JSON.parse(line.slice(6));
+                            if (ev.type === "chunk") {
+                              assistantText += ev.text;
+                              setChatHistory([...newHistory, { role: "assistant", content: assistantText }]);
+                            } else if (ev.type === "action") {
+                              executeUiAction(ev.action);
+                            } else if (ev.type === "done" || ev.type === "error") {
+                              setChatStreaming(false);
+                            }
+                          } catch {}
+                        }
+                      }
+                      setChatStreaming(false);
+                    }).catch(() => setChatStreaming(false));
+                  }
+                }
+              }}
+              placeholder="Спроси что-нибудь… (Enter — отправить)"
+              disabled={chatStreaming}
+              rows={2}
+              style={{
+                flex: 1, resize: "none", fontFamily: "inherit", fontSize: 12,
+                background: "var(--bg-input)", color: "var(--text-primary)",
+                border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px",
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
