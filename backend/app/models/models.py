@@ -45,10 +45,11 @@ class Chunk(Base):
 
 class Embedding(Base):
     __tablename__="embeddings"
+    __table_args__ = (UniqueConstraint("chunk_id", name="uq_embeddings_chunk_id"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), index=True)
     dim: Mapped[int] = mapped_column(Integer, default=1536)
-    # 1536-dim shim: multilingual-e5-small is 384-dim, zero-padded for OpenAI API compatibility
+    # 1536-dim storage: local model (default: multilingual-e5-large, 1024-dim) is zero-padded for OpenAI compatibility
     vec: Mapped[Optional[list]] = mapped_column(_Vector(1536) if _PGVECTOR else JSON, nullable=True)
     model: Mapped[str] = mapped_column(String(100), nullable=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -60,6 +61,14 @@ class KnowledgeNode(Base):
         # Covers the non-NULL document_id case (all Canvas-ingested nodes).
         # A separate partial index (see migration 0016) covers document_id IS NULL.
         UniqueConstraint("dataset_id", "document_id", "title", name="uq_kn_dataset_doc_title"),
+        # HNSW index for fast cosine similarity search over node embeddings.
+        # Requires pgvector >= 0.5. Alembic autogenerate won't handle this —
+        # create manually or via a migration:
+        #   CREATE INDEX ix_knode_vec_hnsw ON knowledge_nodes
+        #   USING hnsw (vec vector_cosine_ops) WITH (m=16, ef_construction=64);
+        Index("ix_knode_vec_hnsw", "vec", postgresql_using="hnsw",
+              postgresql_with={"m": 16, "ef_construction": 64},
+              postgresql_ops={"vec": "vector_cosine_ops"}),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
@@ -71,7 +80,7 @@ class KnowledgeNode(Base):
     top_levels: Mapped[list] = mapped_column(JSON, default=list)
     embedding_dim: Mapped[int] = mapped_column(Integer, default=1536)
     embedding_model: Mapped[str] = mapped_column(String(100), nullable=True)
-    # 1536-dim shim: multilingual-e5-small is 384-dim, zero-padded for OpenAI API compatibility
+    # 1536-dim storage: local model (default: multilingual-e5-large, 1024-dim) is zero-padded for OpenAI compatibility
     vec: Mapped[Optional[list]] = mapped_column(_Vector(1536) if _PGVECTOR else JSON, nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     model_info: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -79,6 +88,10 @@ class KnowledgeNode(Base):
 
 class KnowledgeEdge(Base):
     __tablename__ = "knowledge_edges"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "from_node_id", "to_node_id", "method",
+                         name="uq_kedge_ds_from_to_method"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
     from_node_id: Mapped[int] = mapped_column(ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True)
@@ -109,6 +122,7 @@ class Rubric(Base):
 
 class BloomAnnotation(Base):
     __tablename__="bloom_annotations"
+    __table_args__ = (UniqueConstraint("chunk_id", "level", name="uq_bloom_chunk_level"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), index=True)
     level: Mapped[str] = mapped_column(Enum(BloomLevel), index=True)

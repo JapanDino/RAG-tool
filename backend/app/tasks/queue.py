@@ -40,7 +40,7 @@ def _run_sync(db: Session, job: Job):
                     job.payload.get("min_score", 0.2),
                     job.payload.get("max_edges", 200),
                     job.payload.get("include_cooccurrence", True),
-                    job.payload.get("limit_nodes", 500),
+                    job.payload.get("limit_nodes", 2000),
                     job.payload.get("co_window", 2),
                 )
         else:
@@ -91,7 +91,10 @@ def enqueue_or_mark(db: Session, job: Job):
             )
             db.commit()
         elif job.type == JobType.export:
-            pass
+            # Export runs synchronously in the router and marks itself done;
+            # if it ends up in the queue, just mark it done so it doesn't get stuck.
+            db.execute(text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"), {"id": job.id})
+            db.commit()
         elif job.type == JobType.graph:
             if job.payload.get("action") == "reindex":
                 async_result = reindex_dataset_nodes.delay(job.payload["dataset_id"], job.id)
@@ -104,7 +107,7 @@ def enqueue_or_mark(db: Session, job: Job):
                     job.payload.get("min_score", 0.2),
                     job.payload.get("max_edges", 200),
                     job.payload.get("include_cooccurrence", True),
-                    job.payload.get("limit_nodes", 500),
+                    job.payload.get("limit_nodes", 2000),
                     job.payload.get("co_window", 2),
                 )
             db.execute(

@@ -41,4 +41,6 @@ app.include_router(canvas.router)
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    from .services.embedding_provider import current_embedding_model
+    model = current_embedding_model()
+    return {"ok": True, "embedding_model": model, "semantic": not model.startswith("hash:")}

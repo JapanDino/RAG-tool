@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/app/uploads")
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_SIZE", str(20 * 1024 * 1024)))  # 20 MB default
 
 
 @router.get("", response_model=list[DatasetOut])
@@ -53,7 +54,9 @@ def upload_document(dataset_id: int, file: UploadFile = File(...), db: Session =
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     file_path = f"{UPLOAD_DIR}/{file_uuid}{ext}"
-    data = file.file.read()
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_BYTES // (1024*1024)} MB)")
     with open(file_path, "wb") as f:
         f.write(data)
 

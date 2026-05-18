@@ -21,3 +21,5 @@ beautifulsoup4>=4.12,<5.0
 lxml>=5.0,<6.0
 
 # Local NLP/embeddings (Hybrid offline-first path)
+pymorphy3>=1.0,<2.0
+pymorphy3-dicts-ru>=2.4,<3.0

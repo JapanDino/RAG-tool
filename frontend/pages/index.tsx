@@ -44,10 +44,13 @@ function getConfidenceMeta(node: Pick<AnalyzeNode, "prob_vector" | "top_levels">
   const runnerUp = sorted[1] || null;
   const gap = runnerUp ? primary.prob - runnerUp.prob : primary.prob;
 
+  // Thresholds calibrated for keyword classifier output (Laplace smoothing produces
+  // flat distributions: typical max prob 0.25–0.50). LLM mode will naturally land
+  // in "high" more often since it can reach 0.70+.
   let band: ConfidenceBand = "low";
-  if (primary.prob >= 0.72 && gap >= 0.18) {
+  if (primary.prob >= 0.45 && gap >= 0.15) {
     band = "high";
-  } else if (primary.prob >= 0.52 && gap >= 0.08) {
+  } else if (primary.prob >= 0.30 && gap >= 0.07) {
     band = "medium";
   }
 
@@ -404,6 +407,7 @@ export default function Home() {
   const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE || "/api-proxy";
   const [apiBase, setApiBase] = useState(DEFAULT_API);
   const [apiStatus, setApiStatus] = useState<"unknown" | "ok" | "down">("unknown");
+  const [embeddingSemantic, setEmbeddingSemantic] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // ── Dashboard ────────────────────────────────────────────────
@@ -445,6 +449,10 @@ export default function Home() {
 
   // ── Undo labeling ─────────────────────────────────────────────
   const [undoStack, setUndoStack] = useState<{ node: AnalyzeNode; labels: Record<BloomLevel, boolean> }[]>([]);
+
+  // ── Metrics ───────────────────────────────────────────────────
+  const [metricsData, setMetricsData] = useState<any | null>(null);
+  const [isMetricsLoading, setIsMetricsLoading] = useState(false);
 
   // ── Toast system ────────────────────────────────────────────
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -577,7 +585,23 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     let cancelled = false;
     const check = async () => {
       if (cancelled) return;
-      await checkApiStatus();
+      try {
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), 8000);
+        const r = await fetch(`${apiBase}/health`, { signal: controller.signal });
+        clearTimeout(t);
+        if (!cancelled) {
+          setApiStatus(r.ok ? "ok" : "down");
+          if (r.ok) {
+            try {
+              const data = await r.json();
+              setEmbeddingSemantic(data.semantic ?? null);
+            } catch {}
+          }
+        }
+      } catch {
+        if (!cancelled) setApiStatus("down");
+      }
     };
     setApiStatus("unknown");
     check();
@@ -1173,6 +1197,16 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     setGraphEdgesData([]);
   }, [ds]);
 
+  const loadMetrics = async () => {
+    if (!ds) return;
+    setIsMetricsLoading(true);
+    const data = await apiFetchJson(
+      `/evaluate/multilabel?dataset_id=${ds}&annotator=${encodeURIComponent(annotator)}`
+    );
+    setIsMetricsLoading(false);
+    if (data) setMetricsData(data);
+  };
+
   const loadLabelQueue = async () => {
     if (!ds) return;
     setLabelQueueStatus("Загружаем очередь разметки...");
@@ -1598,7 +1632,7 @@ const analysisFlowSteps = [
                       onKeyDown={(e) => {
                         if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                           e.preventDefault();
-                          if (textInput.trim() && !isAnalyzing && !isTranscribing) analyzeText();
+                          if (textInput.trim().length >= 10 && !isAnalyzing && !isTranscribing) analyzeText();
                         }
                       }}
                       onPaste={(e) => {
@@ -1610,6 +1644,15 @@ const analysisFlowSteps = [
                       }}
                       onFocus={() => setShowHistory(false)}
                     />
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+                      <span style={{
+                        fontSize: 11,
+                        color: textInput.trim().length < 10 && textInput.length > 0 ? "#f87171" : "#6b7280",
+                      }}>
+                        {textInput.length.toLocaleString()} символов
+                        {textInput.trim().length < 10 && textInput.length > 0 && " · минимум 10"}
+                      </span>
+                    </div>
                     {/* History dropdown */}
                     {showHistory && textHistory.length > 0 && (
                       <div className={styles.historyDropdown}>
@@ -1655,7 +1698,7 @@ const analysisFlowSteps = [
                   <button
                     className={[styles.btn, styles.btnPrimaryLg].join(" ")}
                     onClick={analyzeText}
-                    disabled={!textInput.trim() || isAnalyzing || isTranscribing}
+                    disabled={textInput.trim().length < 10 || isAnalyzing || isTranscribing}
                     title="Анализировать (Ctrl+Enter)"
                   >
                     {isAnalyzing ? <span className={styles.spinner} /> : <IconSparkle />}
@@ -2305,9 +2348,10 @@ const analysisFlowSteps = [
                     className={[styles.btn, styles.btnWarn].join(" ")}
                     onClick={rebuildGraph}
                     disabled={!ds}
+                    title="Пересчитать рёбра графа по векторному сходству"
                   >
                     <IconRefresh />
-                    Rebuild edges (job)
+                    Пересобрать рёбра
                   </button>
                   <input
                     className={styles.graphSearchInput}
@@ -2321,6 +2365,21 @@ const analysisFlowSteps = [
                   )}
                 </div>
               </div>
+
+              {/* Hash-embeddings warning banner */}
+              {embeddingSemantic === false && (
+                <div style={{
+                  display: "flex", alignItems: "flex-start", gap: 10,
+                  padding: "10px 14px", borderRadius: 8, marginBottom: 10,
+                  background: "rgba(251,146,60,0.1)", border: "1px solid rgba(251,146,60,0.3)",
+                }}>
+                  <IconAlert />
+                  <span style={{ fontSize: 12.5, color: "#fb923c", lineHeight: 1.5 }}>
+                    Используются базовые эмбеддинги (hash). Рёбра графа отражают лексическое сходство, а не семантику.
+                    Для смыслового графа установите <code style={{ fontFamily: "monospace" }}>EMBEDDING_PROVIDER=local</code> в backend/.env.
+                  </span>
+                </div>
+              )}
 
               {/* Graph canvas */}
               <ErrorBoundary>
@@ -2390,14 +2449,26 @@ const analysisFlowSteps = [
                         {confidence.guidance}
                       </span>
                     </div>
-                    <div style={{ marginTop: 10, display: "flex", gap: 12, flexWrap: "wrap" }}>
-                      {sorted.slice(0, 4).map(({ lvl, prob }) => (
-                        <span
-                          key={lvl}
-                          style={{ fontSize: 11.5, fontFamily: "var(--font-mono)", color: LEVEL_COLORS[lvl] }}
-                        >
-                          {LEVEL_LABELS[lvl]}: {prob.toFixed(2)}
-                        </span>
+                    {/* Prob bar chart — all 6 levels */}
+                    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 5 }}>
+                      {sorted.map(({ lvl, prob }) => (
+                        <div key={lvl} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 11, width: 90, flexShrink: 0, color: LEVEL_COLORS[lvl], fontWeight: 500 }}>
+                            {LEVEL_LABELS[lvl]}
+                          </span>
+                          <div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
+                            <div style={{
+                              width: `${(prob * 100).toFixed(1)}%`,
+                              height: "100%",
+                              background: LEVEL_COLORS[lvl],
+                              borderRadius: 3,
+                              opacity: prob >= 0.2 ? 1 : 0.4,
+                            }} />
+                          </div>
+                          <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "#94a3b8", width: 34, textAlign: "right" }}>
+                            {(prob * 100).toFixed(0)}%
+                          </span>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -2583,6 +2654,110 @@ const analysisFlowSteps = [
                   </div>
                 )
               )}
+
+              {/* ── Metrics card ──────────────────────────── */}
+              <div className={styles.sectionBlock} style={{ marginTop: 24 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                  <span className={styles.cardTitle} style={{ margin: 0 }}>Метрики качества</span>
+                  <button
+                    className={[styles.btn, styles.btnGhost].join(" ")}
+                    style={{ marginLeft: "auto" }}
+                    onClick={loadMetrics}
+                    disabled={!ds || isMetricsLoading}
+                    type="button"
+                  >
+                    {isMetricsLoading ? <span className={styles.spinner} /> : <IconRefresh />}
+                    Вычислить
+                  </button>
+                </div>
+
+                {!metricsData && !isMetricsLoading && (
+                  <div className={styles.emptyText} style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Нажми «Вычислить» — для расчёта нужны размеченные узлы в этом датасете.
+                  </div>
+                )}
+
+                {isMetricsLoading && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-muted)", fontSize: 13 }}>
+                    <span className={styles.spinner} /> Вычисляем метрики…
+                  </div>
+                )}
+
+                {metricsData && !isMetricsLoading && (
+                  <>
+                    {/* Summary chips */}
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+                      {[
+                        { label: "Выборка", value: metricsData.samples, color: "var(--text-secondary)" },
+                        { label: "Hamming Loss", value: metricsData.hamming_loss?.toFixed(3), color: metricsData.hamming_loss < 0.2 ? "var(--success)" : metricsData.hamming_loss < 0.4 ? "#fb923c" : "var(--error)" },
+                        { label: "F1 micro", value: metricsData.f1_micro?.toFixed(3), color: metricsData.f1_micro > 0.7 ? "var(--success)" : metricsData.f1_micro > 0.4 ? "#fb923c" : "var(--error)" },
+                        { label: "F1 macro", value: metricsData.f1_macro?.toFixed(3), color: metricsData.f1_macro > 0.7 ? "var(--success)" : metricsData.f1_macro > 0.4 ? "#fb923c" : "var(--error)" },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} style={{
+                          padding: "8px 14px",
+                          background: "var(--bg-surface)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 12,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 2,
+                          minWidth: 90,
+                        }}>
+                          <span style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
+                          <span style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)", color }}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Per-level table */}
+                    {metricsData.per_level && (
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ color: "var(--text-muted)" }}>
+                              <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Уровень</th>
+                              <th style={{ textAlign: "right", padding: "4px 8px", fontWeight: 600 }}>Precision</th>
+                              <th style={{ textAlign: "right", padding: "4px 8px", fontWeight: 600 }}>Recall</th>
+                              <th style={{ textAlign: "right", padding: "4px 8px", fontWeight: 600 }}>F1</th>
+                              <th style={{ padding: "4px 8px" }} />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {BLOOM_LEVELS.map((lvl) => {
+                              const m = metricsData.per_level[lvl];
+                              if (!m) return null;
+                              return (
+                                <tr key={lvl} style={{ borderTop: "1px solid var(--border)" }}>
+                                  <td style={{ padding: "6px 8px" }}>
+                                    <BloomBadge level={lvl} />
+                                  </td>
+                                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+                                    {(m.precision * 100).toFixed(0)}%
+                                  </td>
+                                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+                                    {(m.recall * 100).toFixed(0)}%
+                                  </td>
+                                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "var(--font-mono)", fontWeight: 700, color: m.f1 > 0.7 ? "var(--success)" : m.f1 > 0.4 ? "#fb923c" : "var(--error)" }}>
+                                    {m.f1.toFixed(2)}
+                                  </td>
+                                  <td style={{ padding: "6px 8px", width: 80 }}>
+                                    <div style={{ height: 5, background: "var(--bg-hover)", borderRadius: 3 }}>
+                                      <div style={{ height: "100%", width: `${(m.f1 * 100).toFixed(0)}%`, background: LEVEL_COLORS[lvl], borderRadius: 3 }} />
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
+                          Источник предсказаний: {metricsData.prediction_source} · Аннотатор: {metricsData.annotator}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )}
           {/* ── Dashboard Tab ──────────────────────────── */}

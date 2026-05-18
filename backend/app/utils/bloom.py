@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 import re
@@ -9,6 +10,8 @@ import re
 
 LEVEL_ORDER = ["remember", "understand", "apply", "analyze", "evaluate", "create"]
 
+# Structural regex patterns — fired on raw lowercase text (no lemmatisation needed).
+# Complements the verb dictionary for content pages that lack explicit task verbs.
 HEURISTIC_PATTERNS = {
     "remember": [r"\bформул", r"\bопределен", r"\bтермин", r"\bсвойств", r"\bтаблиц"],
     "understand": [r"\bобъясн", r"\bпонят", r"\bтеор", r"\bпринцип", r"\bзакон"],
@@ -18,6 +21,33 @@ HEURISTIC_PATTERNS = {
     "create": [r"\bпроект", r"\bсозда", r"\bразработ", r"\bмодел", r"\bсформулир"],
 }
 DEFAULT_CONTENT_PRIORS = [0.17, 0.24, 0.22, 0.16, 0.11, 0.10]
+
+_WORD_RE = re.compile(r"[А-Яа-яЁёA-Za-z]+(?:-[А-Яа-яЁёA-Za-z]+)?")
+
+
+@lru_cache(maxsize=1)
+def _get_morph():
+    """Return pymorphy3 analyser, or None if not installed."""
+    try:
+        import pymorphy3  # type: ignore
+        return pymorphy3.MorphAnalyzer()
+    except Exception:
+        return None
+
+
+def _normalize_text(text: str) -> str:
+    """Tokenise + lemmatise with pymorphy3 (if available), else lowercase."""
+    morph = _get_morph()
+    if morph is None:
+        return text.lower()
+    tokens = _WORD_RE.findall(text)
+    lemmas = []
+    for tok in tokens:
+        try:
+            lemmas.append(morph.parse(tok)[0].normal_form)
+        except Exception:
+            lemmas.append(tok.lower())
+    return " ".join(lemmas)
 
 
 def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
@@ -32,7 +62,13 @@ def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
         "evaluate": "Оценивание",
         "create": "Создание",
     }.get(level, "N/A")
-    return dict(level=level, label=label, rationale=result["rationale"], score=round(score, 3))
+    # Build a rationale specific to the requested level (not the global top level).
+    level_triggers = result.get("triggers", {}).get(level, [])
+    if level_triggers:
+        rationale = f"{level}: {', '.join(sorted(set(level_triggers))[:6])}"
+    else:
+        rationale = f"{level}: keyword-baseline (score={score:.3f})"
+    return dict(level=level, label=label, rationale=rationale, score=round(score, 3))
 
 
 def _default_verbs_path() -> Path:
@@ -44,7 +80,6 @@ def _default_verbs_path() -> Path:
 def _load_keywords() -> dict[str, list[str]]:
     path = Path(os.getenv("BLOOM_VERBS_PATH", str(_default_verbs_path())))
     if not path.exists():
-        # Safe fallback: minimal built-in keywords.
         return {
             "remember": ["назовите", "перечислите", "определите"],
             "understand": ["объясните", "почему", "сравните"],
@@ -57,6 +92,27 @@ def _load_keywords() -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for lvl in LEVEL_ORDER:
         out[lvl] = [str(x).lower() for x in data.get(lvl, []) if str(x).strip()]
+    return out
+
+
+@lru_cache(maxsize=1)
+def _load_normalized_keywords() -> dict[str, list[str]]:
+    """Return keywords pre-lemmatised via pymorphy3 for morphology-aware matching."""
+    morph = _get_morph()
+    raw = _load_keywords()
+    if morph is None:
+        return raw
+    out: dict[str, list[str]] = {}
+    for lvl, kws in raw.items():
+        normalized = []
+        for kw in kws:
+            tokens = _WORD_RE.findall(kw)
+            try:
+                lemmas = [morph.parse(t)[0].normal_form for t in tokens]
+                normalized.append(" ".join(lemmas))
+            except Exception:
+                normalized.append(kw.lower())
+        out[lvl] = normalized
     return out
 
 
@@ -81,27 +137,30 @@ def _heuristic_counts(text: str) -> tuple[list[int], dict[str, list[str]]]:
         counts.append(hits)
     return counts, triggers
 
+
 def classify_bloom_multilabel(
     text: str,
     min_prob: float = 0.2,
     max_levels: int = 2,
 ):
-    lowered = text.lower()
+    normalized = _normalize_text(text)   # lemmatised — for keyword matching
+    lowered = text.lower()               # raw lowercase — for heuristic regex
     keyword_counts = []
     triggers: dict[str, list[str]] = {lvl: [] for lvl in LEVEL_ORDER}
-    keywords = _load_keywords()
+    norm_keywords = _load_normalized_keywords()
+    raw_keywords = _load_keywords()
     for level in LEVEL_ORDER:
         hits = 0
-        for kw in keywords.get(level, []):
-            if kw in lowered:
+        for norm_kw, raw_kw in zip(norm_keywords.get(level, []), raw_keywords.get(level, [])):
+            if norm_kw in normalized:
                 hits += 1
-                triggers[level].append(kw)
+                triggers[level].append(raw_kw)
         keyword_counts.append(hits)
 
     heuristic_counts, heuristic_triggers = _heuristic_counts(lowered)
     counts = []
     for i, level in enumerate(LEVEL_ORDER):
-        # Structural cues ("семинар", "лабораторная", "формулы") are useful for
+        # Structural cues ("семинар", "лабораторная", "формулы") add signal for
         # content pages that do not contain explicit task verbs.
         counts.append(keyword_counts[i] + heuristic_counts[i])
         if heuristic_triggers[level]:
@@ -116,7 +175,8 @@ def classify_bloom_multilabel(
     probs = [round(p, 3) for p in raw]
     drift = round(1.0 - sum(probs), 3)
     if drift != 0:
-        probs[-1] = round(probs[-1] + drift, 3)
+        max_idx = probs.index(max(probs))
+        probs[max_idx] = round(probs[max_idx] + drift, 3)
 
     sorted_levels = sorted(zip(LEVEL_ORDER, probs), key=lambda x: x[1], reverse=True)
     top_levels = [lvl for lvl, p in sorted_levels if p >= min_prob][:max_levels]

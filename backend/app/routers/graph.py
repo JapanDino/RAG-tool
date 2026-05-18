@@ -123,7 +123,7 @@ def get_graph(
     min_score: float = Query(0.2, ge=0.0, le=1.0),
     max_edges: int = Query(200, ge=1, le=5000),
     include_cooccurrence: bool = True,
-    limit_nodes: int = Query(500, ge=1, le=5000),
+    limit_nodes: int = Query(2000, ge=1, le=10000),
     db: Session = Depends(get_db),
 ):
     filters = ["kn.vec IS NOT NULL"]
