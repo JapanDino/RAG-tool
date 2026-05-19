@@ -1350,86 +1350,82 @@ const analysisFlowSteps = [
 ];
 
   return (
-    <div className={styles.page}>
+    <div className={styles.appShell}>
 
       {/* ── Header ─────────────────────────────────────── */}
-      <header className={styles.header}>
-        <div className={styles.headerInner}>
-          <div className={styles.brand}>
-            <div className={styles.brandIcon}>
-              <span className={styles.brandIconSvg}>
-                <IconSparkle />
-              </span>
+      <header className={styles.appHeader}>
+        <div className={styles.headerBrand}>
+          <div className={styles.logoMark}>⬡</div>
+          <div className={styles.logoText}>
+            <span className={styles.logoName}>Bloom RAG Studio</span>
+            <span className={styles.logoSub}>
+              {ds ? `dataset #${ds}` : "no dataset"} · multi-label taxonomy
+            </span>
+          </div>
+        </div>
+
+        <div className={styles.headerCenter}>
+          {embeddingSemantic === false && (
+            <div className={styles.warnBanner}>
+              ⚠ Хэш-эмбеддинги — семантический поиск ограничен
             </div>
-            <div className={styles.brandText}>
-              <span className={styles.title}>Bloom RAG Studio</span>
-              <span className={styles.subtitle}>multi-label knowledge taxonomy</span>
-            </div>
+          )}
+        </div>
+
+        <div className={styles.headerRight}>
+          {/* API status pill */}
+          <div className={styles.statusPill}>
+            <span className={[
+              styles.dotPulse,
+              apiStatus === "ok" ? styles.dotGood :
+              apiStatus === "down" ? styles.dotErr : styles.dotMuted,
+            ].join(" ")} />
+            <span className={styles.statusLabel}>
+              {apiStatus === "ok" ? "connected" : apiStatus === "down" ? "offline" : "checking"}
+            </span>
           </div>
 
-          <div className={styles.metaRow}>
-            {/* API status */}
-            <div className={styles.pill}>
-              <span className={[styles.dot, apiStatusDotClass].join(" ")} />
-              <span>API</span>
-              <span className={styles.kbd}>{apiStatus}</span>
+          {/* Dataset badge */}
+          {ds && (
+            <div className={styles.dsBadge}>
+              <span>ds</span>
+              <span className={styles.dsBadgeVal}>#{ds}</span>
             </div>
+          )}
 
-            {/* Dataset badge */}
-            <div className={styles.pill}>
-              <span style={{ color: "var(--text-muted)" }}>dataset</span>
-              <span className={styles.kbd} style={{ color: ds ? "var(--text-accent)" : undefined }}>
-                {ds ?? "—"}
-              </span>
-            </div>
+          {/* Theme toggle */}
+          <button
+            className={styles.iconBtn}
+            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            title="Переключить тему"
+            type="button"
+          >
+            {theme === "light" ? "🌙" : "☀"}
+          </button>
 
-            {/* Job badge */}
-            {lastJob && (
-              <div className={styles.pill}>
-                <span style={{ color: "var(--text-muted)" }}>job</span>
-                <span className={styles.kbd}>{lastJob}</span>
-              </div>
-            )}
+          {/* Settings */}
+          <button className={styles.iconBtn} onClick={() => setShowSettings(true)} title="Настройки">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
 
-            <button
-              className={styles.themeToggle}
-              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              title="Переключить тему"
-              type="button"
-            >
-              {theme === "light" ? "Тёмная" : "Светлая"}
-            </button>
-
-            {/* Settings gear */}
-            <button
-              className={styles.gearBtn}
-              onClick={() => setShowSettings(true)}
-              title="Настройки (Settings)"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-              </svg>
-            </button>
-
-            {/* Help button */}
-            <button
-              className={styles.helpBtn}
-              onClick={() => setShowGuide(true)}
-              title="Инструкция по использованию"
-            >
-              ?
-            </button>
-          </div>
+          {/* Help */}
+          <button className={styles.iconBtn} onClick={() => setShowGuide(true)} title="Помощь">
+            {/* placeholder below is filled by next Edit */}
+            <span style={{ fontSize: 12 }}>?</span>
+          </button>
         </div>
       </header>
 
-      {/* ── Shell ──────────────────────────────────────── */}
-      <div className={styles.shell}>
+      {/* ── Body ───────────────────────────────────────── */}
+      <div className={styles.appBody}>
 
-        {/* ── Sidebar nav ──────────────────────────────── */}
-        <nav className={styles.nav}>
-          <div className={styles.navCard}>
-            <div className={styles.navSectionTitle}>Инструменты</div>
+        {/* ── Sidebar ──────────────────────────────────── */}
+        <nav className={styles.appSidebar}>
+          <div className={styles.sidebarScroll}>
+            <div className={styles.sidebarSectionLabel}>Инструменты</div>
 
             <button
               className={[styles.navBtn, activeTab === "analysis" ? styles.navBtnActive : ""].join(" ")}
@@ -1448,8 +1444,11 @@ const analysisFlowSteps = [
               onClick={() => setActiveTab("graph")}
             >
               <span className={styles.navIcon}><IconGraph /></span>
-              <span className={styles.navLabel}>Граф</span>
-              <span className={styles.navHint}>cyto</span>
+              <span className={styles.navLabel}>Граф знаний</span>
+              {graphNodesData.length > 0
+                ? <span className={styles.navCount}>{graphNodesData.length}</span>
+                : <span className={styles.navHint}>cyto</span>
+              }
             </button>
 
             <button
@@ -1475,8 +1474,9 @@ const analysisFlowSteps = [
               onClick={() => { setActiveTab("dashboard"); loadDashboard(); }}
             >
               <span className={styles.navIcon}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                  <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
                 </svg>
               </span>
               <span className={styles.navLabel}>Дашборд</span>
@@ -1488,12 +1488,12 @@ const analysisFlowSteps = [
               onClick={() => setActiveTab("search")}
             >
               <span className={styles.navIcon}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
                 </svg>
               </span>
-              <span className={styles.navLabel}>Поиск</span>
-              <span className={styles.navHint}>RAG</span>
+              <span className={styles.navLabel}>Поиск RAG</span>
+              <span className={styles.navHint}>e5</span>
             </button>
 
             <button
@@ -1501,14 +1501,139 @@ const analysisFlowSteps = [
               onClick={() => { setActiveTab("canvas"); if (!canvasCourses.length) loadCanvasCourses(); }}
             >
               <span className={styles.navIcon}><IconCanvas /></span>
-              <span className={styles.navLabel}>Canvas</span>
-              <span className={styles.navHint}>LMS</span>
+              <span className={styles.navLabel}>Canvas LMS</span>
+              {canvasCourses.length > 0
+                ? <span className={styles.navCount}>{canvasCourses.length}</span>
+                : <span className={styles.navHint}>LMS</span>
+              }
             </button>
+
+            <div className={styles.navDivider} />
+            <div className={styles.sidebarSectionLabel}>Данные</div>
+
+            {/* Quick dataset + connection controls in sidebar */}
+            <div style={{ padding: "0 4px", display: "flex", flexDirection: "column", gap: 10 }}>
+
+              {/* Dataset quick panel */}
+              <div className={styles.sidebarWidget}>
+                <div className={styles.widgetLabel}>Датасет</div>
+                <div className={styles.dsRow}>
+                  <input
+                    className={styles.dsInput}
+                    placeholder="Имя нового"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                  <button
+                    className={[styles.btnCompact, styles.btnCompactPrimary].join(" ")}
+                    onClick={createDataset}
+                    disabled={!name.trim()}
+                    title="Создать датасет"
+                  >
+                    <IconPlus />
+                  </button>
+                </div>
+                <input
+                  className={styles.widgetInput}
+                  type="number"
+                  placeholder="ID существующего"
+                  value={ds ?? ""}
+                  onChange={(e) => setDs(e.target.value ? Number(e.target.value) : undefined)}
+                />
+              </div>
+
+              {/* File upload */}
+              <div className={styles.sidebarWidget}>
+                <div className={styles.widgetLabel}>Документ</div>
+                <input
+                  ref={sidebarFileRef}
+                  type="file"
+                  accept=".txt,.pdf,.md"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setFile(f);
+                    setFileName(f?.name ?? "");
+                    if (f) setName(f.name.replace(/\.[^.]+$/, ""));
+                    e.target.value = "";
+                  }}
+                />
+                <div
+                  className={styles.dropZone}
+                  style={{ padding: "8px 10px", minHeight: 48 }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const f = e.dataTransfer.files?.[0] || null;
+                    setFile(f); setFileName(f?.name ?? "");
+                    if (f) setName(f.name.replace(/\.[^.]+$/, ""));
+                  }}
+                  onClick={() => sidebarFileRef.current?.click()}
+                >
+                  {fileName
+                    ? <span className={styles.dropZoneText} style={{ color: "var(--good)", fontSize: 11 }}>{fileName}</span>
+                    : <>
+                        <span className={styles.dropZoneText} style={{ fontSize: 11 }}>Перетащи файл</span>
+                        <span className={styles.dropZoneHint}>.txt .pdf .md</span>
+                      </>
+                  }
+                </div>
+                <div className={styles.widgetRow}>
+                  <button className={[styles.btnCompact, styles.btnCompactPrimary].join(" ")} onClick={upload} disabled={!ds || !file}>
+                    <IconUpload /> Загрузить
+                  </button>
+                  <button className={styles.btnCompact} onClick={indexDs} disabled={!ds}>
+                    Индекс
+                  </button>
+                  <button className={styles.btnCompact} onClick={exportJsonl} disabled={!ds}>
+                    <IconDownload />
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          {/* Sidebar bottom: connection + job */}
+          <div className={styles.sidebarBottom}>
+            <div className={styles.sidebarWidget}>
+              <div className={styles.widgetLabel} style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>API</span>
+                <span style={{
+                  fontSize: 9.5,
+                  color: apiStatus === "ok" ? "var(--good)" : apiStatus === "down" ? "var(--err)" : "var(--muted2)"
+                }}>
+                  {apiStatus === "ok" ? "● online" : apiStatus === "down" ? "● offline" : "● …"}
+                </span>
+              </div>
+              <input
+                className={styles.widgetInput}
+                value={apiBase}
+                onChange={(e) => setApiBase(e.target.value)}
+                placeholder="/api-proxy"
+              />
+              <div className={styles.widgetRow}>
+                <button className={styles.btnCompact} onClick={() => setApiBase("/api-proxy")} style={{ fontSize: 10 }}>proxy</button>
+                <button className={styles.btnCompact} onClick={() => window.open(`${apiBase}/docs`, "_blank")} style={{ fontSize: 10 }}>/docs</button>
+                <button
+                  className={[styles.btnCompact, apiStatus === "down" ? styles.btnCompactPrimary : ""].join(" ")}
+                  onClick={() => { setApiStatus("unknown"); checkApiStatus(); }}
+                  style={{ fontSize: 10 }}
+                >
+                  ↺
+                </button>
+              </div>
+            </div>
+            {lastJob && (
+              <div style={{ marginTop: 4 }}>
+                <JobStatus jobId={lastJob} apiBase={apiBase} />
+              </div>
+            )}
           </div>
         </nav>
 
         {/* ── Main area ────────────────────────────────── */}
-        <main className={styles.main}>
+        <main className={styles.appMain}>
 
           {/* Error banner */}
           {error && (
@@ -1529,7 +1654,7 @@ const analysisFlowSteps = [
 
           {/* ── Analysis Tab ─────────────────────────── */}
           {activeTab === "analysis" && (
-            <div className={styles.card}>
+            <div className={styles.tabPane}>
 
 <SectionHero
   eyebrow="Главный сценарий"
@@ -2052,7 +2177,7 @@ const analysisFlowSteps = [
 
           {/* ── Search Tab ───────────────────────────── */}
           {activeTab === "search" && (
-            <div className={styles.card}>
+            <div className={styles.tabPane}>
 
 <SectionHero
   eyebrow="Навигация по материалам"
@@ -2235,7 +2360,7 @@ const analysisFlowSteps = [
 
           {/* ── Graph Tab ────────────────────────────── */}
           {activeTab === "graph" && (
-            <div className={styles.card}>
+            <div className={styles.tabPane}>
 
 <SectionHero
   eyebrow="Связи и структура"
@@ -2479,7 +2604,7 @@ const analysisFlowSteps = [
 
           {/* ── Labeling Tab ─────────────────────────── */}
           {activeTab === "labeling" && (
-            <div className={styles.card}>
+            <div className={styles.tabPane}>
 
 <SectionHero
   eyebrow="Подтверждение качества"
@@ -2762,7 +2887,7 @@ const analysisFlowSteps = [
           )}
           {/* ── Dashboard Tab ──────────────────────────── */}
           {activeTab === "dashboard" && (
-            <div className={styles.card}>
+            <div className={styles.tabPane}>
 
 <SectionHero
   eyebrow="Статус по платформе"
@@ -2883,7 +3008,7 @@ const analysisFlowSteps = [
 
           {/* ── Canvas LMS tab ──────────────────────── */}
           {activeTab === "canvas" && (
-            <div className={styles.card}>
+            <div className={styles.tabPane}>
 
               <SectionHero
                 eyebrow="Интеграция"
@@ -3133,8 +3258,8 @@ const analysisFlowSteps = [
 
         </main>
 
-        {/* ── Aside (right sidebar) ────────────────────── */}
-        <aside className={styles.aside}>
+        {/* ── Aside removed — content moved to sidebar ── */}
+        <aside style={{ display: "none" }}>
 
           {/* Connection card */}
           <div className={styles.asideCard}>
@@ -3395,7 +3520,7 @@ const analysisFlowSteps = [
           </div>
 
         </aside>
-      </div>
+      </div>{/* end appBody */}
 
       {/* ── Node detail modal ──────────────────────────── */}
       {detailNode && (
@@ -3733,12 +3858,8 @@ const analysisFlowSteps = [
         </div>
       )}
 
-      {/* ── Footer ─────────────────────────────────────── */}
-      <footer style={{
-        position: "relative",
-        padding: "32px 32px 28px",
-        marginTop: 8,
-      }}>
+      {/* ── Footer (hidden in AppShell mode) ─────────── */}
+      <footer style={{ display: "none" }}>
         {/* gradient divider */}
         <div style={{
           position: "absolute",

@@ -13,7 +13,6 @@ from ..schemas.schemas import (
     KnowledgeNodeSearchHit,
     KnowledgeNodeUpdateIn,
 )
-from ..services.embedding import embed_texts
 from ..services.embedding_provider import current_embedding_model
 from ..services.query_embed import embed_query
 from ..services.bloom_multilabel import classify_bloom_multilabel

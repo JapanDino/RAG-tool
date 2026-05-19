@@ -5,6 +5,7 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
+import re
 
 
 LEVEL_ORDER = ["remember", "understand", "apply", "analyze", "evaluate", "create"]
