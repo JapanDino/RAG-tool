@@ -1866,8 +1866,8 @@ const analysisFlowSteps = [
                     {nodesStatus}
                   </div>
                 )}
-                </div>{/* end .grid (left) */}
-              </div>{/* end tabPaneLeft */}
+                </div>
+              </div>
 
               {/* ── RIGHT: Results ─── */}
               <div className={styles.tabPaneRight}>
@@ -2168,9 +2168,9 @@ const analysisFlowSteps = [
                     </div>
                   </div>
                 )}
-              </div>{/* end tabPaneRight */}
-              </div>{/* end tabGrid */}
-            </div>{/* end tabHost */}
+              </div>
+              </div>
+            </div>
           )}
 
           {/* ── Search Tab ───────────────────────────── */}
@@ -2260,8 +2260,8 @@ const analysisFlowSteps = [
                     </button>
                   </div>
                 )}
-                </div>{/* end .grid */}
-              </div>{/* end tabPaneLeft */}
+                </div>
+              </div>
 
               {/* ── RIGHT: Results ─── */}
               <div className={styles.tabPaneRight}>
@@ -2348,9 +2348,9 @@ const analysisFlowSteps = [
                   )}
                 </>
                 )}
-              </div>{/* end tabPaneRight */}
-              </div>{/* end tabGrid */}
-            </div>{/* end tabHost */}
+              </div>
+              </div>
+            </div>
           )}
 
           {/* ── Graph Tab ────────────────────────────── */}
@@ -2583,7 +2583,7 @@ const analysisFlowSteps = [
                   </div>
                 );
               })()}
-            </div>{/* end tabHost */}
+            </div>
           )}
 
           {/* ── Labeling Tab ─────────────────────────── */}
@@ -2807,7 +2807,7 @@ const analysisFlowSteps = [
                 )
               )}
 
-              </div>{/* end tabPaneLeft */}
+              </div>
 
               {/* ── RIGHT: Metrics ─── */}
               <div className={styles.tabPaneRight}>
@@ -2932,10 +2932,10 @@ const analysisFlowSteps = [
                     )}
                   </>
                 )}
-              </div>{/* end sectionBlock */}
-              </div>{/* end tabPaneRight */}
-              </div>{/* end tabGrid */}
-            </div>{/* end tabHost */}
+              </div>
+              </div>
+              </div>
+            </div>
           )}
           {/* ── Dashboard Tab ──────────────────────────── */}
           {activeTab === "dashboard" && (
@@ -3027,7 +3027,7 @@ const analysisFlowSteps = [
                   )}
                 </>
               )}
-              </div>{/* end tabPaneLeft */}
+              </div>
 
               {/* ── RIGHT: Bloom distribution ─── */}
               <div className={styles.tabPaneRight}>
@@ -3056,9 +3056,9 @@ const analysisFlowSteps = [
                     <div className={styles.emptyText}>Загрузи текст в Analysis чтобы увидеть распределение.</div>
                   </div>
                 )}
-              </div>{/* end tabPaneRight */}
-              </div>{/* end tabGrid */}
-            </div>{/* end tabHost */}
+              </div>
+              </div>
+            </div>
           )}
 
           {/* ── Canvas LMS tab ──────────────────────── */}
@@ -3083,8 +3083,6 @@ const analysisFlowSteps = [
                     {canvasCoursesLoading ? <span className={styles.spinner} /> : <IconRefresh />}
                   </button>
                 </div>
-                <div>{/* Course search + list */}
-                {/* Course search + list */}
                 <div>
                   <label className={styles.fieldLabel}>
                     Поиск курса
@@ -3144,8 +3142,8 @@ const analysisFlowSteps = [
                       }
                     </div>
                   )}
-                </div>{/* end course list div */}
-              </div>{/* end tabPaneLeft */}
+                </div>
+              </div>
 
               {/* ── RIGHT: Ingest settings + log ─── */}
               <div className={styles.tabPaneRight}>
@@ -3375,10 +3373,10 @@ const analysisFlowSteps = [
                       </button>
                     </div>
                   )}
-                </div>{/* end ingest settings div */}
-              </div>{/* end tabPaneRight */}
-              </div>{/* end tabGrid */}
-            </div>{/* end tabHost */}
+                </div>
+              </div>
+              </div>
+            </div>
           )}
 
         </main>
