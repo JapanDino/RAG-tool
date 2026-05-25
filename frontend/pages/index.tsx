@@ -389,6 +389,7 @@ export default function Home() {
   const [selectedNode, setSelectedNode] = useState<AnalyzeNode | null>(null);
 
   const [annotator, setAnnotator] = useState("default");
+  const [expertMode, setExpertMode] = useState(false);
   const [labelQueue, setLabelQueue] = useState<AnalyzeNode[]>([]);
   const [labelQueueStatus, setLabelQueueStatus] = useState<string | null>(null);
   const [labelProgress, setLabelProgress] = useState<{ total: number; labeled: number } | null>(null);
@@ -1173,6 +1174,21 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     setGraphEdgesData([]);
   }, [ds]);
 
+  const [metricsExpertOnly, setMetricsExpertOnly] = useState(false);
+
+  const loadMetrics = async () => {
+    if (!ds) return;
+    setIsMetricsLoading(true);
+    const params = new URLSearchParams({
+      dataset_id: String(ds),
+      annotator,
+      ...(metricsExpertOnly ? { expert_only: "true" } : {}),
+    });
+    const data = await apiFetchJson(`/evaluate/multilabel?${params.toString()}`);
+    setIsMetricsLoading(false);
+    if (data) setMetricsData(data);
+  };
+
   const loadLabelQueue = async () => {
     if (!ds) return;
     setLabelQueueStatus("Загружаем очередь разметки...");
@@ -1200,7 +1216,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     const ok = await apiFetchJson(`/nodes/${node.id}/labels`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ labels, annotator }),
+      body: JSON.stringify({ labels, annotator, expert_mode: expertMode }),
     });
     if (!ok) return;
     addToast("✓ Разметка сохранена", "success");
@@ -2452,6 +2468,42 @@ const analysisFlowSteps = [
                   <IconDownload />
                   Export JSONL
                 </button>
+                {/* Expert mode toggle */}
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    padding: "6px 14px",
+                    borderRadius: 8,
+                    border: expertMode ? "1px solid var(--warning)" : "1px solid var(--border)",
+                    background: expertMode ? "rgba(251,191,36,0.08)" : "transparent",
+                    color: expertMode ? "var(--warning)" : "var(--text-muted)",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    transition: "all 0.15s",
+                  }}
+                  title="Режим эксперта: предсказания модели скрыты. Аннотация будет помечена как независимая экспертная оценка (is_expert=true)."
+                >
+                  <input
+                    type="checkbox"
+                    checked={expertMode}
+                    onChange={(e) => setExpertMode(e.target.checked)}
+                    style={{ display: "none" }}
+                  />
+                  <span style={{
+                    width: 14, height: 14, borderRadius: 3,
+                    border: expertMode ? "2px solid var(--warning)" : "2px solid var(--border)",
+                    background: expertMode ? "var(--warning)" : "transparent",
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 10, color: "#000", transition: "all 0.15s",
+                  }}>
+                    {expertMode ? "✓" : ""}
+                  </span>
+                  Режим эксперта
+                </label>
               </div>
 
               {/* Progress */}
@@ -2490,18 +2542,24 @@ const analysisFlowSteps = [
                   <div className={styles.labelNodeTitle}>{labelQueue[0].title}</div>
                   <div className={styles.labelNodeContext}>{labelQueue[0].context_text}</div>
 
-                  {/* Model prediction meta */}
-                  <div className={styles.labelNodeMeta}>
-                    <span className={styles.mutedSm}>Предсказание модели:</span>
-                    {labelQueue[0].top_levels.map((lvl) => (
-                      <BloomBadge key={lvl} level={lvl} />
-                    ))}
-                    {labelQueue[0].rationale && (
-                      <span className={styles.mutedSm} style={{ marginLeft: 4 }}>
-                        — {labelQueue[0].rationale}
-                      </span>
-                    )}
-                  </div>
+                  {/* Model prediction meta — hidden in expert mode */}
+                  {!expertMode ? (
+                    <div className={styles.labelNodeMeta}>
+                      <span className={styles.mutedSm}>Предсказание модели:</span>
+                      {labelQueue[0].top_levels.map((lvl) => (
+                        <BloomBadge key={lvl} level={lvl} />
+                      ))}
+                      {labelQueue[0].rationale && (
+                        <span className={styles.mutedSm} style={{ marginLeft: 4 }}>
+                          — {labelQueue[0].rationale}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className={styles.labelNodeMeta} style={{ color: "var(--warning)", fontStyle: "italic", fontSize: 12 }}>
+                      🔬 Режим эксперта: предсказание модели скрыто для независимой оценки
+                    </div>
+                  )}
 
                   {/* Level toggles */}
                   <div className={styles.labelLevelToggles}>
@@ -2583,6 +2641,125 @@ const analysisFlowSteps = [
                   </div>
                 )
               )}
+
+              {/* ── Metrics card ──────────────────────────── */}
+              <div className={styles.sectionBlock} style={{ marginTop: 24 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                  <span className={styles.cardTitle} style={{ margin: 0 }}>Метрики качества</span>
+                  <label
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                      fontSize: 12, color: metricsExpertOnly ? "var(--warning)" : "var(--text-muted)",
+                      marginLeft: "auto",
+                    }}
+                    title="Учитывать только аннотации в режиме эксперта (is_expert=true)"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={metricsExpertOnly}
+                      onChange={(e) => setMetricsExpertOnly(e.target.checked)}
+                    />
+                    Только эксперт
+                  </label>
+                  <button
+                    className={[styles.btn, styles.btnGhost].join(" ")}
+                    onClick={loadMetrics}
+                    disabled={!ds || isMetricsLoading}
+                    type="button"
+                  >
+                    {isMetricsLoading ? <span className={styles.spinner} /> : <IconRefresh />}
+                    Вычислить
+                  </button>
+                </div>
+
+                {!metricsData && !isMetricsLoading && (
+                  <div className={styles.emptyText} style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Нажми «Вычислить» — для расчёта нужны размеченные узлы в этом датасете.
+                  </div>
+                )}
+
+                {isMetricsLoading && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-muted)", fontSize: 13 }}>
+                    <span className={styles.spinner} /> Вычисляем метрики…
+                  </div>
+                )}
+
+                {metricsData && !isMetricsLoading && (
+                  <>
+                    {/* Summary chips */}
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+                      {[
+                        { label: "Выборка", value: metricsData.samples, color: "var(--text-secondary)" },
+                        { label: "Hamming Loss", value: metricsData.hamming_loss?.toFixed(3), color: metricsData.hamming_loss < 0.2 ? "var(--success)" : metricsData.hamming_loss < 0.4 ? "#fb923c" : "var(--error)" },
+                        { label: "F1 micro", value: metricsData.f1_micro?.toFixed(3), color: metricsData.f1_micro > 0.7 ? "var(--success)" : metricsData.f1_micro > 0.4 ? "#fb923c" : "var(--error)" },
+                        { label: "F1 macro", value: metricsData.f1_macro?.toFixed(3), color: metricsData.f1_macro > 0.7 ? "var(--success)" : metricsData.f1_macro > 0.4 ? "#fb923c" : "var(--error)" },
+                        ...(metricsData.cohen_kappa != null ? [{ label: "Cohen κ", value: metricsData.cohen_kappa?.toFixed(3), color: metricsData.cohen_kappa > 0.6 ? "var(--success)" : metricsData.cohen_kappa > 0.4 ? "#fb923c" : "var(--error)" }] : []),
+                      ].map(({ label, value, color }) => (
+                        <div key={label} style={{
+                          padding: "8px 14px",
+                          background: "var(--bg-surface)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 12,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 2,
+                          minWidth: 90,
+                        }}>
+                          <span style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
+                          <span style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)", color }}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Per-level table */}
+                    {metricsData.per_level && (
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ color: "var(--text-muted)" }}>
+                              <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Уровень</th>
+                              <th style={{ textAlign: "right", padding: "4px 8px", fontWeight: 600 }}>Precision</th>
+                              <th style={{ textAlign: "right", padding: "4px 8px", fontWeight: 600 }}>Recall</th>
+                              <th style={{ textAlign: "right", padding: "4px 8px", fontWeight: 600 }}>F1</th>
+                              <th style={{ padding: "4px 8px" }} />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {BLOOM_LEVELS.map((lvl) => {
+                              const m = metricsData.per_level[lvl];
+                              if (!m) return null;
+                              return (
+                                <tr key={lvl} style={{ borderTop: "1px solid var(--border)" }}>
+                                  <td style={{ padding: "6px 8px" }}>
+                                    <BloomBadge level={lvl} />
+                                  </td>
+                                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+                                    {(m.precision * 100).toFixed(0)}%
+                                  </td>
+                                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+                                    {(m.recall * 100).toFixed(0)}%
+                                  </td>
+                                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "var(--font-mono)", fontWeight: 700, color: m.f1 > 0.7 ? "var(--success)" : m.f1 > 0.4 ? "#fb923c" : "var(--error)" }}>
+                                    {m.f1.toFixed(2)}
+                                  </td>
+                                  <td style={{ padding: "6px 8px", width: 80 }}>
+                                    <div style={{ height: 5, background: "var(--bg-hover)", borderRadius: 3 }}>
+                                      <div style={{ height: "100%", width: `${(m.f1 * 100).toFixed(0)}%`, background: LEVEL_COLORS[lvl], borderRadius: 3 }} />
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
+                          Источник предсказаний: {metricsData.prediction_source} · Аннотатор: {metricsData.annotator}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )}
           {/* ── Dashboard Tab ──────────────────────────── */}
