@@ -172,6 +172,222 @@ class NatashaNerExtractor(NodeExtractor):
         return items
 
 
+_LLM_NODE_PROMPT = """\
+Ты — ассистент по анализу образовательного контента.
+Прочитай текст ниже и выдели из него ключевые смысловые единицы:
+концепты, термины, научные законы, формулы, навыки и имена собственные.
+
+Верни результат строго в виде JSON-массива объектов:
+[
+  {{"title": "краткое название концепта", "context": "предложение или фраза из текста, где встречается концепт"}},
+  ...
+]
+
+Правила:
+- Не более {max_nodes} элементов.
+- Каждый title — краткое существительное или именная группа (1–5 слов).
+- context — дословная цитата из текста (не перефразировать).
+- Без пояснений, только JSON.
+
+ТЕКСТ:
+{text}
+"""
+
+# ---------------------------------------------------------------------------
+# StatementExtractor prompt — extracts pedagogical judgments (осмысленные
+# суждения) instead of bare noun-phrase entities.  Each statement is a
+# single-sentence claim expressed with an active verb, directly traceable to
+# the source text.
+# ---------------------------------------------------------------------------
+_STATEMENT_PROMPT = """\
+Ты — специалист по педагогическому анализу текста.
+Раздели текст на ОСМЫСЛЕННЫЕ СУЖДЕНИЯ — короткие утверждения,
+каждое из которых выражает одну законченную мысль или знание.
+
+Для каждого суждения определи:
+- "statement": переформулированное суждение (1 предложение, активный глагол, начинается с глагола)
+- "context": дословная цитата из текста-источника (не перефразировать)
+- "bloom_hint": предполагаемый уровень таксономии Блума:
+  remember | understand | apply | analyze | evaluate | create
+
+Верни результат строго в виде JSON-массива объектов:
+[
+  {{
+    "statement": "...",
+    "context": "...",
+    "bloom_hint": "remember"
+  }},
+  ...
+]
+
+Правила:
+- Не более {max_nodes} суждений.
+- Каждое суждение начинается с глагола действия на русском языке.
+- Не дублируй суждения по смыслу.
+- Без пояснений, только JSON.
+
+ТЕКСТ:
+{text}
+"""
+
+
+class LLMNodeExtractor(NodeExtractor):
+    """Extracts knowledge nodes via LLM with fallback to NatashaNerExtractor."""
+
+    name = "llm"
+
+    def extract(self, text: str, max_nodes: int = 30, min_freq: int = 1) -> list[dict[str, Any]]:
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+        if not api_key:
+            warnings.warn("NODE_EXTRACTOR=llm but OPENAI_API_KEY is not set; falling back to local_ner", RuntimeWarning)
+            return _ner_fallback(text, max_nodes, min_freq)
+
+        from ..services.openai_client import chat_completion_json  # avoid circular import at module level
+
+        prompt = _LLM_NODE_PROMPT.format(text=text[:4000], max_nodes=max_nodes)
+        try:
+            js = chat_completion_json(model, prompt, max_tokens=800)
+            raw: list[dict[str, Any]] = json.loads(js)
+            if not isinstance(raw, list):
+                raise ValueError("Expected JSON array")
+        except Exception as exc:
+            warnings.warn(f"LLMNodeExtractor failed ({exc}); falling back to local_ner", RuntimeWarning)
+            return _ner_fallback(text, max_nodes, min_freq)
+
+        sentences = split_sentences_with_offsets(text)
+        enriched: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        lowered = text.lower()
+
+        for item in raw:
+            title = str(item.get("title") or "").strip()
+            if not title or len(title) < 2:
+                continue
+            key = title.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+
+            context_hint = str(item.get("context") or "").strip()
+            m = re.search(re.escape(title), text, flags=re.IGNORECASE)
+            if m:
+                sent_idx, sent_text = locate_sentence(sentences, m.start())
+                src = {"sentence_idx": sent_idx, "char_start": m.start(), "char_end": m.end()}
+                context = sent_text[:240] or context_hint[:240]
+            else:
+                src = {"sentence_idx": 0, "char_start": None, "char_end": None}
+                context = context_hint[:240]
+
+            freq = max(lowered.count(key), 1)
+            enriched.append({
+                "title": title,
+                "context_snippet": context,
+                "frequency": freq,
+                "node_type": "concept",
+                "source": src,
+            })
+            if len(enriched) >= max_nodes:
+                break
+
+        return enriched if enriched else _ner_fallback(text, max_nodes, min_freq)
+
+
+class StatementExtractor(NodeExtractor):
+    """Extracts pedagogical judgments (осмысленные суждения) via LLM.
+
+    Each node is a single-sentence claim with an active verb, a verbatim
+    context quote from the source text, and a Bloom-level hint.  Falls back
+    to ``LLMNodeExtractor`` when the LLM is unavailable.
+    """
+
+    name = "statement"
+
+    # Map bloom_hint → numeric level for the ``bloom_level`` field stored on
+    # KnowledgeNode so the rest of the pipeline can work without changes.
+    _BLOOM_LEVEL_MAP: dict[str, int] = {
+        "remember": 1,
+        "understand": 2,
+        "apply": 3,
+        "analyze": 4,
+        "evaluate": 5,
+        "create": 6,
+    }
+
+    def extract(self, text: str, max_nodes: int = 30, min_freq: int = 1) -> list[dict[str, Any]]:
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+        if not api_key:
+            warnings.warn(
+                "NODE_EXTRACTOR=statement but OPENAI_API_KEY is not set; falling back to llm/local_ner",
+                RuntimeWarning,
+            )
+            return _ner_fallback(text, max_nodes, min_freq)
+
+        from ..services.openai_client import chat_completion_json  # avoid circular import
+
+        prompt = _STATEMENT_PROMPT.format(text=text[:4000], max_nodes=max_nodes)
+        try:
+            js = chat_completion_json(model, prompt, max_tokens=1200)
+            raw: list[dict[str, Any]] = json.loads(js)
+            if not isinstance(raw, list):
+                raise ValueError("Expected JSON array")
+        except Exception as exc:
+            warnings.warn(
+                f"StatementExtractor LLM call failed ({exc}); falling back to local_ner",
+                RuntimeWarning,
+            )
+            return _ner_fallback(text, max_nodes, min_freq)
+
+        sentences = split_sentences_with_offsets(text)
+        enriched: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for item in raw:
+            statement = str(item.get("statement") or "").strip()
+            if not statement or len(statement) < 5:
+                continue
+            key = statement.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+
+            bloom_hint = str(item.get("bloom_hint") or "").strip().lower()
+            bloom_level = self._BLOOM_LEVEL_MAP.get(bloom_hint, 0)
+
+            context_quote = str(item.get("context") or "").strip()
+            # Try to locate the context quote in the original text for source tracking.
+            m = re.search(re.escape(context_quote[:60]), text, flags=re.IGNORECASE) if context_quote else None
+            if m:
+                sent_idx, sent_text = locate_sentence(sentences, m.start())
+                src = {"sentence_idx": sent_idx, "char_start": m.start(), "char_end": m.end()}
+                context_snippet = sent_text[:240] or context_quote[:240]
+            else:
+                src = {"sentence_idx": 0, "char_start": None, "char_end": None}
+                context_snippet = context_quote[:240]
+
+            enriched.append({
+                "title": statement,
+                "context_snippet": context_snippet,
+                "frequency": 1,
+                "node_type": "statement",
+                "bloom_level": bloom_level,
+                "bloom_hint": bloom_hint,
+                "source": src,
+            })
+            if len(enriched) >= max_nodes:
+                break
+
+        return enriched if enriched else _ner_fallback(text, max_nodes, min_freq)
+
+
+def _ner_fallback(text: str, max_nodes: int, min_freq: int) -> list[dict[str, Any]]:
+    try:
+        return NatashaNerExtractor().extract(text, max_nodes=max_nodes, min_freq=min_freq)
+    except Exception:
+        return HeuristicExtractor().extract(text, max_nodes=max_nodes, min_freq=min_freq)
+
+
 @lru_cache(maxsize=1)
 def get_node_extractor() -> NodeExtractor:
     name = os.getenv("NODE_EXTRACTOR", "local_ner").strip().lower()
@@ -187,9 +403,10 @@ def get_node_extractor() -> NodeExtractor:
             return HeuristicExtractor()
     if name == "heuristic":
         return HeuristicExtractor()
-    # LLM extractor is optional; not enabled by default.
-    if name == "llm":  # pragma: no cover
-        raise RuntimeError("NODE_EXTRACTOR=llm is not implemented yet")
+    if name == "llm":
+        return LLMNodeExtractor()
+    if name == "statement":
+        return StatementExtractor()
     raise RuntimeError(f"Unknown NODE_EXTRACTOR: {name}")
 
 

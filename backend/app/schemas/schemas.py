@@ -215,11 +215,16 @@ class KnowledgeNodeSearchHit(BaseModel):
 class NodeLabelsIn(BaseModel):
     labels: List[BloomLevel]
     annotator: str = "default"
+    # expert_mode=True means model predictions were hidden during annotation.
+    # The resulting label is stored with is_expert=True on NodeLabel for use
+    # in Cohen's κ and other blind-review metrics.
+    expert_mode: bool = False
 
 class NodeLabelsOut(BaseModel):
     node_id: int
     annotator: str
     labels: List[BloomLevel]
+    is_expert: bool = False
     created_at: Optional[Union[datetime, str]] = None
 
 class LabelQueueItem(BaseModel):
@@ -232,6 +237,7 @@ class LabelQueueItem(BaseModel):
     rationale: Optional[str] = None
     labeled: bool = False
     labels: Optional[List[BloomLevel]] = None
+    is_expert: bool = False
 
 class LabelQueueOut(BaseModel):
     total: int

@@ -94,6 +94,10 @@ class NodeLabel(Base):
     labels: Mapped[list] = mapped_column(JSON, default=list)
     annotator: Mapped[str] = mapped_column(String(200), default="default", index=True)
     source: Mapped[str] = mapped_column(String(50), default="human")
+    # When is_expert=True the annotation was made in blind expert mode (model
+    # predictions were hidden).  Used to weight Cohen's κ and other pedagogy
+    # validation metrics that require independent expert judgments.
+    is_expert: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class Rubric(Base):

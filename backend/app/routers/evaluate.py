@@ -59,6 +59,41 @@ def _f1_macro(y_true: list[list[int]], y_pred: list[list[int]]) -> float:
     return sum(f1s) / len(f1s) if f1s else 0.0
 
 
+def _cohen_kappa(y_true: list[list[int]], y_pred: list[list[int]]) -> float:
+    """Multi-label Cohen's κ — macro-averaged over Bloom levels.
+
+    For each label independently computes the standard binary Cohen's κ:
+        κ = (p_o - p_e) / (1 - p_e)
+    where ``p_o`` is observed agreement and ``p_e`` is expected agreement
+    assuming independence.  Returns the unweighted macro average across all
+    labels defined in ``LEVEL_ORDER``.  Returns 0.0 when there are no samples
+    or when expected agreement is 1.0 for every label.
+    """
+    if not y_true:
+        return 0.0
+    n = len(y_true)
+    kappas: list[float] = []
+    for idx in range(len(LEVEL_ORDER)):
+        t_col = [row[idx] for row in y_true]
+        p_col = [row[idx] for row in y_pred]
+
+        p_o = sum(1 for tv, pv in zip(t_col, p_col) if tv == pv) / n
+
+        # marginal proportions for the positive class
+        prev_t = sum(t_col) / n
+        prev_p = sum(p_col) / n
+
+        # expected agreement: both agree on 1 + both agree on 0
+        p_e = prev_t * prev_p + (1 - prev_t) * (1 - prev_p)
+
+        if p_e >= 1.0:
+            kappas.append(1.0 if p_o >= 1.0 else 0.0)
+        else:
+            kappas.append((p_o - p_e) / (1 - p_e))
+
+    return sum(kappas) / len(kappas) if kappas else 0.0
+
+
 def _per_level(y_true: list[list[int]], y_pred: list[list[int]]) -> dict[str, dict[str, float]]:
     out: dict[str, dict[str, float]] = {}
     for idx, lvl in enumerate(LEVEL_ORDER):
@@ -94,6 +129,7 @@ def evaluate_multilabel(
     embedding_model: str | None = None,
     min_prob: float = 0.2,
     max_levels: int = 2,
+    expert_only: bool = False,
     db: Session = Depends(get_db),
 ):
     q = (
@@ -106,6 +142,8 @@ def evaluate_multilabel(
     )
     if embedding_model:
         q = q.filter(KnowledgeNode.embedding_model == embedding_model)
+    if expert_only:
+        q = q.filter(NodeLabel.is_expert.is_(True))
     rows = q.all()
     if not rows:
         raise HTTPException(404, "no labeled nodes found")
@@ -131,11 +169,13 @@ def evaluate_multilabel(
         "hamming_loss": round(_hamming_loss(y_true, y_pred), 4),
         "f1_micro": round(_f1_micro(y_true, y_pred), 4),
         "f1_macro": round(_f1_macro(y_true, y_pred), 4),
+        "cohen_kappa": round(_cohen_kappa(y_true, y_pred), 4),
         "per_level": _per_level(y_true, y_pred),
         "min_prob": min_prob,
         "max_levels": max_levels,
         "embedding_model": embedding_model or "all",
         "annotator": annotator,
+        "expert_only": expert_only,
         "prediction_source": (
             "stored_top_levels"
             if used_recomputed_predictions == 0
