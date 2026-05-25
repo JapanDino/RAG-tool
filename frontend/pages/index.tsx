@@ -392,6 +392,7 @@ export default function Home() {
   const [selectedNode, setSelectedNode] = useState<AnalyzeNode | null>(null);
 
   const [annotator, setAnnotator] = useState("default");
+  const [expertMode, setExpertMode] = useState(false);
   const [labelQueue, setLabelQueue] = useState<AnalyzeNode[]>([]);
   const [labelQueueStatus, setLabelQueueStatus] = useState<string | null>(null);
   const [labelProgress, setLabelProgress] = useState<{ total: number; labeled: number } | null>(null);
@@ -1236,12 +1237,17 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     setGraphEdgesData([]);
   }, [ds]);
 
+  const [metricsExpertOnly, setMetricsExpertOnly] = useState(false);
+
   const loadMetrics = async () => {
     if (!ds) return;
     setIsMetricsLoading(true);
-    const data = await apiFetchJson(
-      `/evaluate/multilabel?dataset_id=${ds}&annotator=${encodeURIComponent(annotator)}`
-    );
+    const params = new URLSearchParams({
+      dataset_id: String(ds),
+      annotator,
+      ...(metricsExpertOnly ? { expert_only: "true" } : {}),
+    });
+    const data = await apiFetchJson(`/evaluate/multilabel?${params.toString()}`);
     setIsMetricsLoading(false);
     if (data) setMetricsData(data);
   };
@@ -1273,7 +1279,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     const ok = await apiFetchJson(`/nodes/${node.id}/labels`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ labels, annotator }),
+      body: JSON.stringify({ labels, annotator, expert_mode: expertMode }),
     });
     if (!ok) return;
     addToast("✓ Разметка сохранена", "success");
@@ -2634,6 +2640,42 @@ const analysisFlowSteps = [
                   <IconDownload />
                   Export JSONL
                 </button>
+                {/* Expert mode toggle */}
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    padding: "6px 14px",
+                    borderRadius: 8,
+                    border: expertMode ? "1px solid var(--warning)" : "1px solid var(--border)",
+                    background: expertMode ? "rgba(251,191,36,0.08)" : "transparent",
+                    color: expertMode ? "var(--warning)" : "var(--text-muted)",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    transition: "all 0.15s",
+                  }}
+                  title="Режим эксперта: предсказания модели скрыты. Аннотация будет помечена как независимая экспертная оценка (is_expert=true)."
+                >
+                  <input
+                    type="checkbox"
+                    checked={expertMode}
+                    onChange={(e) => setExpertMode(e.target.checked)}
+                    style={{ display: "none" }}
+                  />
+                  <span style={{
+                    width: 14, height: 14, borderRadius: 3,
+                    border: expertMode ? "2px solid var(--warning)" : "2px solid var(--border)",
+                    background: expertMode ? "var(--warning)" : "transparent",
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 10, color: "#000", transition: "all 0.15s",
+                  }}>
+                    {expertMode ? "✓" : ""}
+                  </span>
+                  Режим эксперта
+                </label>
               </div>
 
               {/* Progress */}
@@ -2672,18 +2714,24 @@ const analysisFlowSteps = [
                   <div className={styles.labelNodeTitle}>{labelQueue[0].title}</div>
                   <div className={styles.labelNodeContext}>{labelQueue[0].context_text}</div>
 
-                  {/* Model prediction meta */}
-                  <div className={styles.labelNodeMeta}>
-                    <span className={styles.mutedSm}>Предсказание модели:</span>
-                    {labelQueue[0].top_levels.map((lvl) => (
-                      <BloomBadge key={lvl} level={lvl} />
-                    ))}
-                    {labelQueue[0].rationale && (
-                      <span className={styles.mutedSm} style={{ marginLeft: 4 }}>
-                        — {labelQueue[0].rationale}
-                      </span>
-                    )}
-                  </div>
+                  {/* Model prediction meta — hidden in expert mode */}
+                  {!expertMode ? (
+                    <div className={styles.labelNodeMeta}>
+                      <span className={styles.mutedSm}>Предсказание модели:</span>
+                      {labelQueue[0].top_levels.map((lvl) => (
+                        <BloomBadge key={lvl} level={lvl} />
+                      ))}
+                      {labelQueue[0].rationale && (
+                        <span className={styles.mutedSm} style={{ marginLeft: 4 }}>
+                          — {labelQueue[0].rationale}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className={styles.labelNodeMeta} style={{ color: "var(--warning)", fontStyle: "italic", fontSize: 12 }}>
+                      🔬 Режим эксперта: предсказание модели скрыто для независимой оценки
+                    </div>
+                  )}
 
                   {/* Level toggles */}
                   <div className={styles.labelLevelToggles}>
@@ -2770,9 +2818,23 @@ const analysisFlowSteps = [
               <div className={styles.sectionBlock} style={{ marginTop: 24 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                   <span className={styles.cardTitle} style={{ margin: 0 }}>Метрики качества</span>
+                  <label
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                      fontSize: 12, color: metricsExpertOnly ? "var(--warning)" : "var(--text-muted)",
+                      marginLeft: "auto",
+                    }}
+                    title="Учитывать только аннотации в режиме эксперта (is_expert=true)"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={metricsExpertOnly}
+                      onChange={(e) => setMetricsExpertOnly(e.target.checked)}
+                    />
+                    Только эксперт
+                  </label>
                   <button
                     className={[styles.btn, styles.btnGhost].join(" ")}
-                    style={{ marginLeft: "auto" }}
                     onClick={loadMetrics}
                     disabled={!ds || isMetricsLoading}
                     type="button"
@@ -2803,6 +2865,7 @@ const analysisFlowSteps = [
                         { label: "Hamming Loss", value: metricsData.hamming_loss?.toFixed(3), color: metricsData.hamming_loss < 0.2 ? "var(--success)" : metricsData.hamming_loss < 0.4 ? "#fb923c" : "var(--error)" },
                         { label: "F1 micro", value: metricsData.f1_micro?.toFixed(3), color: metricsData.f1_micro > 0.7 ? "var(--success)" : metricsData.f1_micro > 0.4 ? "#fb923c" : "var(--error)" },
                         { label: "F1 macro", value: metricsData.f1_macro?.toFixed(3), color: metricsData.f1_macro > 0.7 ? "var(--success)" : metricsData.f1_macro > 0.4 ? "#fb923c" : "var(--error)" },
+                        ...(metricsData.cohen_kappa != null ? [{ label: "Cohen κ", value: metricsData.cohen_kappa?.toFixed(3), color: metricsData.cohen_kappa > 0.6 ? "var(--success)" : metricsData.cohen_kappa > 0.4 ? "#fb923c" : "var(--error)" }] : []),
                       ].map(({ label, value, color }) => (
                         <div key={label} style={{
                           padding: "8px 14px",
