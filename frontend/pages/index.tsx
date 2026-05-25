@@ -1646,57 +1646,22 @@ const analysisFlowSteps = [
 
           {/* ── Analysis Tab ─────────────────────────── */}
           {activeTab === "analysis" && (
-            <div className={styles.card}>
+            <div className={styles.tabHost}>
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1.35fr 1fr" }}>
 
-<SectionHero
-  eyebrow="Главный сценарий"
-  title="От текста к карте знаний"
-  description="Загрузи материал и запусти анализ, чтобы получить узлы знаний с уровнями Блума. Когда основа готова, переходи к графу, поиску и ручной проверке."
-  stats={[
-    { label: "API", value: apiStatus === "ok" ? "online" : "offline", tone: apiStatus === "ok" ? "success" : "warning" },
-    { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
-    { label: "Узлы", value: nodes.length, tone: hasNodes ? "info" : "neutral" },
-    { label: "Нужна проверка", value: lowConfidenceCount, tone: lowConfidenceCount ? "warning" : "success" },
-  ]}
-  actions={nodes.length > 0 ? (
-    <div className={styles.exportMenuWrap}>
-      <button
-        className={[styles.btn, styles.btnGhost].join(" ")}
-        onClick={() => setShowExportMenu(v => !v)}
-        type="button"
-      >
-        <IconDownload /> Экспорт ▾
-      </button>
-      {showExportMenu && (
-        <div className={styles.exportDropdown}>
-          <div className={styles.exportItem} onClick={() => { exportNodesJson(); setShowExportMenu(false); }}>
-            <IconDownload /> JSON
-          </div>
-          <div className={styles.exportItem} onClick={() => { exportNodesCsv(); setShowExportMenu(false); }}>
-            <IconDownload /> CSV
-          </div>
-          {ds && (
-            <div className={styles.exportItem} onClick={() => { exportJsonl(); setShowExportMenu(false); }}>
-              <IconDownload /> JSONL (датасет)
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  ) : (
-    <button className={[styles.btn, styles.btnGhost].join(" ")} onClick={() => setShowGuide(true)} type="button">
-      Показать подсказки
-    </button>
-  )}
->
-  <div className={styles.flowSteps}>
-    {analysisFlowSteps.map((item) => (
-      <FlowStep key={item.step} step={item.step} title={item.title} text={item.text} state={item.state as "pending" | "current" | "done"} />
-    ))}
-  </div>
-</SectionHero>
-
-              <div className={styles.grid}>
+              {/* ── LEFT: Input ─── */}
+              <div className={styles.tabPaneLeft}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Ввод текста</span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: apiStatus === "ok" ? "var(--success)" : "var(--warning)", display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: apiStatus === "ok" ? "var(--success)" : "var(--warning)" }} />
+                      {apiStatus === "ok" ? "API online" : "API offline"}
+                    </span>
+                    {hasDataset && <span style={{ fontSize: 11, color: "var(--text-accent)" }}>DS #{ds}</span>}
+                  </span>
+                </div>
+                <div className={styles.grid}>
                 {/* File drop zone */}
                 <div
                   style={{
@@ -1901,6 +1866,46 @@ const analysisFlowSteps = [
                     {nodesStatus}
                   </div>
                 )}
+                </div>{/* end .grid (left) */}
+              </div>{/* end tabPaneLeft */}
+
+              {/* ── RIGHT: Results ─── */}
+              <div className={styles.tabPaneRight}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Результаты</span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                    {nodes.length > 0 && (
+                      <div className={styles.exportMenuWrap}>
+                        <button
+                          className={[styles.btn, styles.btnGhost].join(" ")}
+                          onClick={() => setShowExportMenu(v => !v)}
+                          type="button"
+                          style={{ fontSize: 11, padding: "4px 10px" }}
+                        >
+                          <IconDownload /> Экспорт ▾
+                        </button>
+                        {showExportMenu && (
+                          <div className={styles.exportDropdown}>
+                            <div className={styles.exportItem} onClick={() => { exportNodesJson(); setShowExportMenu(false); }}>
+                              <IconDownload /> JSON
+                            </div>
+                            <div className={styles.exportItem} onClick={() => { exportNodesCsv(); setShowExportMenu(false); }}>
+                              <IconDownload /> CSV
+                            </div>
+                            {ds && (
+                              <div className={styles.exportItem} onClick={() => { exportJsonl(); setShowExportMenu(false); }}>
+                                <IconDownload /> JSONL (датасет)
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {lowConfidenceCount > 0 && (
+                      <span style={{ fontSize: 11, color: "var(--warning)" }}>⚠ {lowConfidenceCount} неуверенных</span>
+                    )}
+                  </span>
+                </div>
 
                 {/* Stats chips */}
                 {nodes.length > 0 && !isAnalyzing && (() => {
@@ -2159,36 +2164,34 @@ const analysisFlowSteps = [
                     <span className={styles.emptyIcon}><IconBrain /></span>
                     <div className={styles.emptyTitle}>Нет результатов</div>
                     <div className={styles.emptyText}>
-                      Вставь текст выше и нажми &quot;Анализировать&quot; (нужен активный dataset).
+                      Вставь текст слева и нажми &quot;Анализировать&quot; (нужен активный dataset).
                     </div>
                   </div>
                 )}
-              </div>
-            </div>
+              </div>{/* end tabPaneRight */}
+              </div>{/* end tabGrid */}
+            </div>{/* end tabHost */}
           )}
 
           {/* ── Search Tab ───────────────────────────── */}
           {activeTab === "search" && (
-            <div className={styles.card}>
+            <div className={styles.tabHost}>
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "260px 1fr" }}>
 
-<SectionHero
-  eyebrow="Навигация по материалам"
-  title="Семантический поиск"
-  description="Ищи фрагменты по содержанию или находи конкретные узлы знаний, чтобы быстро возвращаться к нужному контексту."
-  stats={[
-    { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
-    { label: "Режим", value: searchMode === "chunks" ? "чанки" : "узлы", tone: "info" },
-    { label: "Результаты", value: searchMode === "chunks" ? searchResults.length : nodeSearchResults.length, tone: "neutral" },
-  ]}
-/>
-<div className={styles.grid}>
+              {/* ── LEFT: Filters / controls ─── */}
+              <div className={styles.tabPaneLeft}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Параметры</span>
+                  {hasDataset && <span style={{ fontSize: 11, color: "var(--text-accent)", marginLeft: "auto" }}>DS #{ds}</span>}
+                </div>
+                <div className={styles.grid}>
                 {/* Search mode toggle */}
                 <div className={[styles.searchModeToggle, styles.sectionBlock].join(" ")}>
                   <button
                     className={[styles.searchModeBtn, searchMode === "chunks" ? styles.searchModeBtnActive : ""].join(" ")}
                     onClick={() => setSearchMode("chunks")}
                   >
-                    Чанки документов
+                    Чанки
                   </button>
                   <button
                     className={[styles.searchModeBtn, searchMode === "nodes" ? styles.searchModeBtnActive : ""].join(" ")}
@@ -2198,10 +2201,9 @@ const analysisFlowSteps = [
                   </button>
                 </div>
 
-                {/* Chunk search mode */}
-                {searchMode === "chunks" && (
-                <div style={{ display: "contents" }}>
-                  <div className={styles.searchBox}>
+                {/* Search input */}
+                {searchMode === "chunks" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <input
                       className={styles.searchInput}
                       placeholder="Введи поисковый запрос…"
@@ -2209,8 +2211,8 @@ const analysisFlowSteps = [
                       onChange={e => setSearchQuery(e.target.value)}
                       onKeyDown={e => { if (e.key === "Enter") searchNodes(); }}
                     />
-                    <div className={styles.paramField} style={{ margin: 0, flexShrink: 0 }}>
-                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Top-K</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)", flexShrink: 0 }}>Top-K</span>
                       <input
                         className={styles.paramInput}
                         type="number"
@@ -2220,12 +2222,34 @@ const analysisFlowSteps = [
                         onChange={e => setSearchTopK(Number(e.target.value))}
                         style={{ width: 52 }}
                       />
+                      <button
+                        className={[styles.btn, styles.btnPrimary].join(" ")}
+                        onClick={searchNodes}
+                        disabled={!searchQuery.trim() || isSearching}
+                        style={{ flex: 1 }}
+                      >
+                        {isSearching ? <span className={styles.spinner} /> : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                          </svg>
+                        )}
+                        {isSearching ? "Ищем…" : "Найти"}
+                      </button>
                     </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <input
+                      className={styles.searchInput}
+                      placeholder="Поиск по узлам знаний…"
+                      value={nodeSearchQuery}
+                      onChange={e => setNodeSearchQuery(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") searchByNodes(); }}
+                    />
                     <button
                       className={[styles.btn, styles.btnPrimary].join(" ")}
-                      onClick={searchNodes}
-                      disabled={!searchQuery.trim() || isSearching}
-                      style={{ flexShrink: 0 }}
+                      onClick={searchByNodes}
+                      disabled={!nodeSearchQuery.trim() || isSearching}
                     >
                       {isSearching ? <span className={styles.spinner} /> : (
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2235,8 +2259,24 @@ const analysisFlowSteps = [
                       {isSearching ? "Ищем…" : "Найти"}
                     </button>
                   </div>
+                )}
+                </div>{/* end .grid */}
+              </div>{/* end tabPaneLeft */}
 
-                  {/* Skeleton while searching */}
+              {/* ── RIGHT: Results ─── */}
+              <div className={styles.tabPaneRight}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>
+                    {searchMode === "chunks" ? "Результаты поиска" : "Узлы знаний"}
+                  </span>
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-muted)" }}>
+                    {searchMode === "chunks" ? searchResults.length : nodeSearchResults.length} результатов
+                  </span>
+                </div>
+
+                {/* Chunk results */}
+                {searchMode === "chunks" && (
+                <>
                   {isSearching && (
                     <div className={styles.searchResults}>
                       {Array.from({ length: 3 }).map((_, i) => (
@@ -2248,8 +2288,6 @@ const analysisFlowSteps = [
                       ))}
                     </div>
                   )}
-
-                  {/* Results */}
                   {!isSearching && searchResults.length > 0 && (
                     <div className={styles.searchResults}>
                       {searchResults.map((r, i) => (
@@ -2264,62 +2302,26 @@ const analysisFlowSteps = [
                       ))}
                     </div>
                   )}
-
-                  {/* Empty state */}
                   {!isSearching && searchDone && searchResults.length === 0 && (
                     <div className={styles.emptyState}>
-                      <span className={styles.emptyIcon}>
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                        </svg>
-                      </span>
                       <div className={styles.emptyTitle}>Ничего не найдено</div>
                       <div className={styles.emptyText}>Попробуй другой запрос или проверь, что документы проиндексированы.</div>
                     </div>
                   )}
-
-                  {/* Hint when empty */}
                   {!isSearching && !searchDone && (
                     <div className={styles.emptyState}>
-                      <span className={styles.emptyIcon}>
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                        </svg>
-                      </span>
                       <div className={styles.emptyTitle}>Семантический RAG-поиск</div>
-                      <div className={styles.emptyText}>Введи запрос на естественном языке — система найдёт смыслово похожие фрагменты документов. Не забудь сначала загрузить и проиндексировать документ.</div>
+                      <div className={styles.emptyText}>Введи запрос слева — система найдёт смысловo похожие фрагменты.</div>
                     </div>
                   )}
-                </div>
+                </>
                 )}
 
-                {/* Nodes search mode */}
+                {/* Node results */}
                 {searchMode === "nodes" && (
-                <div>
-                  <div className={styles.searchBox}>
-                    <input
-                      className={styles.searchInput}
-                      placeholder="Поиск по узлам знаний…"
-                      value={nodeSearchQuery}
-                      onChange={e => setNodeSearchQuery(e.target.value)}
-                      onKeyDown={e => { if (e.key === "Enter") searchByNodes(); }}
-                    />
-                    <button
-                      className={[styles.btn, styles.btnPrimary].join(" ")}
-                      onClick={searchByNodes}
-                      disabled={!nodeSearchQuery.trim() || isSearching}
-                      style={{ flexShrink: 0 }}
-                    >
-                      {isSearching ? <span className={styles.spinner} /> : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                        </svg>
-                      )}
-                      {isSearching ? "Ищем…" : "Найти"}
-                    </button>
-                  </div>
+                <>
                   {nodeSearchResults.length > 0 && (
-                    <div className={styles.searchResults} style={{ marginTop: 12 }}>
+                    <div className={styles.searchResults}>
                       {nodeSearchResults.map(n => (
                         <div key={n.id} className={styles.searchResultCard} style={{ cursor: "pointer" }} onClick={() => setDetailNode(n)}>
                           <div className={styles.searchResultHead}>
@@ -2341,31 +2343,21 @@ const analysisFlowSteps = [
                   {!searchDone && !isSearching && (
                     <div className={styles.emptyState}>
                       <div className={styles.emptyTitle}>Поиск по узлам знаний</div>
-                      <div className={styles.emptyText}>Ищет по названию и контексту узлов в текущем датасете. Узлы должны быть загружены в БД.</div>
+                      <div className={styles.emptyText}>Ищет по названию и контексту узлов в текущем датасете.</div>
                     </div>
                   )}
-                </div>
+                </>
                 )}
-              </div>
-            </div>
+              </div>{/* end tabPaneRight */}
+              </div>{/* end tabGrid */}
+            </div>{/* end tabHost */}
           )}
 
           {/* ── Graph Tab ────────────────────────────── */}
           {activeTab === "graph" && (
-            <div className={styles.card}>
+            <div className={styles.tabHost}>
 
-<SectionHero
-  eyebrow="Связи и структура"
-  title="Граф знаний"
-  description="Смотри, как понятия связаны между собой. Здесь удобно проверять структуру материала, переходить между уровнями и замечать пробелы."
-  stats={[
-    { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
-    { label: "Узлы", value: graphNodesData.length, tone: hasGraph ? "info" : "neutral" },
-    { label: "Связи", value: graphEdgesData.length, tone: hasGraph ? "success" : "neutral" },
-  ]}
-/>
-
-<div className={[styles.sectionBlock, styles.graphControls].join(" ")}>
+<div className={[styles.sectionBlock, styles.graphControls].join(" ")} style={{ flexShrink: 0, borderBottom: "1px solid var(--border)", padding: "10px 16px", background: "var(--bg-surface)" }}>
                 {/* Level filters */}
                 <div className={styles.graphFilters}>
                   {BLOOM_LEVELS.map((lvl) => (
@@ -2591,23 +2583,24 @@ const analysisFlowSteps = [
                   </div>
                 );
               })()}
-            </div>
+            </div>{/* end tabHost */}
           )}
 
           {/* ── Labeling Tab ─────────────────────────── */}
           {activeTab === "labeling" && (
-            <div className={styles.card}>
+            <div className={styles.tabHost}>
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1fr 320px" }}>
 
-<SectionHero
-  eyebrow="Подтверждение качества"
-  title="Ручная разметка"
-  description="Проверяй автоматические уровни, подтверждай выводы модели и улучшай качество данных. Быстрые клавиши 1–6 тоже работают."
-  stats={[
-    { label: "В очереди", value: labelQueue.length, tone: labelQueue.length ? "info" : "neutral" },
-    { label: "Прогресс", value: labelProgress ? `${progressPct}%` : "Не начат", tone: labelProgress ? "success" : "neutral" },
-    { label: "Аннотатор", value: annotator || "default", tone: "accent" },
-  ]}
-/>
+              {/* ── LEFT: Annotation flow ─── */}
+              <div className={styles.tabPaneLeft}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Разметка</span>
+                  {labelProgress && (
+                    <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--success)" }}>
+                      {labelProgress.labeled} / {labelProgress.total} ({progressPct}%)
+                    </span>
+                  )}
+                </div>
 
 {/* Labeling controls */}
 <div className={[styles.sectionBlock, styles.labelingHeader].join(" ")}>
@@ -2814,8 +2807,16 @@ const analysisFlowSteps = [
                 )
               )}
 
+              </div>{/* end tabPaneLeft */}
+
+              {/* ── RIGHT: Metrics ─── */}
+              <div className={styles.tabPaneRight}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Метрики качества</span>
+                </div>
+
               {/* ── Metrics card ──────────────────────────── */}
-              <div className={styles.sectionBlock} style={{ marginTop: 24 }}>
+              <div className={styles.sectionBlock}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                   <span className={styles.cardTitle} style={{ margin: 0 }}>Метрики качества</span>
                   <label
@@ -2931,34 +2932,31 @@ const analysisFlowSteps = [
                     )}
                   </>
                 )}
-              </div>
-            </div>
+              </div>{/* end sectionBlock */}
+              </div>{/* end tabPaneRight */}
+              </div>{/* end tabGrid */}
+            </div>{/* end tabHost */}
           )}
           {/* ── Dashboard Tab ──────────────────────────── */}
           {activeTab === "dashboard" && (
-            <div className={styles.card}>
+            <div className={styles.tabHost}>
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1fr 1fr" }}>
 
-<SectionHero
-  eyebrow="Статус по платформе"
-  title="Дашборд"
-  description="Краткая сводка по датасетам, текущему объёму знаний и операционному состоянию платформы."
-  stats={[
-    { label: "Датасеты", value: dashDatasets.length, tone: "accent" },
-    { label: "Узлы в DS", value: dashNodeCount ?? "?", tone: dashNodeCount ? "info" : "neutral" },
-    { label: "API", value: apiStatus === "ok" ? "online" : "offline", tone: apiStatus === "ok" ? "success" : "warning" },
-  ]}
-  actions={
-    <button
-      className={[styles.btn, styles.btnPrimary].join(" ")}
-      onClick={loadDashboard}
-      disabled={isDashLoading}
-      type="button"
-    >
-      {isDashLoading ? <span className={styles.spinner} /> : <IconRefresh />}
-      Обновить
-    </button>
-  }
-/>
+              {/* ── LEFT: Datasets & KPI ─── */}
+              <div className={styles.tabPaneLeft}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Обзор</span>
+                  <button
+                    className={[styles.btn, styles.btnGhost].join(" ")}
+                    onClick={loadDashboard}
+                    disabled={isDashLoading}
+                    type="button"
+                    style={{ marginLeft: "auto", fontSize: 11, padding: "3px 10px" }}
+                  >
+                    {isDashLoading ? <span className={styles.spinner} /> : <IconRefresh />}
+                    Обновить
+                  </button>
+                </div>
 
 {isDashLoading ? (
                 <div className={styles.dashGrid}>
@@ -3015,29 +3013,6 @@ const analysisFlowSteps = [
                     </div>
                   )}
 
-                  {/* Bloom distribution (from current nodes) */}
-                  {nodes.length > 0 && (
-                    <div className={styles.dashSection}>
-                      <div className={styles.cardTitle} style={{ fontSize: 13, marginBottom: 10 }}>
-                        Bloom-распределение (текущий анализ)
-                      </div>
-                      {BLOOM_LEVELS.map(lvl => {
-                        const count = nodes.filter(n => n.top_levels.includes(lvl)).length;
-                        if (!count) return null;
-                        const pct = (count / nodes.length) * 100;
-                        return (
-                          <div key={lvl} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                            <span style={{ width: 90, fontSize: 12, color: LEVEL_COLORS[lvl] }}>{LEVEL_LABELS[lvl]}</span>
-                            <div style={{ flex: 1, height: 6, background: "var(--bg-hover)", borderRadius: 3, overflow: "hidden" }}>
-                              <div style={{ height: "100%", width: `${pct}%`, background: LEVEL_COLORS[lvl], borderRadius: 3 }} />
-                            </div>
-                            <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-muted)", width: 28, textAlign: "right" }}>{count}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
                   {!dashDatasets.length && !isDashLoading && (
                     <div className={styles.emptyState}>
                       <span className={styles.emptyIcon}>
@@ -3052,38 +3027,63 @@ const analysisFlowSteps = [
                   )}
                 </>
               )}
-            </div>
+              </div>{/* end tabPaneLeft */}
+
+              {/* ── RIGHT: Bloom distribution ─── */}
+              <div className={styles.tabPaneRight}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Bloom-распределение</span>
+                </div>
+                {nodes.length > 0 ? (
+                  <div className={styles.dashSection}>
+                    {BLOOM_LEVELS.map(lvl => {
+                      const count = nodes.filter(n => n.top_levels.includes(lvl)).length;
+                      if (!count) return null;
+                      const pct = (count / nodes.length) * 100;
+                      return (
+                        <div key={lvl} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                          <span style={{ width: 90, fontSize: 12, color: LEVEL_COLORS[lvl], fontWeight: 500 }}>{LEVEL_LABELS[lvl]}</span>
+                          <div style={{ flex: 1, height: 8, background: "var(--bg-hover)", borderRadius: 4, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${pct}%`, background: LEVEL_COLORS[lvl], borderRadius: 4 }} />
+                          </div>
+                          <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-muted)", width: 28, textAlign: "right" }}>{count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className={styles.emptyState}>
+                    <div className={styles.emptyText}>Загрузи текст в Analysis чтобы увидеть распределение.</div>
+                  </div>
+                )}
+              </div>{/* end tabPaneRight */}
+              </div>{/* end tabGrid */}
+            </div>{/* end tabHost */}
           )}
 
           {/* ── Canvas LMS tab ──────────────────────── */}
           {activeTab === "canvas" && (
-            <div className={styles.card}>
+            <div className={styles.tabHost}>
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1fr 1.4fr" }}>
 
-              <SectionHero
-                eyebrow="Интеграция"
-                title="Canvas LMS"
-                description="Загрузи содержимое курса Canvas в датасет Bloom RAG Studio. Страницы, задания, тесты и обсуждения будут автоматически размечены по уровням Блума."
-                stats={[
-                  { label: "Курсов", value: canvasCourses.length || "—", tone: canvasCourses.length ? "accent" : "neutral" },
-                  { label: "Датасет", value: ds ? `#${ds}` : "Не выбран", tone: ds ? "success" : "warning" },
-                  { label: "Выбран курс", value: canvasSelectedCourse
-                      ? (canvasCourses.find(c => c.id === canvasSelectedCourse)?.name?.slice(0, 22) ?? `#${canvasSelectedCourse}`)
-                      : "—", tone: canvasSelectedCourse ? "info" : "neutral" },
-                ]}
-                actions={
+              {/* ── LEFT: Course list ─── */}
+              <div className={styles.tabPaneLeft}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Курсы Canvas</span>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
+                    {canvasCourses.length > 0 ? `${canvasCourses.length} курсов` : ""}
+                  </span>
                   <button
                     className={[styles.btn, styles.btnGhost].join(" ")}
                     onClick={loadCanvasCourses}
                     disabled={canvasCoursesLoading}
                     type="button"
+                    style={{ fontSize: 11, padding: "3px 8px" }}
                   >
                     {canvasCoursesLoading ? <span className={styles.spinner} /> : <IconRefresh />}
-                    Обновить список
                   </button>
-                }
-              />
-
-              <div className={styles.grid}>
+                </div>
+                <div>{/* Course search + list */}
                 {/* Course search + list */}
                 <div>
                   <label className={styles.fieldLabel}>
@@ -3143,6 +3143,18 @@ const analysisFlowSteps = [
                         ))
                       }
                     </div>
+                  )}
+                </div>{/* end course list div */}
+              </div>{/* end tabPaneLeft */}
+
+              {/* ── RIGHT: Ingest settings + log ─── */}
+              <div className={styles.tabPaneRight}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Настройки импорта</span>
+                  {canvasSelectedCourse && (
+                    <span style={{ fontSize: 11, color: "var(--text-accent)", marginLeft: "auto" }}>
+                      {canvasCourses.find(c => c.id === canvasSelectedCourse)?.name?.slice(0, 28) ?? `#${canvasSelectedCourse}`}
+                    </span>
                   )}
                 </div>
 
@@ -3363,9 +3375,10 @@ const analysisFlowSteps = [
                       </button>
                     </div>
                   )}
-                </div>
-              </div>
-            </div>
+                </div>{/* end ingest settings div */}
+              </div>{/* end tabPaneRight */}
+              </div>{/* end tabGrid */}
+            </div>{/* end tabHost */}
           )}
 
         </main>
