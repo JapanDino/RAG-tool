@@ -10,6 +10,7 @@ from sqlalchemy import text
 from ..db.session import get_db
 from ..models.models import KnowledgeNode, KnowledgeEdge, Job, JobType, JobStatus
 from ..schemas.schemas import GraphOut, GraphNodeOut, GraphEdgeOut, GraphRebuildIn, GraphRebuildOut
+from ..utils.bloom import LEVEL_ORDER
 from ..tasks.queue import enqueue_or_mark
 
 router = APIRouter(prefix="/graph", tags=["graph"])
@@ -254,3 +255,100 @@ def get_graph(
         for n in nodes
     ]
     return GraphOut(nodes=node_items, edges=edge_items)
+
+
+# ---------------------------------------------------------------------------
+# ZPD — Zone of Proximal Development
+# ---------------------------------------------------------------------------
+
+@router.get("/zpd")
+def get_zpd(
+    node_id: int,
+    top_k: int = Query(5, ge=1, le=50),
+    min_score: float = Query(0.0, ge=0.0, le=1.0),
+    db: Session = Depends(get_db),
+):
+    """Return top-K nodes at the next Bloom level closest to *node_id*.
+
+    Given a node whose ``top_levels`` contains at least one Bloom level,
+    finds the highest level present, looks up the next level in the taxonomy
+    (remember → understand → apply → … → create), then returns the ``top_k``
+    nodes at that next level ranked by pgvector cosine similarity.
+
+    If the node is already at *create* (the highest level) or has no vector,
+    the response is empty.
+    """
+    node = db.get(KnowledgeNode, node_id)
+    if node is None:
+        from fastapi import HTTPException
+        raise HTTPException(404, "node not found")
+
+    # Determine the node's current Bloom level (highest in top_levels).
+    top_levels: list[str] = list(node.top_levels or [])
+    current_idx: int | None = None
+    for lvl in reversed(LEVEL_ORDER):       # highest first
+        if lvl in top_levels:
+            current_idx = LEVEL_ORDER.index(lvl)
+            break
+
+    if current_idx is None or current_idx >= len(LEVEL_ORDER) - 1 or node.vec is None:
+        return {
+            "node_id": node_id,
+            "current_level": LEVEL_ORDER[current_idx] if current_idx is not None else None,
+            "next_level": None,
+            "suggestions": [],
+        }
+
+    next_level = LEVEL_ORDER[current_idx + 1]
+
+    # pgvector cosine similarity query restricted to next_level nodes.
+    sql = text("""
+        SELECT kn.id,
+               kn.title,
+               kn.context_text,
+               kn.prob_vector,
+               kn.top_levels,
+               kn.model_info,
+               1.0 - (kn.vec <=> (SELECT vec FROM knowledge_nodes WHERE id = :id)) AS score
+        FROM knowledge_nodes kn
+        WHERE kn.id != :id
+          AND kn.vec IS NOT NULL
+          AND kn.top_levels @> :next_level_json::jsonb
+        ORDER BY kn.vec <=> (SELECT vec FROM knowledge_nodes WHERE id = :id)
+        LIMIT :k
+    """)
+
+    rows = db.execute(
+        sql,
+        {
+            "id": node_id,
+            "next_level_json": f'["{next_level}"]',
+            "k": top_k,
+        }
+    ).mappings().all()
+
+    suggestions = []
+    for r in rows:
+        score = float(r["score"])
+        if score < min_score:
+            continue
+        mi = r.get("model_info") or {}
+        freq = mi.get("frequency") if isinstance(mi, dict) else None
+        rationale = mi.get("rationale") if isinstance(mi, dict) else None
+        suggestions.append({
+            "id": int(r["id"]),
+            "title": str(r["title"]),
+            "context_text": str(r["context_text"]),
+            "prob_vector": list(r.get("prob_vector") or []),
+            "top_levels": list(r.get("top_levels") or []),
+            "similarity": round(score, 4),
+            "frequency": int(freq) if freq is not None else None,
+            "rationale": str(rationale) if rationale else None,
+        })
+
+    return {
+        "node_id": node_id,
+        "current_level": LEVEL_ORDER[current_idx],
+        "next_level": next_level,
+        "suggestions": suggestions,
+    }
