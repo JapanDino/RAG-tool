@@ -392,6 +392,7 @@ export default function Home() {
   const [selectedNode, setSelectedNode] = useState<AnalyzeNode | null>(null);
 
   const [annotator, setAnnotator] = useState("default");
+  const [expertMode, setExpertMode] = useState(false);
   const [labelQueue, setLabelQueue] = useState<AnalyzeNode[]>([]);
   const [labelQueueStatus, setLabelQueueStatus] = useState<string | null>(null);
   const [labelProgress, setLabelProgress] = useState<{ total: number; labeled: number } | null>(null);
@@ -411,13 +412,16 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   // ── Dashboard ────────────────────────────────────────────────
+  const [dashStats, setDashStats] = useState<any>(null);
+  const [dashMetrics, setDashMetrics] = useState<any>(null);
   const [dashDatasets, setDashDatasets] = useState<any[]>([]);
-  const [dashNodeCount, setDashNodeCount] = useState<number | null>(null);
   const [isDashLoading, setIsDashLoading] = useState(false);
+  const [dashLastUpdated, setDashLastUpdated] = useState<Date | null>(null);
 
   // ── Settings ─────────────────────────────────────────────────
   const [showSettings, setShowSettings] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [lang, setLang] = useState<"ru" | "en">("ru");
   const [minProb, setMinProb] = useState(0.2);
   const [maxLevels, setMaxLevels] = useState(6);
   const [embeddingModel, setEmbeddingModel] = useState("");
@@ -456,6 +460,12 @@ export default function Home() {
 
   // ── Toast system ────────────────────────────────────────────
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<{role: "user"|"assistant"; content: string}[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const [pendingIngest, setPendingIngest] = useState(false);
+  const ingestCanvasCourseRef = useRef<(() => void) | null>(null);
   const toastCounter = useRef(0);
   const addToast = useCallback((msg: string, type: Toast["type"] = "info") => {
     const id = ++toastCounter.current;
@@ -485,6 +495,9 @@ export default function Home() {
   const [canvasSelectedCourse, setCanvasSelectedCourse] = useState<number | null>(null);
   const [canvasContentTypes, setCanvasContentTypes] = useState<string[]>(["syllabus", "pages", "assignments", "quizzes", "discussions", "files"]);
   const [canvasMaxNodes, setCanvasMaxNodes] = useState(30);
+  const [canvasMaxNodesAuto, setCanvasMaxNodesAuto] = useState(false);
+  const [canvasTopicMode, setCanvasTopicMode] = useState<"none" | "auto" | "guided">("none");
+  const [canvasTopicTree, setCanvasTopicTree] = useState("");
   const [canvasMaxFiles, setCanvasMaxFiles] = useState(20);
   const [canvasIngesting, setCanvasIngesting] = useState(false);
 const [canvasIngestResult, setCanvasIngestResult] = useState<{ documents_ingested: number; nodes_created: number; nodes_updated: number; skipped: string[] } | null>(null);
@@ -525,10 +538,12 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     const savedTheme = localStorage.getItem("bloom_theme");
     if (savedTheme === "dark" || savedTheme === "light") {
       setTheme(savedTheme);
-      document.documentElement.setAttribute("data-theme", savedTheme);
-    } else {
-      document.documentElement.setAttribute("data-theme", "light");
+      if (savedTheme === "light") document.documentElement.setAttribute("data-theme", "light");
     }
+    // dark is the default (no attribute needed since :root is dark)
+
+    const savedLang = localStorage.getItem("bloom_lang");
+    if (savedLang === "ru" || savedLang === "en") setLang(savedLang);
 
     // Onboarding
     if (!localStorage.getItem("bloom_visited")) {
@@ -550,7 +565,11 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
   useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem("bloom_theme", theme);
-    document.documentElement.setAttribute("data-theme", theme);
+    if (theme === "light") {
+      document.documentElement.setAttribute("data-theme", "light");
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
   }, [theme]);
   useEffect(() => { localStorage.setItem("bloom_annotator", annotator); }, [annotator]);
 
@@ -573,11 +592,6 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
   }, [apiBase]);
 
   const getDirectBackendBase = useCallback(() => {
-    if (typeof window === "undefined") return null;
-    const host = window.location.hostname;
-    if (host === "localhost" || host === "127.0.0.1") {
-      return "http://127.0.0.1:8000";
-    }
     return null;
   }, []);
 
@@ -852,16 +866,56 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     setNodesStatus(items.length ? `Загружено узлов: ${items.length}` : "В БД нет узлов");
   };
 
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     setIsDashLoading(true);
+    // Datasets list (always needed for selector)
     const datasets = await apiFetchJson("/datasets");
     if (datasets) setDashDatasets(Array.isArray(datasets) ? datasets : datasets.items || []);
+
     if (ds) {
-      const params = new URLSearchParams({ dataset_id: String(ds), limit: "1", offset: "0" });
-      const res = await apiFetchJson(`/nodes?${params.toString()}`);
-      if (res) setDashNodeCount(res.total ?? null);
+      // Stats and metrics in parallel; metrics may 404 (no labels) — use silent fetch
+      const [stats, metricsRaw] = await Promise.all([
+        apiFetchJson(`/datasets/${ds}/stats`),
+        (async () => {
+          try {
+            const r = await fetch(`${apiBase}/evaluate/metrics?dataset_id=${ds}`);
+            return r.ok ? r.json() : null;
+          } catch { return null; }
+        })(),
+      ]);
+      if (stats) setDashStats(stats);
+      if (metricsRaw) setDashMetrics(metricsRaw);
     }
+    setDashLastUpdated(new Date());
     setIsDashLoading(false);
+  }, [apiFetchJson, apiBase, ds]);
+
+  // ── Dashboard helpers ────────────────────────────────────────
+  const fmtRelTime = (iso: string | null | undefined): string => {
+    if (!iso) return "—";
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 60000) return `${Math.round(diff / 1000)} с назад`;
+    if (diff < 3600000) return `${Math.round(diff / 60000)} мин назад`;
+    if (diff < 86400000) return `${Math.round(diff / 3600000)} ч назад`;
+    return new Date(iso).toLocaleDateString("ru-RU");
+  };
+
+  const jobBadgeClass = (status: string) => {
+    if (status === "done" || status === "completed") return styles.jobBadgeDone;
+    if (status === "running") return styles.jobBadgeRunning;
+    if (status === "queued") return styles.jobBadgeQueued;
+    return styles.jobBadgeFailed;
+  };
+
+  const JOB_TYPE_LABELS: Record<string, string> = {
+    analyze: "Анализ", index: "Индексация", graph: "Граф",
+    annotate: "Разметка", parse: "Парсинг", canvas: "Canvas",
+  };
+  const CONF_COLORS: Record<string, string> = {
+    high: "var(--success)", medium: "var(--warning)", low: "var(--error)",
+  };
+  const CONF_LABELS: Record<string, string> = {
+    high: "Высокая", medium: "Средняя", low: "Низкая",
   };
 
   const saveInlineEdit = async (nodeId: number) => {
@@ -1015,7 +1069,10 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
           dataset_id: ds,
           content_types: canvasContentTypes,
           max_nodes_per_doc: canvasMaxNodes,
+          max_nodes_auto: canvasMaxNodesAuto,
           max_files: canvasMaxFiles,
+          topic_mode: canvasTopicMode,
+          topic_tree: canvasTopicMode === "guided" ? canvasTopicTree : undefined,
         }),
       });
 
@@ -1091,7 +1148,49 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
       setCanvasIngesting(false);
       setCanvasProgress(null);
     }
-  }, [addToast, apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxFiles, getDirectBackendBase]);
+  }, [addToast, apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxNodesAuto, canvasMaxFiles, getDirectBackendBase]);
+
+  // Keep a stable ref so the chat action handler can call ingestCanvasCourse without stale closure
+  useEffect(() => { ingestCanvasCourseRef.current = ingestCanvasCourse; }, [ingestCanvasCourse]);
+
+  // Dashboard auto-refresh: poll every 8 s when there are active jobs, 30 s otherwise
+  useEffect(() => {
+    if (activeTab !== "dashboard") return;
+    const interval = (dashStats?.active_jobs ?? 0) > 0 ? 8000 : 30000;
+    const timer = setInterval(() => { loadDashboard(); }, interval);
+    return () => clearInterval(timer);
+  }, [activeTab, dashStats?.active_jobs, loadDashboard]);
+
+  // Reload dashboard stats when ds changes (and dashboard is visible)
+  useEffect(() => {
+    if (activeTab === "dashboard" && ds) loadDashboard();
+  }, [ds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Execute pending ingest after course + dataset are set
+  useEffect(() => {
+    if (pendingIngest && canvasSelectedCourse && ds) {
+      setPendingIngest(false);
+      ingestCanvasCourseRef.current?.();
+    }
+  }, [pendingIngest, canvasSelectedCourse, ds]);
+
+  const executeUiAction = useCallback((action: {type: string; tab?: string; course_id?: number}) => {
+    if (action.type === "switchTab") {
+      const tab = action.tab as "analysis" | "graph" | "labeling" | "search" | "dashboard" | "canvas";
+      setActiveTab(tab);
+      if (tab === "canvas" && canvasCourses.length === 0) loadCanvasCourses();
+      addToast(`→ Вкладка: ${tab}`, "info");
+    } else if (action.type === "selectCourse") {
+      if (action.course_id) {
+        setCanvasSelectedCourse(action.course_id);
+        const name = canvasCourses.find(c => c.id === action.course_id)?.name;
+        addToast(`→ Курс: ${name ?? action.course_id}`, "info");
+      }
+    } else if (action.type === "startIngest") {
+      addToast("→ Запускаю анализ курса…", "info");
+      setPendingIngest(true);
+    }
+  }, [addToast, canvasCourses, loadCanvasCourses]);
 
   const filteredNodes = useMemo(() => {
     let result = [...nodes];
@@ -1197,12 +1296,17 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     setGraphEdgesData([]);
   }, [ds]);
 
+  const [metricsExpertOnly, setMetricsExpertOnly] = useState(false);
+
   const loadMetrics = async () => {
     if (!ds) return;
     setIsMetricsLoading(true);
-    const data = await apiFetchJson(
-      `/evaluate/multilabel?dataset_id=${ds}&annotator=${encodeURIComponent(annotator)}`
-    );
+    const params = new URLSearchParams({
+      dataset_id: String(ds),
+      annotator,
+      ...(metricsExpertOnly ? { expert_only: "true" } : {}),
+    });
+    const data = await apiFetchJson(`/evaluate/multilabel?${params.toString()}`);
     setIsMetricsLoading(false);
     if (data) setMetricsData(data);
   };
@@ -1234,7 +1338,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     const ok = await apiFetchJson(`/nodes/${node.id}/labels`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ labels, annotator }),
+      body: JSON.stringify({ labels, annotator, expert_mode: expertMode }),
     });
     if (!ok) return;
     addToast("✓ Разметка сохранена", "success");
@@ -1350,290 +1454,237 @@ const analysisFlowSteps = [
 ];
 
   return (
-    <div className={styles.appShell}>
+    <div className={styles.page}>
 
       {/* ── Header ─────────────────────────────────────── */}
-      <header className={styles.appHeader}>
-        <div className={styles.headerBrand}>
-          <div className={styles.logoMark}>⬡</div>
-          <div className={styles.logoText}>
-            <span className={styles.logoName}>Bloom RAG Studio</span>
-            <span className={styles.logoSub}>
-              {ds ? `dataset #${ds}` : "no dataset"} · multi-label taxonomy
-            </span>
-          </div>
-        </div>
-
-        <div className={styles.headerCenter}>
-          {embeddingSemantic === false && (
-            <div className={styles.warnBanner}>
-              ⚠ Хэш-эмбеддинги — семантический поиск ограничен
+      <header className={styles.header}>
+        <div className={styles.headerInner}>
+          {/* Brand */}
+          <div className={styles.brand}>
+            <div className={styles.brandIcon}>
+              <span className={styles.brandIconSvg}><IconBrain /></span>
             </div>
-          )}
-        </div>
-
-        <div className={styles.headerRight}>
-          {/* API status pill */}
-          <div className={styles.statusPill}>
-            <span className={[
-              styles.dotPulse,
-              apiStatus === "ok" ? styles.dotGood :
-              apiStatus === "down" ? styles.dotErr : styles.dotMuted,
-            ].join(" ")} />
-            <span className={styles.statusLabel}>
-              {apiStatus === "ok" ? "connected" : apiStatus === "down" ? "offline" : "checking"}
-            </span>
+            <div className={styles.brandText}>
+              <span className={styles.title}>Bloom RAG Studio</span>
+              <span className={styles.subtitle}>Граф знаний · Таксономия Блума</span>
+            </div>
           </div>
 
-          {/* Dataset badge */}
-          {ds && (
-            <div className={styles.dsBadge}>
-              <span>ds</span>
-              <span className={styles.dsBadgeVal}>#{ds}</span>
-            </div>
-          )}
-
-          {/* Theme toggle */}
-          <button
-            className={styles.iconBtn}
-            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-            title="Переключить тему"
-            type="button"
-          >
-            {theme === "light" ? "🌙" : "☀"}
-          </button>
-
-          {/* Settings */}
-          <button className={styles.iconBtn} onClick={() => setShowSettings(true)} title="Настройки">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          {/* Dataset selector */}
+          <div className={styles.headerDataset} title="Сменить датасет">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-muted)", flexShrink: 0 }}>
+              <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>
             </svg>
-          </button>
+            <div>
+              <div className={styles.headerDatasetLabel}>Датасет</div>
+              <div className={styles.headerDatasetVal}>{ds ? `#${ds}` : "— не выбран"}</div>
+            </div>
+            <span style={{ color: "var(--text-muted)", fontSize: 10, marginLeft: 4 }}>▾</span>
+          </div>
 
-          {/* Help */}
-          <button className={styles.iconBtn} onClick={() => setShowGuide(true)} title="Помощь">
-            {/* placeholder below is filled by next Edit */}
-            <span style={{ fontSize: 12 }}>?</span>
-          </button>
+          {/* Global search */}
+          <div className={styles.headerSearch}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-muted)", flexShrink: 0 }}>
+              <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+            </svg>
+            <span className={styles.headerSearchPlaceholder}>Поиск по узлам, документам, датасетам…</span>
+            <span className={styles.headerSearchKbd}>⌘K</span>
+          </div>
+
+          <div className={styles.metaRow}>
+            {/* API health */}
+            <div className={[styles.healthChip, apiStatus === "ok" ? styles.healthChipOk : styles.healthChipErr].join(" ")}>
+              <span className={[styles.dot, apiStatus === "ok" ? styles.dotOk : styles.dotBad].join(" ")} />
+              {apiStatus === "ok" ? "API · работает" : "API недоступен"}
+            </div>
+
+            {/* Version */}
+            <span className={styles.kbd} style={{ fontSize: 10.5 }}>v0.9.3</span>
+
+            {/* Job indicator */}
+            {lastJob && (
+              <span className={styles.kbd} style={{ fontSize: 10.5, color: "var(--warning)" }}>
+                job #{lastJob}
+              </span>
+            )}
+
+            <span className={styles.headerSep} />
+
+            {/* Export */}
+            <button className={styles.iconBtn} title="Экспорт JSONL" onClick={exportJsonl} type="button">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </button>
+
+            {/* Settings */}
+            <button className={styles.iconBtn} onClick={() => setShowSettings(true)} title="Настройки" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3h.1a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8v.1a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/>
+              </svg>
+            </button>
+
+            <span className={styles.headerSep} />
+
+            {/* Lang toggle */}
+            <div className={styles.langToggle}>
+              <button className={[styles.langOption, lang === "ru" ? styles.langOptionActive : ""].join(" ")} onClick={() => { setLang("ru"); localStorage.setItem("bloom_lang", "ru"); }} type="button">RU</button>
+              <button className={[styles.langOption, lang === "en" ? styles.langOptionActive : ""].join(" ")} onClick={() => { setLang("en"); localStorage.setItem("bloom_lang", "en"); }} type="button">EN</button>
+            </div>
+
+            {/* Avatar */}
+            <div className={styles.avatar}>БР</div>
+          </div>
         </div>
       </header>
 
-      {/* ── Body ───────────────────────────────────────── */}
-      <div className={styles.appBody}>
+      {/* ── Shell ──────────────────────────────────────── */}
+      <div className={styles.shell}>
 
-        {/* ── Sidebar ──────────────────────────────────── */}
-        <nav className={styles.appSidebar}>
-          <div className={styles.sidebarScroll}>
-            <div className={styles.sidebarSectionLabel}>Инструменты</div>
+        {/* ── Sidebar nav ──────────────────────────────── */}
+        <nav className={styles.nav}>
+          {/* New Analysis CTA */}
+          <button className={styles.navPrimaryBtn} onClick={() => setActiveTab("analysis")} type="button">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Новый анализ
+            <span style={{ marginLeft: "auto", opacity: 0.85, fontSize: 10, fontFamily: "var(--font-mono)" }}>⌘N</span>
+          </button>
 
-            <button
-              className={[styles.navBtn, activeTab === "analysis" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => setActiveTab("analysis")}
-            >
-              <span className={styles.navIcon}><IconBrain /></span>
-              <span className={styles.navLabel}>Анализ</span>
-              {nodes.length > 0
-                ? <span className={styles.navCount}>{nodes.length}</span>
-                : <span className={styles.navHint}>content</span>
-              }
-            </button>
+          <div className={styles.navSectionTitle}>РАБОТА</div>
 
-            <button
-              className={[styles.navBtn, activeTab === "graph" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => setActiveTab("graph")}
-            >
-              <span className={styles.navIcon}><IconGraph /></span>
-              <span className={styles.navLabel}>Граф знаний</span>
-              {graphNodesData.length > 0
-                ? <span className={styles.navCount}>{graphNodesData.length}</span>
-                : <span className={styles.navHint}>cyto</span>
-              }
-            </button>
+          <button
+            className={[styles.navBtn, activeTab === "analysis" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => setActiveTab("analysis")}
+          >
+            <span className={styles.navIcon}><IconBrain /></span>
+            <span className={styles.navLabel}>Анализ контента</span>
+            {nodes.length > 0
+              ? <span className={styles.navCount}>{nodes.length}</span>
+              : <span className={styles.navHint}>A</span>
+            }
+          </button>
 
-            <button
-              className={[styles.navBtn, activeTab === "labeling" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => setActiveTab("labeling")}
-            >
-              <span className={styles.navIcon}><IconTag /></span>
-              <span className={styles.navLabel}>Разметка</span>
-              {labelProgress && labelProgress.total > 0 ? (
-                <div className={styles.navProgressChip}>
-                  <span className={styles.navProgressText}>{labelProgress.labeled}/{labelProgress.total}</span>
-                  <div className={styles.navProgressMini}>
-                    <div className={styles.navProgressMiniFill} style={{ width: `${progressPct}%` }} />
-                  </div>
-                </div>
-              ) : (
-                <span className={styles.navHint}>queue</span>
-              )}
-            </button>
+          <button
+            className={[styles.navBtn, activeTab === "graph" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => setActiveTab("graph")}
+          >
+            <span className={styles.navIcon}><IconGraph /></span>
+            <span className={styles.navLabel}>Граф знаний</span>
+            <span className={styles.navHint}>G</span>
+          </button>
 
-            <button
-              className={[styles.navBtn, activeTab === "dashboard" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => { setActiveTab("dashboard"); loadDashboard(); }}
-            >
-              <span className={styles.navIcon}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                  <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-                </svg>
-              </span>
-              <span className={styles.navLabel}>Дашборд</span>
-              <span className={styles.navHint}>stats</span>
-            </button>
-
-            <button
-              className={[styles.navBtn, activeTab === "search" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => setActiveTab("search")}
-            >
-              <span className={styles.navIcon}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                </svg>
-              </span>
-              <span className={styles.navLabel}>Поиск RAG</span>
-              <span className={styles.navHint}>e5</span>
-            </button>
-
-            <button
-              className={[styles.navBtn, activeTab === "canvas" ? styles.navBtnActive : ""].join(" ")}
-              onClick={() => { setActiveTab("canvas"); if (!canvasCourses.length) loadCanvasCourses(); }}
-            >
-              <span className={styles.navIcon}><IconCanvas /></span>
-              <span className={styles.navLabel}>Canvas LMS</span>
-              {canvasCourses.length > 0
-                ? <span className={styles.navCount}>{canvasCourses.length}</span>
-                : <span className={styles.navHint}>LMS</span>
-              }
-            </button>
-
-            <div className={styles.navDivider} />
-            <div className={styles.sidebarSectionLabel}>Данные</div>
-
-            {/* Quick dataset + connection controls in sidebar */}
-            <div style={{ padding: "0 4px", display: "flex", flexDirection: "column", gap: 10 }}>
-
-              {/* Dataset quick panel */}
-              <div className={styles.sidebarWidget}>
-                <div className={styles.widgetLabel}>Датасет</div>
-                <div className={styles.dsRow}>
-                  <input
-                    className={styles.dsInput}
-                    placeholder="Имя нового"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                  <button
-                    className={[styles.btnCompact, styles.btnCompactPrimary].join(" ")}
-                    onClick={createDataset}
-                    disabled={!name.trim()}
-                    title="Создать датасет"
-                  >
-                    <IconPlus />
-                  </button>
-                </div>
-                <input
-                  className={styles.widgetInput}
-                  type="number"
-                  placeholder="ID существующего"
-                  value={ds ?? ""}
-                  onChange={(e) => setDs(e.target.value ? Number(e.target.value) : undefined)}
-                />
-              </div>
-
-              {/* File upload */}
-              <div className={styles.sidebarWidget}>
-                <div className={styles.widgetLabel}>Документ</div>
-                <input
-                  ref={sidebarFileRef}
-                  type="file"
-                  accept=".txt,.pdf,.md"
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] || null;
-                    setFile(f);
-                    setFileName(f?.name ?? "");
-                    if (f) setName(f.name.replace(/\.[^.]+$/, ""));
-                    e.target.value = "";
-                  }}
-                />
-                <div
-                  className={styles.dropZone}
-                  style={{ padding: "8px 10px", minHeight: 48 }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const f = e.dataTransfer.files?.[0] || null;
-                    setFile(f); setFileName(f?.name ?? "");
-                    if (f) setName(f.name.replace(/\.[^.]+$/, ""));
-                  }}
-                  onClick={() => sidebarFileRef.current?.click()}
-                >
-                  {fileName
-                    ? <span className={styles.dropZoneText} style={{ color: "var(--good)", fontSize: 11 }}>{fileName}</span>
-                    : <>
-                        <span className={styles.dropZoneText} style={{ fontSize: 11 }}>Перетащи файл</span>
-                        <span className={styles.dropZoneHint}>.txt .pdf .md</span>
-                      </>
-                  }
-                </div>
-                <div className={styles.widgetRow}>
-                  <button className={[styles.btnCompact, styles.btnCompactPrimary].join(" ")} onClick={upload} disabled={!ds || !file}>
-                    <IconUpload /> Загрузить
-                  </button>
-                  <button className={styles.btnCompact} onClick={indexDs} disabled={!ds}>
-                    Индекс
-                  </button>
-                  <button className={styles.btnCompact} onClick={exportJsonl} disabled={!ds}>
-                    <IconDownload />
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          {/* Sidebar bottom: connection + job */}
-          <div className={styles.sidebarBottom}>
-            <div className={styles.sidebarWidget}>
-              <div className={styles.widgetLabel} style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>API</span>
-                <span style={{
-                  fontSize: 9.5,
-                  color: apiStatus === "ok" ? "var(--good)" : apiStatus === "down" ? "var(--err)" : "var(--muted2)"
-                }}>
-                  {apiStatus === "ok" ? "● online" : apiStatus === "down" ? "● offline" : "● …"}
-                </span>
-              </div>
-              <input
-                className={styles.widgetInput}
-                value={apiBase}
-                onChange={(e) => setApiBase(e.target.value)}
-                placeholder="/api-proxy"
-              />
-              <div className={styles.widgetRow}>
-                <button className={styles.btnCompact} onClick={() => setApiBase("/api-proxy")} style={{ fontSize: 10 }}>proxy</button>
-                <button className={styles.btnCompact} onClick={() => window.open(`${apiBase}/docs`, "_blank")} style={{ fontSize: 10 }}>/docs</button>
-                <button
-                  className={[styles.btnCompact, apiStatus === "down" ? styles.btnCompactPrimary : ""].join(" ")}
-                  onClick={() => { setApiStatus("unknown"); checkApiStatus(); }}
-                  style={{ fontSize: 10 }}
-                >
-                  ↺
-                </button>
-              </div>
-            </div>
-            {lastJob && (
-              <div style={{ marginTop: 4 }}>
-                <JobStatus jobId={lastJob} apiBase={apiBase} />
-              </div>
+          <button
+            className={[styles.navBtn, activeTab === "labeling" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => setActiveTab("labeling")}
+          >
+            <span className={styles.navIcon}><IconTag /></span>
+            <span className={styles.navLabel}>Разметка</span>
+            {labelProgress && labelProgress.total > 0 ? (
+              <span className={styles.navCount}>{labelProgress.total - labelProgress.labeled}</span>
+            ) : (
+              <span className={styles.navHint}>L</span>
             )}
+          </button>
+
+          <button
+            className={[styles.navBtn, activeTab === "search" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => setActiveTab("search")}
+          >
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Векторный поиск</span>
+            <span className={styles.navHint}>S</span>
+          </button>
+
+          <button
+            className={[styles.navBtn, activeTab === "dashboard" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => { setActiveTab("dashboard"); loadDashboard(); }}
+          >
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Обзор / Метрики</span>
+            <span className={styles.navHint}>D</span>
+          </button>
+
+          <button
+            className={[styles.navBtn, activeTab === "canvas" ? styles.navBtnActive : ""].join(" ")}
+            onClick={() => { setActiveTab("canvas"); if (!canvasCourses.length) loadCanvasCourses(); }}
+          >
+            <span className={styles.navIcon}><IconCanvas /></span>
+            <span className={styles.navLabel}>Canvas LMS</span>
+            <span className={styles.navHint}>C</span>
+          </button>
+
+          <div className={styles.navSectionTitle}>ДАННЫЕ</div>
+
+          <button className={styles.navBtn} onClick={() => setActiveTab("dashboard")} type="button">
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Датасеты</span>
+            <span className={styles.navHint} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>4</span>
+          </button>
+
+          <button className={styles.navBtn} type="button">
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Документы</span>
+            <span className={styles.navHint} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>{nodes.length > 0 ? "✓" : "—"}</span>
+          </button>
+
+          <button className={styles.navBtn} type="button">
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2L3 14h7l-1 8 11-14h-7z"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Очередь задач</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", padding: "1px 6px", border: "1px solid var(--border)", borderRadius: 4 }}>2/4</span>
+          </button>
+
+          <button className={styles.navBtn} onClick={() => setShowSettings(true)} type="button">
+            <span className={styles.navIcon}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3h.1a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8v.1a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/>
+              </svg>
+            </span>
+            <span className={styles.navLabel}>Настройки</span>
+          </button>
+
+          {/* Providers panel */}
+          <div className={styles.navProviders}>
+            <div className={styles.navProviderHeader}>ПРОВАЙДЕРЫ</div>
+            <div className={styles.navProviderRow}>
+              <span className={styles.navProviderDot} style={{ color: "var(--success)" }} />
+              <span className={styles.navProviderLabel}>Эмбеддинги</span>
+              <span className={styles.navProviderVal}>e5-large</span>
+            </div>
+            <div className={styles.navProviderRow}>
+              <span className={styles.navProviderDot} style={{ color: apiStatus === "ok" ? "var(--success)" : "var(--error)" }} />
+              <span className={styles.navProviderLabel}>LLM</span>
+              <span className={styles.navProviderVal}>qwen3:14b</span>
+            </div>
+            <div className={styles.navProviderRow}>
+              <span className={styles.navProviderDot} style={{ color: "var(--success)" }} />
+              <span className={styles.navProviderLabel}>База данных</span>
+              <span className={styles.navProviderVal}>pgvector</span>
+            </div>
           </div>
         </nav>
 
         {/* ── Main area ────────────────────────────────── */}
-        <main className={styles.appMain}>
+        <main className={styles.main}>
 
           {/* Error banner */}
           {error && (
@@ -1654,57 +1705,22 @@ const analysisFlowSteps = [
 
           {/* ── Analysis Tab ─────────────────────────── */}
           {activeTab === "analysis" && (
-            <div className={styles.tabPane}>
+            <div className={styles.tabHost}>
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1.35fr 1fr" }}>
 
-<SectionHero
-  eyebrow="Главный сценарий"
-  title="От текста к карте знаний"
-  description="Загрузи материал и запусти анализ, чтобы получить узлы знаний с уровнями Блума. Когда основа готова, переходи к графу, поиску и ручной проверке."
-  stats={[
-    { label: "API", value: apiStatus === "ok" ? "online" : "offline", tone: apiStatus === "ok" ? "success" : "warning" },
-    { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
-    { label: "Узлы", value: nodes.length, tone: hasNodes ? "info" : "neutral" },
-    { label: "Нужна проверка", value: lowConfidenceCount, tone: lowConfidenceCount ? "warning" : "success" },
-  ]}
-  actions={nodes.length > 0 ? (
-    <div className={styles.exportMenuWrap}>
-      <button
-        className={[styles.btn, styles.btnGhost].join(" ")}
-        onClick={() => setShowExportMenu(v => !v)}
-        type="button"
-      >
-        <IconDownload /> Экспорт ▾
-      </button>
-      {showExportMenu && (
-        <div className={styles.exportDropdown}>
-          <div className={styles.exportItem} onClick={() => { exportNodesJson(); setShowExportMenu(false); }}>
-            <IconDownload /> JSON
-          </div>
-          <div className={styles.exportItem} onClick={() => { exportNodesCsv(); setShowExportMenu(false); }}>
-            <IconDownload /> CSV
-          </div>
-          {ds && (
-            <div className={styles.exportItem} onClick={() => { exportJsonl(); setShowExportMenu(false); }}>
-              <IconDownload /> JSONL (датасет)
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  ) : (
-    <button className={[styles.btn, styles.btnGhost].join(" ")} onClick={() => setShowGuide(true)} type="button">
-      Показать подсказки
-    </button>
-  )}
->
-  <div className={styles.flowSteps}>
-    {analysisFlowSteps.map((item) => (
-      <FlowStep key={item.step} step={item.step} title={item.title} text={item.text} state={item.state as "pending" | "current" | "done"} />
-    ))}
-  </div>
-</SectionHero>
-
-              <div className={styles.grid}>
+              {/* ── LEFT: Input ─── */}
+              <div className={styles.tabPaneLeft}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Ввод текста</span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: apiStatus === "ok" ? "var(--success)" : "var(--warning)", display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: apiStatus === "ok" ? "var(--success)" : "var(--warning)" }} />
+                      {apiStatus === "ok" ? "API online" : "API offline"}
+                    </span>
+                    {hasDataset && <span style={{ fontSize: 11, color: "var(--text-accent)" }}>DS #{ds}</span>}
+                  </span>
+                </div>
+                <div className={styles.grid}>
                 {/* File drop zone */}
                 <div
                   style={{
@@ -1909,6 +1925,46 @@ const analysisFlowSteps = [
                     {nodesStatus}
                   </div>
                 )}
+                </div>
+              </div>
+
+              {/* ── RIGHT: Results ─── */}
+              <div className={styles.tabPaneRight}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Результаты</span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                    {nodes.length > 0 && (
+                      <div className={styles.exportMenuWrap}>
+                        <button
+                          className={[styles.btn, styles.btnGhost].join(" ")}
+                          onClick={() => setShowExportMenu(v => !v)}
+                          type="button"
+                          style={{ fontSize: 11, padding: "4px 10px" }}
+                        >
+                          <IconDownload /> Экспорт ▾
+                        </button>
+                        {showExportMenu && (
+                          <div className={styles.exportDropdown}>
+                            <div className={styles.exportItem} onClick={() => { exportNodesJson(); setShowExportMenu(false); }}>
+                              <IconDownload /> JSON
+                            </div>
+                            <div className={styles.exportItem} onClick={() => { exportNodesCsv(); setShowExportMenu(false); }}>
+                              <IconDownload /> CSV
+                            </div>
+                            {ds && (
+                              <div className={styles.exportItem} onClick={() => { exportJsonl(); setShowExportMenu(false); }}>
+                                <IconDownload /> JSONL (датасет)
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {lowConfidenceCount > 0 && (
+                      <span style={{ fontSize: 11, color: "var(--warning)" }}>⚠ {lowConfidenceCount} неуверенных</span>
+                    )}
+                  </span>
+                </div>
 
                 {/* Stats chips */}
                 {nodes.length > 0 && !isAnalyzing && (() => {
@@ -2167,36 +2223,34 @@ const analysisFlowSteps = [
                     <span className={styles.emptyIcon}><IconBrain /></span>
                     <div className={styles.emptyTitle}>Нет результатов</div>
                     <div className={styles.emptyText}>
-                      Вставь текст выше и нажми &quot;Анализировать&quot; (нужен активный dataset).
+                      Вставь текст слева и нажми &quot;Анализировать&quot; (нужен активный dataset).
                     </div>
                   </div>
                 )}
+              </div>
               </div>
             </div>
           )}
 
           {/* ── Search Tab ───────────────────────────── */}
           {activeTab === "search" && (
-            <div className={styles.tabPane}>
+            <div className={styles.tabHost}>
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "260px 1fr" }}>
 
-<SectionHero
-  eyebrow="Навигация по материалам"
-  title="Семантический поиск"
-  description="Ищи фрагменты по содержанию или находи конкретные узлы знаний, чтобы быстро возвращаться к нужному контексту."
-  stats={[
-    { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
-    { label: "Режим", value: searchMode === "chunks" ? "чанки" : "узлы", tone: "info" },
-    { label: "Результаты", value: searchMode === "chunks" ? searchResults.length : nodeSearchResults.length, tone: "neutral" },
-  ]}
-/>
-<div className={styles.grid}>
+              {/* ── LEFT: Filters / controls ─── */}
+              <div className={styles.tabPaneLeft}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Параметры</span>
+                  {hasDataset && <span style={{ fontSize: 11, color: "var(--text-accent)", marginLeft: "auto" }}>DS #{ds}</span>}
+                </div>
+                <div className={styles.grid}>
                 {/* Search mode toggle */}
                 <div className={[styles.searchModeToggle, styles.sectionBlock].join(" ")}>
                   <button
                     className={[styles.searchModeBtn, searchMode === "chunks" ? styles.searchModeBtnActive : ""].join(" ")}
                     onClick={() => setSearchMode("chunks")}
                   >
-                    Чанки документов
+                    Чанки
                   </button>
                   <button
                     className={[styles.searchModeBtn, searchMode === "nodes" ? styles.searchModeBtnActive : ""].join(" ")}
@@ -2206,10 +2260,9 @@ const analysisFlowSteps = [
                   </button>
                 </div>
 
-                {/* Chunk search mode */}
-                {searchMode === "chunks" && (
-                <div style={{ display: "contents" }}>
-                  <div className={styles.searchBox}>
+                {/* Search input */}
+                {searchMode === "chunks" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <input
                       className={styles.searchInput}
                       placeholder="Введи поисковый запрос…"
@@ -2217,8 +2270,8 @@ const analysisFlowSteps = [
                       onChange={e => setSearchQuery(e.target.value)}
                       onKeyDown={e => { if (e.key === "Enter") searchNodes(); }}
                     />
-                    <div className={styles.paramField} style={{ margin: 0, flexShrink: 0 }}>
-                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Top-K</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)", flexShrink: 0 }}>Top-K</span>
                       <input
                         className={styles.paramInput}
                         type="number"
@@ -2228,12 +2281,34 @@ const analysisFlowSteps = [
                         onChange={e => setSearchTopK(Number(e.target.value))}
                         style={{ width: 52 }}
                       />
+                      <button
+                        className={[styles.btn, styles.btnPrimary].join(" ")}
+                        onClick={searchNodes}
+                        disabled={!searchQuery.trim() || isSearching}
+                        style={{ flex: 1 }}
+                      >
+                        {isSearching ? <span className={styles.spinner} /> : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                          </svg>
+                        )}
+                        {isSearching ? "Ищем…" : "Найти"}
+                      </button>
                     </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <input
+                      className={styles.searchInput}
+                      placeholder="Поиск по узлам знаний…"
+                      value={nodeSearchQuery}
+                      onChange={e => setNodeSearchQuery(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") searchByNodes(); }}
+                    />
                     <button
                       className={[styles.btn, styles.btnPrimary].join(" ")}
-                      onClick={searchNodes}
-                      disabled={!searchQuery.trim() || isSearching}
-                      style={{ flexShrink: 0 }}
+                      onClick={searchByNodes}
+                      disabled={!nodeSearchQuery.trim() || isSearching}
                     >
                       {isSearching ? <span className={styles.spinner} /> : (
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2243,8 +2318,24 @@ const analysisFlowSteps = [
                       {isSearching ? "Ищем…" : "Найти"}
                     </button>
                   </div>
+                )}
+                </div>
+              </div>
 
-                  {/* Skeleton while searching */}
+              {/* ── RIGHT: Results ─── */}
+              <div className={styles.tabPaneRight}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>
+                    {searchMode === "chunks" ? "Результаты поиска" : "Узлы знаний"}
+                  </span>
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-muted)" }}>
+                    {searchMode === "chunks" ? searchResults.length : nodeSearchResults.length} результатов
+                  </span>
+                </div>
+
+                {/* Chunk results */}
+                {searchMode === "chunks" && (
+                <>
                   {isSearching && (
                     <div className={styles.searchResults}>
                       {Array.from({ length: 3 }).map((_, i) => (
@@ -2256,8 +2347,6 @@ const analysisFlowSteps = [
                       ))}
                     </div>
                   )}
-
-                  {/* Results */}
                   {!isSearching && searchResults.length > 0 && (
                     <div className={styles.searchResults}>
                       {searchResults.map((r, i) => (
@@ -2272,62 +2361,26 @@ const analysisFlowSteps = [
                       ))}
                     </div>
                   )}
-
-                  {/* Empty state */}
                   {!isSearching && searchDone && searchResults.length === 0 && (
                     <div className={styles.emptyState}>
-                      <span className={styles.emptyIcon}>
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                        </svg>
-                      </span>
                       <div className={styles.emptyTitle}>Ничего не найдено</div>
                       <div className={styles.emptyText}>Попробуй другой запрос или проверь, что документы проиндексированы.</div>
                     </div>
                   )}
-
-                  {/* Hint when empty */}
                   {!isSearching && !searchDone && (
                     <div className={styles.emptyState}>
-                      <span className={styles.emptyIcon}>
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                        </svg>
-                      </span>
                       <div className={styles.emptyTitle}>Семантический RAG-поиск</div>
-                      <div className={styles.emptyText}>Введи запрос на естественном языке — система найдёт смыслово похожие фрагменты документов. Не забудь сначала загрузить и проиндексировать документ.</div>
+                      <div className={styles.emptyText}>Введи запрос слева — система найдёт смысловo похожие фрагменты.</div>
                     </div>
                   )}
-                </div>
+                </>
                 )}
 
-                {/* Nodes search mode */}
+                {/* Node results */}
                 {searchMode === "nodes" && (
-                <div>
-                  <div className={styles.searchBox}>
-                    <input
-                      className={styles.searchInput}
-                      placeholder="Поиск по узлам знаний…"
-                      value={nodeSearchQuery}
-                      onChange={e => setNodeSearchQuery(e.target.value)}
-                      onKeyDown={e => { if (e.key === "Enter") searchByNodes(); }}
-                    />
-                    <button
-                      className={[styles.btn, styles.btnPrimary].join(" ")}
-                      onClick={searchByNodes}
-                      disabled={!nodeSearchQuery.trim() || isSearching}
-                      style={{ flexShrink: 0 }}
-                    >
-                      {isSearching ? <span className={styles.spinner} /> : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                        </svg>
-                      )}
-                      {isSearching ? "Ищем…" : "Найти"}
-                    </button>
-                  </div>
+                <>
                   {nodeSearchResults.length > 0 && (
-                    <div className={styles.searchResults} style={{ marginTop: 12 }}>
+                    <div className={styles.searchResults}>
                       {nodeSearchResults.map(n => (
                         <div key={n.id} className={styles.searchResultCard} style={{ cursor: "pointer" }} onClick={() => setDetailNode(n)}>
                           <div className={styles.searchResultHead}>
@@ -2349,31 +2402,21 @@ const analysisFlowSteps = [
                   {!searchDone && !isSearching && (
                     <div className={styles.emptyState}>
                       <div className={styles.emptyTitle}>Поиск по узлам знаний</div>
-                      <div className={styles.emptyText}>Ищет по названию и контексту узлов в текущем датасете. Узлы должны быть загружены в БД.</div>
+                      <div className={styles.emptyText}>Ищет по названию и контексту узлов в текущем датасете.</div>
                     </div>
                   )}
-                </div>
+                </>
                 )}
+              </div>
               </div>
             </div>
           )}
 
           {/* ── Graph Tab ────────────────────────────── */}
           {activeTab === "graph" && (
-            <div className={styles.tabPane}>
+            <div className={styles.tabHost}>
 
-<SectionHero
-  eyebrow="Связи и структура"
-  title="Граф знаний"
-  description="Смотри, как понятия связаны между собой. Здесь удобно проверять структуру материала, переходить между уровнями и замечать пробелы."
-  stats={[
-    { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
-    { label: "Узлы", value: graphNodesData.length, tone: hasGraph ? "info" : "neutral" },
-    { label: "Связи", value: graphEdgesData.length, tone: hasGraph ? "success" : "neutral" },
-  ]}
-/>
-
-<div className={[styles.sectionBlock, styles.graphControls].join(" ")}>
+<div className={[styles.sectionBlock, styles.graphControls].join(" ")} style={{ flexShrink: 0, borderBottom: "1px solid var(--border)", padding: "10px 16px", background: "var(--bg-surface)" }}>
                 {/* Level filters */}
                 <div className={styles.graphFilters}>
                   {BLOOM_LEVELS.map((lvl) => (
@@ -2495,8 +2538,9 @@ const analysisFlowSteps = [
               {embeddingSemantic === false && (
                 <div style={{
                   display: "flex", alignItems: "flex-start", gap: 10,
-                  padding: "10px 14px", borderRadius: 8, marginBottom: 10,
+                  padding: "10px 14px", borderRadius: 8, margin: "0 16px 10px",
                   background: "rgba(251,146,60,0.1)", border: "1px solid rgba(251,146,60,0.3)",
+                  flexShrink: 0,
                 }}>
                   <IconAlert />
                   <span style={{ fontSize: 12.5, color: "#fb923c", lineHeight: 1.5 }}>
@@ -2506,18 +2550,20 @@ const analysisFlowSteps = [
                 </div>
               )}
 
-              {/* Graph canvas */}
-              <ErrorBoundary>
-                <GraphView
-                  nodes={graphNodesData}
-                  edges={graphEdgesData}
-                  filters={filters}
-                  threshold={threshold}
-                  searchQuery={graphSearch}
-                  onHover={(n: AnalyzeNode | null) => setHoveredNode(n)}
-                  onSelect={(n: AnalyzeNode | null) => setSelectedNode(n)}
-                />
-              </ErrorBoundary>
+              {/* Graph canvas — flex:1 so it fills whatever height remains after controls */}
+              <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <ErrorBoundary>
+                  <GraphView
+                    nodes={graphNodesData}
+                    edges={graphEdgesData}
+                    filters={filters}
+                    threshold={threshold}
+                    searchQuery={graphSearch}
+                    onHover={(n: AnalyzeNode | null) => setHoveredNode(n)}
+                    onSelect={(n: AnalyzeNode | null) => setSelectedNode(n)}
+                  />
+                </ErrorBoundary>
+              </div>
 
               {/* Node detail card — fixed overlay, sticky on click */}
               {(selectedNode || hoveredNode) && (() => {
@@ -2530,9 +2576,9 @@ const analysisFlowSteps = [
                     style={{
                       position: "fixed",
                       bottom: 24,
-                      right: 24,
+                      right: 284,          /* 260px aside + 24px gap */
                       width: 340,
-                      maxWidth: "calc(100vw - 48px)",
+                      maxWidth: "calc(100vw - 308px)",
                       zIndex: 200,
                       boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
                     }}
@@ -2604,18 +2650,19 @@ const analysisFlowSteps = [
 
           {/* ── Labeling Tab ─────────────────────────── */}
           {activeTab === "labeling" && (
-            <div className={styles.tabPane}>
+            <div className={styles.tabHost}>
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1fr 320px" }}>
 
-<SectionHero
-  eyebrow="Подтверждение качества"
-  title="Ручная разметка"
-  description="Проверяй автоматические уровни, подтверждай выводы модели и улучшай качество данных. Быстрые клавиши 1–6 тоже работают."
-  stats={[
-    { label: "В очереди", value: labelQueue.length, tone: labelQueue.length ? "info" : "neutral" },
-    { label: "Прогресс", value: labelProgress ? `${progressPct}%` : "Не начат", tone: labelProgress ? "success" : "neutral" },
-    { label: "Аннотатор", value: annotator || "default", tone: "accent" },
-  ]}
-/>
+              {/* ── LEFT: Annotation flow ─── */}
+              <div className={styles.tabPaneLeft}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Разметка</span>
+                  {labelProgress && (
+                    <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--success)" }}>
+                      {labelProgress.labeled} / {labelProgress.total} ({progressPct}%)
+                    </span>
+                  )}
+                </div>
 
 {/* Labeling controls */}
 <div className={[styles.sectionBlock, styles.labelingHeader].join(" ")}>
@@ -2648,6 +2695,42 @@ const analysisFlowSteps = [
                   <IconDownload />
                   Export JSONL
                 </button>
+                {/* Expert mode toggle */}
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    padding: "6px 14px",
+                    borderRadius: 8,
+                    border: expertMode ? "1px solid var(--warning)" : "1px solid var(--border)",
+                    background: expertMode ? "rgba(251,191,36,0.08)" : "transparent",
+                    color: expertMode ? "var(--warning)" : "var(--text-muted)",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    transition: "all 0.15s",
+                  }}
+                  title="Режим эксперта: предсказания модели скрыты. Аннотация будет помечена как независимая экспертная оценка (is_expert=true)."
+                >
+                  <input
+                    type="checkbox"
+                    checked={expertMode}
+                    onChange={(e) => setExpertMode(e.target.checked)}
+                    style={{ display: "none" }}
+                  />
+                  <span style={{
+                    width: 14, height: 14, borderRadius: 3,
+                    border: expertMode ? "2px solid var(--warning)" : "2px solid var(--border)",
+                    background: expertMode ? "var(--warning)" : "transparent",
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 10, color: "#000", transition: "all 0.15s",
+                  }}>
+                    {expertMode ? "✓" : ""}
+                  </span>
+                  Режим эксперта
+                </label>
               </div>
 
               {/* Progress */}
@@ -2686,18 +2769,24 @@ const analysisFlowSteps = [
                   <div className={styles.labelNodeTitle}>{labelQueue[0].title}</div>
                   <div className={styles.labelNodeContext}>{labelQueue[0].context_text}</div>
 
-                  {/* Model prediction meta */}
-                  <div className={styles.labelNodeMeta}>
-                    <span className={styles.mutedSm}>Предсказание модели:</span>
-                    {labelQueue[0].top_levels.map((lvl) => (
-                      <BloomBadge key={lvl} level={lvl} />
-                    ))}
-                    {labelQueue[0].rationale && (
-                      <span className={styles.mutedSm} style={{ marginLeft: 4 }}>
-                        — {labelQueue[0].rationale}
-                      </span>
-                    )}
-                  </div>
+                  {/* Model prediction meta — hidden in expert mode */}
+                  {!expertMode ? (
+                    <div className={styles.labelNodeMeta}>
+                      <span className={styles.mutedSm}>Предсказание модели:</span>
+                      {labelQueue[0].top_levels.map((lvl) => (
+                        <BloomBadge key={lvl} level={lvl} />
+                      ))}
+                      {labelQueue[0].rationale && (
+                        <span className={styles.mutedSm} style={{ marginLeft: 4 }}>
+                          — {labelQueue[0].rationale}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className={styles.labelNodeMeta} style={{ color: "var(--warning)", fontStyle: "italic", fontSize: 12 }}>
+                      🔬 Режим эксперта: предсказание модели скрыто для независимой оценки
+                    </div>
+                  )}
 
                   {/* Level toggles */}
                   <div className={styles.labelLevelToggles}>
@@ -2780,13 +2869,35 @@ const analysisFlowSteps = [
                 )
               )}
 
+              </div>
+
+              {/* ── RIGHT: Metrics ─── */}
+              <div className={styles.tabPaneRight}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Метрики качества</span>
+                </div>
+
               {/* ── Metrics card ──────────────────────────── */}
-              <div className={styles.sectionBlock} style={{ marginTop: 24 }}>
+              <div className={styles.sectionBlock}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                   <span className={styles.cardTitle} style={{ margin: 0 }}>Метрики качества</span>
+                  <label
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                      fontSize: 12, color: metricsExpertOnly ? "var(--warning)" : "var(--text-muted)",
+                      marginLeft: "auto",
+                    }}
+                    title="Учитывать только аннотации в режиме эксперта (is_expert=true)"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={metricsExpertOnly}
+                      onChange={(e) => setMetricsExpertOnly(e.target.checked)}
+                    />
+                    Только эксперт
+                  </label>
                   <button
                     className={[styles.btn, styles.btnGhost].join(" ")}
-                    style={{ marginLeft: "auto" }}
                     onClick={loadMetrics}
                     disabled={!ds || isMetricsLoading}
                     type="button"
@@ -2817,6 +2928,7 @@ const analysisFlowSteps = [
                         { label: "Hamming Loss", value: metricsData.hamming_loss?.toFixed(3), color: metricsData.hamming_loss < 0.2 ? "var(--success)" : metricsData.hamming_loss < 0.4 ? "#fb923c" : "var(--error)" },
                         { label: "F1 micro", value: metricsData.f1_micro?.toFixed(3), color: metricsData.f1_micro > 0.7 ? "var(--success)" : metricsData.f1_micro > 0.4 ? "#fb923c" : "var(--error)" },
                         { label: "F1 macro", value: metricsData.f1_macro?.toFixed(3), color: metricsData.f1_macro > 0.7 ? "var(--success)" : metricsData.f1_macro > 0.4 ? "#fb923c" : "var(--error)" },
+                        ...(metricsData.cohen_kappa != null ? [{ label: "Cohen κ", value: metricsData.cohen_kappa?.toFixed(3), color: metricsData.cohen_kappa > 0.6 ? "var(--success)" : metricsData.cohen_kappa > 0.4 ? "#fb923c" : "var(--error)" }] : []),
                       ].map(({ label, value, color }) => (
                         <div key={label} style={{
                           padding: "8px 14px",
@@ -2883,159 +2995,418 @@ const analysisFlowSteps = [
                   </>
                 )}
               </div>
+              </div>
+              </div>
             </div>
           )}
           {/* ── Dashboard Tab ──────────────────────────── */}
           {activeTab === "dashboard" && (
-            <div className={styles.tabPane}>
+            <div className={styles.tabHost}>
 
-<SectionHero
-  eyebrow="Статус по платформе"
-  title="Дашборд"
-  description="Краткая сводка по датасетам, текущему объёму знаний и операционному состоянию платформы."
-  stats={[
-    { label: "Датасеты", value: dashDatasets.length, tone: "accent" },
-    { label: "Узлы в DS", value: dashNodeCount ?? "?", tone: dashNodeCount ? "info" : "neutral" },
-    { label: "API", value: apiStatus === "ok" ? "online" : "offline", tone: apiStatus === "ok" ? "success" : "warning" },
-  ]}
-  actions={
-    <button
-      className={[styles.btn, styles.btnPrimary].join(" ")}
-      onClick={loadDashboard}
-      disabled={isDashLoading}
-      type="button"
-    >
-      {isDashLoading ? <span className={styles.spinner} /> : <IconRefresh />}
-      Обновить
-    </button>
-  }
-/>
-
-{isDashLoading ? (
-                <div className={styles.dashGrid}>
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className={styles.skeletonCard} style={{ height: 80 }} />
-                  ))}
+              {/* ── KPI strip ── */}
+              <div className={styles.dashKpiStrip}>
+                {/* Live indicator + title */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
+                  <span
+                    className={[styles.liveDot, (dashStats?.active_jobs ?? 0) > 0 ? styles.liveDotPulse : ""].join(" ")}
+                    style={{ background: apiStatus === "ok" ? "var(--success)" : "var(--error)" }}
+                  />
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                    {dashLastUpdated ? fmtRelTime(dashLastUpdated.toISOString()) : "не загружено"}
+                  </span>
                 </div>
-              ) : (
-                <>
-                  {/* KPI chips */}
-                  <div className={styles.dashGrid}>
-                    <div className={styles.dashCard}>
-                      <div className={styles.dashCardVal}>{dashDatasets.length}</div>
-                      <div className={styles.dashCardLabel}>Датасетов</div>
-                    </div>
-                    <div className={styles.dashCard}>
-                      <div className={styles.dashCardVal}>{dashNodeCount ?? "—"}</div>
-                      <div className={styles.dashCardLabel}>Узлов (текущий DS)</div>
-                    </div>
-                    <div className={styles.dashCard}>
-                      <div className={styles.dashCardVal}>{labelProgress?.labeled ?? 0}</div>
-                      <div className={styles.dashCardLabel}>Размечено</div>
-                    </div>
-                    <div className={styles.dashCard}>
-                      <div className={styles.dashCardVal} style={{ color: "var(--success)" }}>
-                        {apiStatus === "ok" ? "Online" : "Offline"}
-                      </div>
-                      <div className={styles.dashCardLabel}>API статус</div>
-                    </div>
-                  </div>
 
-                  {/* Datasets table */}
-                  {dashDatasets.length > 0 && (
-                    <div className={styles.dashSection}>
-                      <div className={styles.cardTitle} style={{ fontSize: 13, marginBottom: 10 }}>
-                        Все датасеты
-                      </div>
-                      {dashDatasets.map((d: any) => (
-                        <div key={d.id} className={styles.dashDatasetRow}>
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)" }}>
-                            #{d.id}
-                          </span>
-                          <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
-                            {d.name}
-                          </span>
-                          <button
-                            className={[styles.btnCompact].join(" ")}
-                            onClick={() => { setDs(d.id); setActiveTab("analysis"); addToast(`Переключён на dataset #${d.id}`, "info"); }}
-                          >
-                            Выбрать
-                          </button>
-                        </div>
-                      ))}
+                {/* Dataset selector */}
+                {dashDatasets.length > 1 && (
+                  <select
+                    className={styles.select}
+                    value={ds ?? ""}
+                    onChange={e => { const v = Number(e.target.value); if (v) setDs(v); }}
+                    style={{ fontSize: 12, padding: "4px 8px", height: 30, marginRight: 4 }}
+                  >
+                    {dashDatasets.map((d: any) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                )}
+
+                {/* KPI cards */}
+                <div className={[styles.kpiCard, styles.kpiCardAccent].join(" ")}>
+                  <div className={styles.kpiVal}>{dashStats?.node_count ?? (isDashLoading ? "…" : "—")}</div>
+                  <div className={styles.kpiLabel}>Узлов знаний</div>
+                </div>
+                <div className={styles.kpiCard}>
+                  <div className={styles.kpiVal}>{dashStats?.document_count ?? (isDashLoading ? "…" : "—")}</div>
+                  <div className={styles.kpiLabel}>Документов</div>
+                </div>
+                <div className={styles.kpiCard}>
+                  <div className={styles.kpiVal}>{dashStats?.labeled_count ?? (isDashLoading ? "…" : "—")}</div>
+                  <div className={styles.kpiLabel}>Размечено</div>
+                  {dashStats && dashStats.node_count > 0 && (
+                    <div className={styles.kpiSub}>
+                      {Math.round((dashStats.labeled_count / dashStats.node_count) * 100)}%
                     </div>
                   )}
+                </div>
+                <div className={styles.kpiCard}>
+                  <div className={styles.kpiVal} style={{
+                    color: dashStats?.confidence_distribution
+                      ? `hsl(${Math.round(((dashStats.confidence_distribution.high ?? 0) / Math.max(dashStats.node_count, 1)) * 120)}, 60%, 55%)`
+                      : "var(--text-primary)"
+                  }}>
+                    {dashStats?.confidence_distribution && dashStats.node_count > 0
+                      ? `${Math.round((dashStats.confidence_distribution.high / dashStats.node_count) * 100)}%`
+                      : (isDashLoading ? "…" : "—")}
+                  </div>
+                  <div className={styles.kpiLabel}>Высокая уверенность</div>
+                </div>
+                {dashMetrics && (
+                  <div className={styles.kpiCard}>
+                    <div className={styles.kpiVal} style={{ fontSize: 18, color: "var(--accent)" }}>
+                      {dashMetrics.f1_micro.toFixed(2)}
+                    </div>
+                    <div className={styles.kpiLabel}>F1 micro</div>
+                    <div className={styles.kpiSub}>κ = {dashMetrics.cohen_kappa?.toFixed(2) ?? "—"}</div>
+                  </div>
+                )}
+                {(dashStats?.active_jobs ?? 0) > 0 && (
+                  <div className={[styles.kpiCard, styles.kpiCardWarn].join(" ")}>
+                    <div className={styles.kpiVal} style={{ color: "var(--warning)" }}>{dashStats.active_jobs}</div>
+                    <div className={styles.kpiLabel}>Активных задач</div>
+                  </div>
+                )}
 
-                  {/* Bloom distribution (from current nodes) */}
-                  {nodes.length > 0 && (
+                {/* Refresh */}
+                <button
+                  className={[styles.btn, styles.btnGhost].join(" ")}
+                  onClick={loadDashboard}
+                  disabled={isDashLoading}
+                  type="button"
+                  style={{ marginLeft: "auto", fontSize: 11, padding: "4px 10px", alignSelf: "center", height: 30 }}
+                >
+                  {isDashLoading ? <span className={styles.spinner} /> : <IconRefresh />}
+                </button>
+              </div>
+
+              {/* ── Main grid ── */}
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1fr 1.25fr" }}>
+
+              {/* ── LEFT: Bloom + Confidence + Models + Datasets ── */}
+              <div className={styles.tabPaneLeft}>
+
+                {/* No dataset selected */}
+                {!ds && !isDashLoading && (
+                  <div className={styles.emptyState} style={{ marginTop: 40 }}>
+                    <div className={styles.emptyTitle}>Выбери датасет</div>
+                    <div className={styles.emptyText}>Создай или выбери датасет в панели слева, затем открой дашборд.</div>
+                  </div>
+                )}
+
+                {/* Loading skeletons */}
+                {isDashLoading && !dashStats && (
+                  <div style={{ padding: "6px 0" }}>
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <div key={i} className={styles.skeletonRow} style={{ width: `${70 + (i % 3) * 10}%` }} />
+                    ))}
+                  </div>
+                )}
+
+                {dashStats && (
+                  <>
+                    {/* Bloom distribution */}
                     <div className={styles.dashSection}>
-                      <div className={styles.cardTitle} style={{ fontSize: 13, marginBottom: 10 }}>
-                        Bloom-распределение (текущий анализ)
-                      </div>
+                      <div className={styles.dashSectionTitle}>Таксономия Блума</div>
                       {BLOOM_LEVELS.map(lvl => {
-                        const count = nodes.filter(n => n.top_levels.includes(lvl)).length;
+                        const count: number = dashStats.bloom_distribution?.[lvl] ?? 0;
                         if (!count) return null;
-                        const pct = (count / nodes.length) * 100;
+                        const total = dashStats.node_count || 1;
+                        const pct = (count / total) * 100;
                         return (
-                          <div key={lvl} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                            <span style={{ width: 90, fontSize: 12, color: LEVEL_COLORS[lvl] }}>{LEVEL_LABELS[lvl]}</span>
-                            <div style={{ flex: 1, height: 6, background: "var(--bg-hover)", borderRadius: 3, overflow: "hidden" }}>
-                              <div style={{ height: "100%", width: `${pct}%`, background: LEVEL_COLORS[lvl], borderRadius: 3 }} />
+                          <div key={lvl} className={styles.bloomRow}>
+                            <span className={styles.bloomRowLabel} style={{ color: LEVEL_COLORS[lvl] }}>
+                              {LEVEL_LABELS[lvl]}
+                            </span>
+                            <div className={styles.bloomBarTrack}>
+                              <div
+                                className={styles.bloomBarFill}
+                                style={{ width: `${pct}%`, background: LEVEL_COLORS[lvl] }}
+                              />
                             </div>
-                            <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-muted)", width: 28, textAlign: "right" }}>{count}</span>
+                            <span className={styles.bloomCount}>{count}</span>
+                            <span className={styles.bloomPct}>{pct.toFixed(0)}%</span>
+                          </div>
+                        );
+                      })}
+                      {Object.values(dashStats.bloom_distribution ?? {}).every((v: any) => v === 0) && (
+                        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Нет классифицированных узлов</div>
+                      )}
+                    </div>
+
+                    {/* Confidence distribution */}
+                    <div className={styles.dashSection}>
+                      <div className={styles.dashSectionTitle}>Уверенность классификации</div>
+                      {(["high", "medium", "low"] as const).map(band => {
+                        const count: number = dashStats.confidence_distribution?.[band] ?? 0;
+                        const total = dashStats.node_count || 1;
+                        const pct = (count / total) * 100;
+                        return (
+                          <div key={band} className={styles.confBandRow}>
+                            <span className={styles.confBandLabel} style={{ color: CONF_COLORS[band] }}>
+                              {CONF_LABELS[band]}
+                            </span>
+                            <div className={styles.bloomBarTrack}>
+                              <div
+                                className={styles.bloomBarFill}
+                                style={{ width: `${pct}%`, background: CONF_COLORS[band] }}
+                              />
+                            </div>
+                            <span className={styles.bloomCount}>{count}</span>
+                            <span className={styles.bloomPct}>{pct.toFixed(0)}%</span>
                           </div>
                         );
                       })}
                     </div>
-                  )}
 
-                  {!dashDatasets.length && !isDashLoading && (
-                    <div className={styles.emptyState}>
-                      <span className={styles.emptyIcon}>
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-                        </svg>
-                      </span>
-                      <div className={styles.emptyTitle}>Нет данных</div>
-                      <div className={styles.emptyText}>Нажми «Обновить» или создай датасет в боковой панели.</div>
-                    </div>
-                  )}
-                </>
-              )}
+                    {/* Labeling progress */}
+                    {dashStats.node_count > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>Прогресс разметки</div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+                          <span>{dashStats.labeled_count} размечено</span>
+                          <span>{dashStats.node_count - dashStats.labeled_count} осталось</span>
+                        </div>
+                        <div className={styles.labelProgress}>
+                          <div
+                            className={styles.labelProgressFill}
+                            style={{ width: `${Math.min(100, (dashStats.labeled_count / dashStats.node_count) * 100)}%` }}
+                          />
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                          {Math.round((dashStats.labeled_count / dashStats.node_count) * 100)}% завершено
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Embedding model distribution */}
+                    {Object.keys(dashStats.model_distribution ?? {}).length > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>Модель эмбеддингов</div>
+                        <div style={{ display: "flex", flexWrap: "wrap" }}>
+                          {Object.entries(dashStats.model_distribution).map(([model, cnt]: any) => (
+                            <span key={model} className={styles.modelChip}>
+                              {model.split("/").pop()}
+                              <span className={styles.modelChipCount}>{cnt}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Datasets list */}
+                    {dashDatasets.length > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>Все датасеты</div>
+                        {dashDatasets.map((d: any) => (
+                          <div
+                            key={d.id}
+                            className={styles.dashDatasetRow}
+                            style={{ border: d.id === ds ? "1px solid var(--accent-border)" : undefined,
+                              background: d.id === ds ? "var(--accent-light)" : undefined }}
+                            onClick={() => { setDs(d.id); loadDashboard(); }}
+                          >
+                            <span className={styles.dashDatasetId}>#{d.id}</span>
+                            <span className={styles.dashDatasetName}>{d.name}</span>
+                            {d.id !== ds && (
+                              <button
+                                className={styles.btnCompact}
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setDs(d.id); setActiveTab("analysis"); addToast(`Переключён на ${d.name}`, "info"); }}
+                              >
+                                Открыть
+                              </button>
+                            )}
+                            {d.id === ds && (
+                              <span style={{ fontSize: 10, color: "var(--accent)", fontWeight: 600 }}>ACTIVE</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* ── RIGHT: Documents + Jobs + Metrics ── */}
+              <div className={styles.tabPaneRight}>
+
+                {/* Loading skeletons */}
+                {isDashLoading && !dashStats && (
+                  <div style={{ padding: "6px 0" }}>
+                    {Array.from({ length: 10 }).map((_, i) => (
+                      <div key={i} className={styles.skeletonRow} style={{ width: `${60 + (i % 4) * 8}%` }} />
+                    ))}
+                  </div>
+                )}
+
+                {dashStats && (
+                  <>
+                    {/* Documents breakdown */}
+                    {dashStats.documents?.length > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>
+                          Документы / курсы — {dashStats.document_count}
+                        </div>
+                        {(() => {
+                          const maxNodes = Math.max(...dashStats.documents.map((d: any) => d.node_count), 1);
+                          return dashStats.documents.map((doc: any) => {
+                            const srcType = doc.source.startsWith("canvas:") ? "Canvas"
+                              : doc.source.startsWith("upload://") ? "Файл"
+                              : "Текст";
+                            return (
+                              <div key={doc.id} className={styles.docEntry}>
+                                <div className={styles.docName} title={doc.title}>{doc.title}</div>
+                                <span className={styles.docTag}>{srcType}</span>
+                                <div className={styles.docMiniBar}>
+                                  <div
+                                    className={styles.docMiniFill}
+                                    style={{ width: `${(doc.node_count / maxNodes) * 100}%` }}
+                                  />
+                                </div>
+                                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)", width: 28, textAlign: "right", flexShrink: 0 }}>
+                                  {doc.node_count}
+                                </span>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+
+                    {/* Quality metrics */}
+                    {dashMetrics && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle} style={{ display: "flex", alignItems: "center" }}>
+                          Качество классификации
+                          <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 400, color: "var(--text-muted)" }}>
+                            n={dashMetrics.samples}
+                          </span>
+                        </div>
+                        {/* Global metrics */}
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                          {[
+                            { label: "F1 micro", val: dashMetrics.f1_micro?.toFixed(3) },
+                            { label: "F1 macro", val: dashMetrics.f1_macro?.toFixed(3) },
+                            { label: "Cohen κ",  val: dashMetrics.cohen_kappa?.toFixed(3) },
+                            { label: "Hamming ↓", val: dashMetrics.hamming_loss?.toFixed(3) },
+                          ].map(m => (
+                            <div key={m.label} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 12px", minWidth: 72, textAlign: "center" }}>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{m.val}</div>
+                              <div style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{m.label}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Per-level table */}
+                        <div className={styles.metricsTableWrap}>
+                          <table className={styles.metricsTable}>
+                            <thead>
+                              <tr>
+                                <th>Уровень</th>
+                                <th>P</th>
+                                <th>R</th>
+                                <th>F1</th>
+                                <th>TP</th>
+                                <th>FP</th>
+                                <th>FN</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {BLOOM_LEVELS.map(lvl => {
+                                const m = dashMetrics.per_level?.[lvl];
+                                if (!m) return null;
+                                return (
+                                  <tr key={lvl}>
+                                    <td style={{ color: LEVEL_COLORS[lvl] }}>{LEVEL_LABELS[lvl]}</td>
+                                    <td>{m.precision.toFixed(2)}</td>
+                                    <td>{m.recall.toFixed(2)}</td>
+                                    <td style={{ fontWeight: 600, color: m.f1 > 0.7 ? "var(--success)" : m.f1 > 0.4 ? "var(--warning)" : "var(--error)" }}>
+                                      {m.f1.toFixed(2)}
+                                    </td>
+                                    <td>{m.tp}</td>
+                                    <td>{m.fp}</td>
+                                    <td>{m.fn}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Recent jobs */}
+                    {dashStats.recent_jobs?.length > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>Последние задачи</div>
+                        {dashStats.recent_jobs.map((job: any) => (
+                          <div key={job.id} className={styles.jobEntry}>
+                            <span className={[styles.jobBadge, jobBadgeClass(job.status)].join(" ")}>
+                              {job.status}
+                            </span>
+                            <span className={styles.jobType}>
+                              {JOB_TYPE_LABELS[job.type] ?? job.type}
+                              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", marginLeft: 4 }}>
+                                #{job.id}
+                              </span>
+                            </span>
+                            {job.error && (
+                              <span style={{ fontSize: 10, color: "var(--error)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={job.error}>
+                                {job.error}
+                              </span>
+                            )}
+                            <span className={styles.jobTime}>
+                              {job.finished_at ? fmtRelTime(job.finished_at) : fmtRelTime(job.created_at)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Empty right pane */}
+                    {!dashStats.documents?.length && !dashStats.recent_jobs?.length && !dashMetrics && (
+                      <div className={styles.emptyState} style={{ marginTop: 40 }}>
+                        <div className={styles.emptyTitle}>Нет данных анализа</div>
+                        <div className={styles.emptyText}>Запусти анализ текста или импорт курса Canvas.</div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              </div>
             </div>
           )}
 
           {/* ── Canvas LMS tab ──────────────────────── */}
           {activeTab === "canvas" && (
-            <div className={styles.tabPane}>
+            <div className={styles.tabHost}>
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1fr 1.4fr" }}>
 
-              <SectionHero
-                eyebrow="Интеграция"
-                title="Canvas LMS"
-                description="Загрузи содержимое курса Canvas в датасет Bloom RAG Studio. Страницы, задания, тесты и обсуждения будут автоматически размечены по уровням Блума."
-                stats={[
-                  { label: "Курсов", value: canvasCourses.length || "—", tone: canvasCourses.length ? "accent" : "neutral" },
-                  { label: "Датасет", value: ds ? `#${ds}` : "Не выбран", tone: ds ? "success" : "warning" },
-                  { label: "Выбран курс", value: canvasSelectedCourse
-                      ? (canvasCourses.find(c => c.id === canvasSelectedCourse)?.name?.slice(0, 22) ?? `#${canvasSelectedCourse}`)
-                      : "—", tone: canvasSelectedCourse ? "info" : "neutral" },
-                ]}
-                actions={
+              {/* ── LEFT: Course list ─── */}
+              <div className={styles.tabPaneLeft}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Курсы Canvas</span>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
+                    {canvasCourses.length > 0 ? `${canvasCourses.length} курсов` : ""}
+                  </span>
                   <button
                     className={[styles.btn, styles.btnGhost].join(" ")}
                     onClick={loadCanvasCourses}
                     disabled={canvasCoursesLoading}
                     type="button"
+                    style={{ fontSize: 11, padding: "3px 8px" }}
                   >
                     {canvasCoursesLoading ? <span className={styles.spinner} /> : <IconRefresh />}
-                    Обновить список
                   </button>
-                }
-              />
-
-              <div className={styles.grid}>
-                {/* Course search + list */}
+                </div>
                 <div>
                   <label className={styles.fieldLabel}>
                     Поиск курса
@@ -3062,7 +3433,7 @@ const analysisFlowSteps = [
                   )}
 
                   {canvasCourses.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 340, overflowY: "auto", marginTop: 8 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
                       {canvasCourses
                         .filter(c => !canvasCourseSearch || c.name.toLowerCase().includes(canvasCourseSearch.toLowerCase()) || (c.course_code || "").toLowerCase().includes(canvasCourseSearch.toLowerCase()))
                         .map(course => (
@@ -3094,6 +3465,18 @@ const analysisFlowSteps = [
                         ))
                       }
                     </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── RIGHT: Ingest settings + log ─── */}
+              <div className={styles.tabPaneRight}>
+                <div className={styles.tabPaneHeader}>
+                  <span className={styles.tabPaneTitle}>Настройки импорта</span>
+                  {canvasSelectedCourse && (
+                    <span style={{ fontSize: 11, color: "var(--text-accent)", marginLeft: "auto" }}>
+                      {canvasCourses.find(c => c.id === canvasSelectedCourse)?.name?.slice(0, 28) ?? `#${canvasSelectedCourse}`}
+                    </span>
                   )}
                 </div>
 
@@ -3151,11 +3534,74 @@ const analysisFlowSteps = [
                   </div>
 
                   <div className={styles.paramField} style={{ marginBottom: 10 }}>
-                    <span>Макс. узлов на документ</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input className={styles.paramSlider} type="range" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ flex: 1 }} />
-                      <input className={styles.paramInput} type="number" min={5} max={100} step={5} value={canvasMaxNodes} onChange={e => setCanvasMaxNodes(Number(e.target.value))} style={{ width: 56 }} />
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      Узлов на документ
+                      <button
+                        onClick={() => setCanvasMaxNodesAuto(v => !v)}
+                        style={{
+                          fontSize: 10, padding: "2px 8px", borderRadius: 4, cursor: "pointer", border: "none",
+                          background: canvasMaxNodesAuto ? "var(--text-accent)" : "var(--bg-hover)",
+                          color: canvasMaxNodesAuto ? "#fff" : "var(--text-muted)",
+                          fontWeight: 600, letterSpacing: "0.04em",
+                        }}
+                        title="LLM сама решит, сколько узлов извлечь из каждого документа"
+                      >
+                        {canvasMaxNodesAuto ? "⚡ авто (LLM)" : "авто"}
+                      </button>
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: canvasMaxNodesAuto ? 0.35 : 1 }}>
+                      <input className={styles.paramSlider} type="range" min={5} max={100} step={5} value={canvasMaxNodes}
+                        disabled={canvasMaxNodesAuto}
+                        onChange={e => { setCanvasMaxNodes(Number(e.target.value)); setCanvasMaxNodesAuto(false); }}
+                        style={{ flex: 1 }} />
+                      <input className={styles.paramInput} type="number" min={5} max={100} step={5} value={canvasMaxNodesAuto ? "—" : canvasMaxNodes}
+                        disabled={canvasMaxNodesAuto}
+                        onChange={e => { setCanvasMaxNodes(Number(e.target.value)); setCanvasMaxNodesAuto(false); }}
+                        style={{ width: 56 }} />
                     </div>
+                    {canvasMaxNodesAuto && (
+                      <div style={{ fontSize: 11, color: "var(--text-accent)", marginTop: 3 }}>
+                        Qwen3 определит количество узлов по содержанию каждого документа
+                      </div>
+                    )}
+                  </div>
+
+                  <div className={styles.paramField} style={{ marginBottom: 10 }}>
+                    <span style={{ fontWeight: 600 }}>Тематическая разметка</span>
+                    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                      {(["none", "auto", "guided"] as const).map(mode => (
+                        <button key={mode} onClick={() => setCanvasTopicMode(mode)} style={{
+                          padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 12,
+                          background: canvasTopicMode === mode ? "var(--text-accent)" : "var(--bg-hover)",
+                          color: canvasTopicMode === mode ? "#fff" : "var(--text-muted)",
+                          fontWeight: canvasTopicMode === mode ? 600 : 400,
+                        }}>
+                          {mode === "none" ? "Выкл" : mode === "auto" ? "⚡ Авто" : "📋 По дереву"}
+                        </button>
+                      ))}
+                    </div>
+                    {canvasTopicMode === "auto" && (
+                      <div style={{ fontSize: 11, color: "var(--text-accent)", marginTop: 4 }}>
+                        Qwen3 определит предмет, тему и подтему для каждого узла
+                      </div>
+                    )}
+                    {canvasTopicMode === "guided" && (
+                      <div style={{ marginTop: 6 }}>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                          Вставь дерево тем — каждый уровень с новой строки, дочерние темы с отступом:
+                        </div>
+                        <textarea
+                          value={canvasTopicTree}
+                          onChange={e => setCanvasTopicTree(e.target.value)}
+                          placeholder={"Физика\n  Механика\n    Кинематика\n    Динамика\n  Оптика\n    Геометрическая оптика"}
+                          style={{
+                            width: "100%", minHeight: 120, fontFamily: "var(--font-mono)", fontSize: 12,
+                            background: "var(--bg-input)", color: "var(--text-primary)", border: "1px solid var(--border)",
+                            borderRadius: 4, padding: "6px 8px", resize: "vertical", boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {canvasContentTypes.includes("files") && (
@@ -3253,13 +3699,14 @@ const analysisFlowSteps = [
                   )}
                 </div>
               </div>
+              </div>
             </div>
           )}
 
         </main>
 
-        {/* ── Aside removed — content moved to sidebar ── */}
-        <aside style={{ display: "none" }}>
+        {/* ── Aside (right sidebar) ────────────────────── */}
+        <aside className={styles.aside}>
 
           {/* Connection card */}
           <div className={styles.asideCard}>
@@ -3520,7 +3967,7 @@ const analysisFlowSteps = [
           </div>
 
         </aside>
-      </div>{/* end appBody */}
+      </div>
 
       {/* ── Node detail modal ──────────────────────────── */}
       {detailNode && (
@@ -3858,8 +4305,12 @@ const analysisFlowSteps = [
         </div>
       )}
 
-      {/* ── Footer (hidden in AppShell mode) ─────────── */}
-      <footer style={{ display: "none" }}>
+      {/* ── Footer ─────────────────────────────────────── */}
+      <footer style={{
+        position: "relative",
+        padding: "32px 32px 28px",
+        marginTop: 8,
+      }}>
         {/* gradient divider */}
         <div style={{
           position: "absolute",
@@ -3978,6 +4429,138 @@ const analysisFlowSteps = [
           </div>
         </div>
       </footer>
+
+      {/* ── RAG Chat ──────────────────────────────────────────────── */}
+      <button
+        onClick={() => setChatOpen(v => !v)}
+        title="RAG-чат"
+        style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 9999,
+          width: 52, height: 52, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.15)", cursor: "pointer",
+          background: chatOpen ? "#6366f1" : "#6366f1",
+          boxShadow: "0 4px 20px rgba(99,102,241,0.5)",
+          fontSize: 22, display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#fff",
+          transition: "transform 0.15s",
+        }}
+      >
+        {chatOpen ? "✕" : "💬"}
+      </button>
+
+      {chatOpen && (
+        <div style={{
+          position: "fixed", bottom: 88, right: 24, zIndex: 999,
+          width: 380, height: 520, display: "flex", flexDirection: "column",
+          background: "var(--bg-card)", border: "1px solid var(--border)",
+          borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.3)", overflow: "hidden",
+        }}>
+          <div style={{
+            padding: "10px 14px", borderBottom: "1px solid var(--border)",
+            fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 8,
+          }}>
+            💬 RAG-чат
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 400, marginLeft: "auto" }}>
+              {ds ? `dataset #${ds}` : "без датасета"}
+            </span>
+            {chatHistory.length > 0 && (
+              <button onClick={() => setChatHistory([])} style={{
+                fontSize: 10, padding: "2px 6px", borderRadius: 4, border: "none",
+                background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer",
+              }}>очистить</button>
+            )}
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {chatHistory.length === 0 && (
+              <div style={{ color: "var(--text-muted)", fontSize: 12, textAlign: "center", marginTop: 40 }}>
+                Спроси про разметку, курс или инструмент.<br/>
+                Я ищу по базе знаний и отвечаю с контекстом.
+              </div>
+            )}
+            {chatHistory.map((msg, i) => (
+              <div key={i} style={{
+                alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
+                maxWidth: "85%",
+                background: msg.role === "user" ? "var(--text-accent)" : "var(--bg-hover)",
+                color: msg.role === "user" ? "#fff" : "var(--text-primary)",
+                borderRadius: msg.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
+                padding: "8px 12px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap",
+              }}>
+                {msg.content}
+              </div>
+            ))}
+            {chatStreaming && (
+              <div style={{
+                alignSelf: "flex-start", color: "var(--text-muted)", fontSize: 12, fontStyle: "italic",
+              }}>печатает…</div>
+            )}
+          </div>
+
+          <div style={{ padding: "8px 10px", borderTop: "1px solid var(--border)", display: "flex", gap: 6 }}>
+            <textarea
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (chatInput.trim() && !chatStreaming) {
+                    const userMsg = chatInput.trim();
+                    setChatInput("");
+                    const newHistory = [...chatHistory, { role: "user" as const, content: userMsg }];
+                    setChatHistory(newHistory);
+                    setChatStreaming(true);
+                    let assistantText = "";
+                    const uiCtx = {
+                      courses: canvasCourses.map(c => ({ id: c.id, name: c.name })),
+                      active_tab: activeTab,
+                      dataset_id: ds ?? null,
+                    };
+                    fetch(`${apiBase}/chat/stream`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ message: userMsg, dataset_id: ds ?? null, history: chatHistory, ui_context: uiCtx }),
+                    }).then(async resp => {
+                      const reader = resp.body!.getReader();
+                      const decoder = new TextDecoder();
+                      let buf = "";
+                      while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buf += decoder.decode(value, { stream: true });
+                        const lines = buf.split("\n");
+                        buf = lines.pop()!;
+                        for (const line of lines) {
+                          if (!line.startsWith("data: ")) continue;
+                          try {
+                            const ev = JSON.parse(line.slice(6));
+                            if (ev.type === "chunk") {
+                              assistantText += ev.text;
+                              setChatHistory([...newHistory, { role: "assistant", content: assistantText }]);
+                            } else if (ev.type === "action") {
+                              executeUiAction(ev.action);
+                            } else if (ev.type === "done" || ev.type === "error") {
+                              setChatStreaming(false);
+                            }
+                          } catch {}
+                        }
+                      }
+                      setChatStreaming(false);
+                    }).catch(() => setChatStreaming(false));
+                  }
+                }
+              }}
+              placeholder="Спроси что-нибудь… (Enter — отправить)"
+              disabled={chatStreaming}
+              rows={2}
+              style={{
+                flex: 1, resize: "none", fontFamily: "inherit", fontSize: 12,
+                background: "var(--bg-input)", color: "var(--text-primary)",
+                border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px",
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
