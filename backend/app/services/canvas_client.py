@@ -55,7 +55,7 @@ def get_all(path: str, params: dict | None = None) -> list[dict[str, Any]]:
         url += "?" + urlencode(params)
     results: list[dict] = []
     while url:
-        resp = requests.get(url, headers=_headers(), timeout=30)
+        resp = requests.get(url, headers=_headers(), timeout=60)
         if resp.status_code == 429:
             time.sleep(5)
             continue
@@ -83,7 +83,7 @@ def get_all(path: str, params: dict | None = None) -> list[dict[str, Any]]:
 def get_one(path: str, params: dict | None = None) -> dict[str, Any]:
     """Fetch a single Canvas resource."""
     url = f"{_base_url()}/api/v1{path}"
-    resp = requests.get(url, headers=_headers(), params=params, timeout=30)
+    resp = requests.get(url, headers=_headers(), params=params, timeout=60)
     resp.raise_for_status()
     data = resp.json()
     _check_canvas_errors(data, url)
@@ -93,10 +93,13 @@ def get_one(path: str, params: dict | None = None) -> dict[str, Any]:
 # ── Convenience wrappers ────────────────────────────────────────────────────
 
 def list_courses(enrollment_state: str = "active") -> list[dict]:
+    # NOTE: do NOT include syllabus_body here — Canvas fetches the full HTML
+    # for every course, making the list request very slow.
+    # Syllabus is fetched per-course during ingest via get_one("/courses/{id}").
+    # Use per_page=10 to avoid SSL read timeouts on large JSON responses.
     return get_all("/courses", {
         "enrollment_state": enrollment_state,
-        "include[]": "syllabus_body",
-        "per_page": 50,
+        "per_page": 10,
     })
 
 
