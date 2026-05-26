@@ -118,13 +118,13 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, o
               "pie-size": "100%",
               "pie-1-background-color": (ele: cytoscape.NodeSingular) =>
                 LEVEL_COLORS[ele.data("primary") as BloomLevel],
-              "pie-1-background-size": "data(pie1Size)",
+              "pie-1-background-size": "data(pie1Size)" as any,
               "pie-1-background-opacity": 1,
               "pie-2-background-color": (ele: cytoscape.NodeSingular) =>
                 ele.data("secondary")
                   ? LEVEL_COLORS[ele.data("secondary") as BloomLevel]
                   : "#161b27",
-              "pie-2-background-size": "data(pie2Size)",
+              "pie-2-background-size": "data(pie2Size)" as any,
               "pie-2-background-opacity": 0.85,
               shape: (ele: cytoscape.NodeSingular) => LEVEL_SHAPES[ele.data("primary") as BloomLevel],
               width: "data(size)",
