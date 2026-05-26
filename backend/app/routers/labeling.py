@@ -47,7 +47,7 @@ def labeling_queue(
 
     sql = f"""
         SELECT kn.id, kn.title, kn.context_text, kn.prob_vector, kn.top_levels, kn.model_info,
-               nl.labels as labels
+               nl.labels as labels, nl.is_expert as is_expert
         FROM knowledge_nodes kn
         LEFT JOIN node_labels nl
           ON nl.node_id = kn.id AND nl.annotator = :ann
@@ -78,6 +78,7 @@ def labeling_queue(
                 rationale=rationale,
                 labeled=labeled,
                 labels=list(labels) if labels is not None else None,
+                is_expert=bool(r.get("is_expert") or False),
             )
         )
 
@@ -163,8 +164,15 @@ def set_node_labels(
     )
     if nl:
         nl.labels = list(payload.labels)
+        nl.is_expert = payload.expert_mode
     else:
-        nl = NodeLabel(node_id=node_id, labels=list(payload.labels), annotator=payload.annotator, source="human")
+        nl = NodeLabel(
+            node_id=node_id,
+            labels=list(payload.labels),
+            annotator=payload.annotator,
+            source="human",
+            is_expert=payload.expert_mode,
+        )
         db.add(nl)
     db.commit()
     db.refresh(nl)
@@ -172,6 +180,7 @@ def set_node_labels(
         node_id=node_id,
         annotator=nl.annotator,
         labels=nl.labels,
+        is_expert=nl.is_expert,
         created_at=str(nl.created_at),
     )
 
@@ -196,5 +205,6 @@ def get_node_labels(
         node_id=node_id,
         annotator=nl.annotator,
         labels=nl.labels,
+        is_expert=nl.is_expert,
         created_at=str(nl.created_at),
     )

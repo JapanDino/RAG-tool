@@ -18,12 +18,17 @@ services:
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
 
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    dns:
+      - 10.8.51.220
+      - 1.1.1.1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file: [ ./backend/.env ]
     environment:
       DB_HOST: db
@@ -53,6 +58,11 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    dns:
+      - 10.8.51.220
+      - 1.1.1.1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file: [ ./backend/.env ]
     environment:
       DB_HOST: db
