@@ -412,13 +412,16 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   // ── Dashboard ────────────────────────────────────────────────
+  const [dashStats, setDashStats] = useState<any>(null);
+  const [dashMetrics, setDashMetrics] = useState<any>(null);
   const [dashDatasets, setDashDatasets] = useState<any[]>([]);
-  const [dashNodeCount, setDashNodeCount] = useState<number | null>(null);
   const [isDashLoading, setIsDashLoading] = useState(false);
+  const [dashLastUpdated, setDashLastUpdated] = useState<Date | null>(null);
 
   // ── Settings ─────────────────────────────────────────────────
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [lang, setLang] = useState<"ru" | "en">("ru");
   const [minProb, setMinProb] = useState(0.2);
   const [maxLevels, setMaxLevels] = useState(6);
   const [embeddingModel, setEmbeddingModel] = useState("");
@@ -538,6 +541,9 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
       if (savedTheme === "light") document.documentElement.setAttribute("data-theme", "light");
     }
     // dark is the default (no attribute needed since :root is dark)
+
+    const savedLang = localStorage.getItem("bloom_lang");
+    if (savedLang === "ru" || savedLang === "en") setLang(savedLang);
 
     // Onboarding
     if (!localStorage.getItem("bloom_visited")) {
@@ -860,16 +866,56 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     setNodesStatus(items.length ? `Загружено узлов: ${items.length}` : "В БД нет узлов");
   };
 
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     setIsDashLoading(true);
+    // Datasets list (always needed for selector)
     const datasets = await apiFetchJson("/datasets");
     if (datasets) setDashDatasets(Array.isArray(datasets) ? datasets : datasets.items || []);
+
     if (ds) {
-      const params = new URLSearchParams({ dataset_id: String(ds), limit: "1", offset: "0" });
-      const res = await apiFetchJson(`/nodes?${params.toString()}`);
-      if (res) setDashNodeCount(res.total ?? null);
+      // Stats and metrics in parallel; metrics may 404 (no labels) — use silent fetch
+      const [stats, metricsRaw] = await Promise.all([
+        apiFetchJson(`/datasets/${ds}/stats`),
+        (async () => {
+          try {
+            const r = await fetch(`${apiBase}/evaluate/metrics?dataset_id=${ds}`);
+            return r.ok ? r.json() : null;
+          } catch { return null; }
+        })(),
+      ]);
+      if (stats) setDashStats(stats);
+      if (metricsRaw) setDashMetrics(metricsRaw);
     }
+    setDashLastUpdated(new Date());
     setIsDashLoading(false);
+  }, [apiFetchJson, apiBase, ds]);
+
+  // ── Dashboard helpers ────────────────────────────────────────
+  const fmtRelTime = (iso: string | null | undefined): string => {
+    if (!iso) return "—";
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 60000) return `${Math.round(diff / 1000)} с назад`;
+    if (diff < 3600000) return `${Math.round(diff / 60000)} мин назад`;
+    if (diff < 86400000) return `${Math.round(diff / 3600000)} ч назад`;
+    return new Date(iso).toLocaleDateString("ru-RU");
+  };
+
+  const jobBadgeClass = (status: string) => {
+    if (status === "done" || status === "completed") return styles.jobBadgeDone;
+    if (status === "running") return styles.jobBadgeRunning;
+    if (status === "queued") return styles.jobBadgeQueued;
+    return styles.jobBadgeFailed;
+  };
+
+  const JOB_TYPE_LABELS: Record<string, string> = {
+    analyze: "Анализ", index: "Индексация", graph: "Граф",
+    annotate: "Разметка", parse: "Парсинг", canvas: "Canvas",
+  };
+  const CONF_COLORS: Record<string, string> = {
+    high: "var(--success)", medium: "var(--warning)", low: "var(--error)",
+  };
+  const CONF_LABELS: Record<string, string> = {
+    high: "Высокая", medium: "Средняя", low: "Низкая",
   };
 
   const saveInlineEdit = async (nodeId: number) => {
@@ -1106,6 +1152,19 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
 
   // Keep a stable ref so the chat action handler can call ingestCanvasCourse without stale closure
   useEffect(() => { ingestCanvasCourseRef.current = ingestCanvasCourse; }, [ingestCanvasCourse]);
+
+  // Dashboard auto-refresh: poll every 8 s when there are active jobs, 30 s otherwise
+  useEffect(() => {
+    if (activeTab !== "dashboard") return;
+    const interval = (dashStats?.active_jobs ?? 0) > 0 ? 8000 : 30000;
+    const timer = setInterval(() => { loadDashboard(); }, interval);
+    return () => clearInterval(timer);
+  }, [activeTab, dashStats?.active_jobs, loadDashboard]);
+
+  // Reload dashboard stats when ds changes (and dashboard is visible)
+  useEffect(() => {
+    if (activeTab === "dashboard" && ds) loadDashboard();
+  }, [ds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Execute pending ingest after course + dataset are set
   useEffect(() => {
@@ -1452,7 +1511,7 @@ const analysisFlowSteps = [
             <span className={styles.headerSep} />
 
             {/* Export */}
-            <button className={styles.iconBtn} title="Экспорт" type="button">
+            <button className={styles.iconBtn} title="Экспорт JSONL" onClick={exportJsonl} type="button">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
@@ -1469,8 +1528,8 @@ const analysisFlowSteps = [
 
             {/* Lang toggle */}
             <div className={styles.langToggle}>
-              <button className={[styles.langOption, theme === "dark" ? styles.langOptionActive : ""].join(" ")} onClick={() => setTheme("dark")} type="button">RU</button>
-              <button className={[styles.langOption, theme === "light" ? styles.langOptionActive : ""].join(" ")} onClick={() => setTheme("light")} type="button">EN</button>
+              <button className={[styles.langOption, lang === "ru" ? styles.langOptionActive : ""].join(" ")} onClick={() => { setLang("ru"); localStorage.setItem("bloom_lang", "ru"); }} type="button">RU</button>
+              <button className={[styles.langOption, lang === "en" ? styles.langOptionActive : ""].join(" ")} onClick={() => { setLang("en"); localStorage.setItem("bloom_lang", "en"); }} type="button">EN</button>
             </div>
 
             {/* Avatar */}
@@ -2479,8 +2538,9 @@ const analysisFlowSteps = [
               {embeddingSemantic === false && (
                 <div style={{
                   display: "flex", alignItems: "flex-start", gap: 10,
-                  padding: "10px 14px", borderRadius: 8, marginBottom: 10,
+                  padding: "10px 14px", borderRadius: 8, margin: "0 16px 10px",
                   background: "rgba(251,146,60,0.1)", border: "1px solid rgba(251,146,60,0.3)",
+                  flexShrink: 0,
                 }}>
                   <IconAlert />
                   <span style={{ fontSize: 12.5, color: "#fb923c", lineHeight: 1.5 }}>
@@ -2490,18 +2550,20 @@ const analysisFlowSteps = [
                 </div>
               )}
 
-              {/* Graph canvas */}
-              <ErrorBoundary>
-                <GraphView
-                  nodes={graphNodesData}
-                  edges={graphEdgesData}
-                  filters={filters}
-                  threshold={threshold}
-                  searchQuery={graphSearch}
-                  onHover={(n: AnalyzeNode | null) => setHoveredNode(n)}
-                  onSelect={(n: AnalyzeNode | null) => setSelectedNode(n)}
-                />
-              </ErrorBoundary>
+              {/* Graph canvas — flex:1 so it fills whatever height remains after controls */}
+              <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <ErrorBoundary>
+                  <GraphView
+                    nodes={graphNodesData}
+                    edges={graphEdgesData}
+                    filters={filters}
+                    threshold={threshold}
+                    searchQuery={graphSearch}
+                    onHover={(n: AnalyzeNode | null) => setHoveredNode(n)}
+                    onSelect={(n: AnalyzeNode | null) => setSelectedNode(n)}
+                  />
+                </ErrorBoundary>
+              </div>
 
               {/* Node detail card — fixed overlay, sticky on click */}
               {(selectedNode || hoveredNode) && (() => {
@@ -2514,9 +2576,9 @@ const analysisFlowSteps = [
                     style={{
                       position: "fixed",
                       bottom: 24,
-                      right: 24,
+                      right: 284,          /* 260px aside + 24px gap */
                       width: 340,
-                      maxWidth: "calc(100vw - 48px)",
+                      maxWidth: "calc(100vw - 308px)",
                       zIndex: 200,
                       boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
                     }}
@@ -2940,121 +3002,383 @@ const analysisFlowSteps = [
           {/* ── Dashboard Tab ──────────────────────────── */}
           {activeTab === "dashboard" && (
             <div className={styles.tabHost}>
-              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1fr 1fr" }}>
 
-              {/* ── LEFT: Datasets & KPI ─── */}
-              <div className={styles.tabPaneLeft}>
-                <div className={styles.tabPaneHeader}>
-                  <span className={styles.tabPaneTitle}>Обзор</span>
-                  <button
-                    className={[styles.btn, styles.btnGhost].join(" ")}
-                    onClick={loadDashboard}
-                    disabled={isDashLoading}
-                    type="button"
-                    style={{ marginLeft: "auto", fontSize: 11, padding: "3px 10px" }}
+              {/* ── KPI strip ── */}
+              <div className={styles.dashKpiStrip}>
+                {/* Live indicator + title */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
+                  <span
+                    className={[styles.liveDot, (dashStats?.active_jobs ?? 0) > 0 ? styles.liveDotPulse : ""].join(" ")}
+                    style={{ background: apiStatus === "ok" ? "var(--success)" : "var(--error)" }}
+                  />
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                    {dashLastUpdated ? fmtRelTime(dashLastUpdated.toISOString()) : "не загружено"}
+                  </span>
+                </div>
+
+                {/* Dataset selector */}
+                {dashDatasets.length > 1 && (
+                  <select
+                    className={styles.select}
+                    value={ds ?? ""}
+                    onChange={e => { const v = Number(e.target.value); if (v) setDs(v); }}
+                    style={{ fontSize: 12, padding: "4px 8px", height: 30, marginRight: 4 }}
                   >
-                    {isDashLoading ? <span className={styles.spinner} /> : <IconRefresh />}
-                    Обновить
-                  </button>
-                </div>
+                    {dashDatasets.map((d: any) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                )}
 
-{isDashLoading ? (
-                <div className={styles.dashGrid}>
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className={styles.skeletonCard} style={{ height: 80 }} />
-                  ))}
+                {/* KPI cards */}
+                <div className={[styles.kpiCard, styles.kpiCardAccent].join(" ")}>
+                  <div className={styles.kpiVal}>{dashStats?.node_count ?? (isDashLoading ? "…" : "—")}</div>
+                  <div className={styles.kpiLabel}>Узлов знаний</div>
                 </div>
-              ) : (
-                <>
-                  {/* KPI chips */}
-                  <div className={styles.dashGrid}>
-                    <div className={styles.dashCard}>
-                      <div className={styles.dashCardVal}>{dashDatasets.length}</div>
-                      <div className={styles.dashCardLabel}>Датасетов</div>
+                <div className={styles.kpiCard}>
+                  <div className={styles.kpiVal}>{dashStats?.document_count ?? (isDashLoading ? "…" : "—")}</div>
+                  <div className={styles.kpiLabel}>Документов</div>
+                </div>
+                <div className={styles.kpiCard}>
+                  <div className={styles.kpiVal}>{dashStats?.labeled_count ?? (isDashLoading ? "…" : "—")}</div>
+                  <div className={styles.kpiLabel}>Размечено</div>
+                  {dashStats && dashStats.node_count > 0 && (
+                    <div className={styles.kpiSub}>
+                      {Math.round((dashStats.labeled_count / dashStats.node_count) * 100)}%
                     </div>
-                    <div className={styles.dashCard}>
-                      <div className={styles.dashCardVal}>{dashNodeCount ?? "—"}</div>
-                      <div className={styles.dashCardLabel}>Узлов (текущий DS)</div>
-                    </div>
-                    <div className={styles.dashCard}>
-                      <div className={styles.dashCardVal}>{labelProgress?.labeled ?? 0}</div>
-                      <div className={styles.dashCardLabel}>Размечено</div>
-                    </div>
-                    <div className={styles.dashCard}>
-                      <div className={styles.dashCardVal} style={{ color: "var(--success)" }}>
-                        {apiStatus === "ok" ? "Online" : "Offline"}
-                      </div>
-                      <div className={styles.dashCardLabel}>API статус</div>
-                    </div>
+                  )}
+                </div>
+                <div className={styles.kpiCard}>
+                  <div className={styles.kpiVal} style={{
+                    color: dashStats?.confidence_distribution
+                      ? `hsl(${Math.round(((dashStats.confidence_distribution.high ?? 0) / Math.max(dashStats.node_count, 1)) * 120)}, 60%, 55%)`
+                      : "var(--text-primary)"
+                  }}>
+                    {dashStats?.confidence_distribution && dashStats.node_count > 0
+                      ? `${Math.round((dashStats.confidence_distribution.high / dashStats.node_count) * 100)}%`
+                      : (isDashLoading ? "…" : "—")}
                   </div>
-
-                  {/* Datasets table */}
-                  {dashDatasets.length > 0 && (
-                    <div className={styles.dashSection}>
-                      <div className={styles.cardTitle} style={{ fontSize: 13, marginBottom: 10 }}>
-                        Все датасеты
-                      </div>
-                      {dashDatasets.map((d: any) => (
-                        <div key={d.id} className={styles.dashDatasetRow}>
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)" }}>
-                            #{d.id}
-                          </span>
-                          <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
-                            {d.name}
-                          </span>
-                          <button
-                            className={[styles.btnCompact].join(" ")}
-                            onClick={() => { setDs(d.id); setActiveTab("analysis"); addToast(`Переключён на dataset #${d.id}`, "info"); }}
-                          >
-                            Выбрать
-                          </button>
-                        </div>
-                      ))}
+                  <div className={styles.kpiLabel}>Высокая уверенность</div>
+                </div>
+                {dashMetrics && (
+                  <div className={styles.kpiCard}>
+                    <div className={styles.kpiVal} style={{ fontSize: 18, color: "var(--accent)" }}>
+                      {dashMetrics.f1_micro.toFixed(2)}
                     </div>
-                  )}
+                    <div className={styles.kpiLabel}>F1 micro</div>
+                    <div className={styles.kpiSub}>κ = {dashMetrics.cohen_kappa?.toFixed(2) ?? "—"}</div>
+                  </div>
+                )}
+                {(dashStats?.active_jobs ?? 0) > 0 && (
+                  <div className={[styles.kpiCard, styles.kpiCardWarn].join(" ")}>
+                    <div className={styles.kpiVal} style={{ color: "var(--warning)" }}>{dashStats.active_jobs}</div>
+                    <div className={styles.kpiLabel}>Активных задач</div>
+                  </div>
+                )}
 
-                  {!dashDatasets.length && !isDashLoading && (
-                    <div className={styles.emptyState}>
-                      <span className={styles.emptyIcon}>
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-                        </svg>
-                      </span>
-                      <div className={styles.emptyTitle}>Нет данных</div>
-                      <div className={styles.emptyText}>Нажми «Обновить» или создай датасет в боковой панели.</div>
-                    </div>
-                  )}
-                </>
-              )}
+                {/* Refresh */}
+                <button
+                  className={[styles.btn, styles.btnGhost].join(" ")}
+                  onClick={loadDashboard}
+                  disabled={isDashLoading}
+                  type="button"
+                  style={{ marginLeft: "auto", fontSize: 11, padding: "4px 10px", alignSelf: "center", height: 30 }}
+                >
+                  {isDashLoading ? <span className={styles.spinner} /> : <IconRefresh />}
+                </button>
               </div>
 
-              {/* ── RIGHT: Bloom distribution ─── */}
-              <div className={styles.tabPaneRight}>
-                <div className={styles.tabPaneHeader}>
-                  <span className={styles.tabPaneTitle}>Bloom-распределение</span>
-                </div>
-                {nodes.length > 0 ? (
-                  <div className={styles.dashSection}>
-                    {BLOOM_LEVELS.map(lvl => {
-                      const count = nodes.filter(n => n.top_levels.includes(lvl)).length;
-                      if (!count) return null;
-                      const pct = (count / nodes.length) * 100;
-                      return (
-                        <div key={lvl} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                          <span style={{ width: 90, fontSize: 12, color: LEVEL_COLORS[lvl], fontWeight: 500 }}>{LEVEL_LABELS[lvl]}</span>
-                          <div style={{ flex: 1, height: 8, background: "var(--bg-hover)", borderRadius: 4, overflow: "hidden" }}>
-                            <div style={{ height: "100%", width: `${pct}%`, background: LEVEL_COLORS[lvl], borderRadius: 4 }} />
+              {/* ── Main grid ── */}
+              <div className={styles.tabGrid} style={{ gridTemplateColumns: "1fr 1.25fr" }}>
+
+              {/* ── LEFT: Bloom + Confidence + Models + Datasets ── */}
+              <div className={styles.tabPaneLeft}>
+
+                {/* No dataset selected */}
+                {!ds && !isDashLoading && (
+                  <div className={styles.emptyState} style={{ marginTop: 40 }}>
+                    <div className={styles.emptyTitle}>Выбери датасет</div>
+                    <div className={styles.emptyText}>Создай или выбери датасет в панели слева, затем открой дашборд.</div>
+                  </div>
+                )}
+
+                {/* Loading skeletons */}
+                {isDashLoading && !dashStats && (
+                  <div style={{ padding: "6px 0" }}>
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <div key={i} className={styles.skeletonRow} style={{ width: `${70 + (i % 3) * 10}%` }} />
+                    ))}
+                  </div>
+                )}
+
+                {dashStats && (
+                  <>
+                    {/* Bloom distribution */}
+                    <div className={styles.dashSection}>
+                      <div className={styles.dashSectionTitle}>Таксономия Блума</div>
+                      {BLOOM_LEVELS.map(lvl => {
+                        const count: number = dashStats.bloom_distribution?.[lvl] ?? 0;
+                        if (!count) return null;
+                        const total = dashStats.node_count || 1;
+                        const pct = (count / total) * 100;
+                        return (
+                          <div key={lvl} className={styles.bloomRow}>
+                            <span className={styles.bloomRowLabel} style={{ color: LEVEL_COLORS[lvl] }}>
+                              {LEVEL_LABELS[lvl]}
+                            </span>
+                            <div className={styles.bloomBarTrack}>
+                              <div
+                                className={styles.bloomBarFill}
+                                style={{ width: `${pct}%`, background: LEVEL_COLORS[lvl] }}
+                              />
+                            </div>
+                            <span className={styles.bloomCount}>{count}</span>
+                            <span className={styles.bloomPct}>{pct.toFixed(0)}%</span>
                           </div>
-                          <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-muted)", width: 28, textAlign: "right" }}>{count}</span>
+                        );
+                      })}
+                      {Object.values(dashStats.bloom_distribution ?? {}).every((v: any) => v === 0) && (
+                        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Нет классифицированных узлов</div>
+                      )}
+                    </div>
+
+                    {/* Confidence distribution */}
+                    <div className={styles.dashSection}>
+                      <div className={styles.dashSectionTitle}>Уверенность классификации</div>
+                      {(["high", "medium", "low"] as const).map(band => {
+                        const count: number = dashStats.confidence_distribution?.[band] ?? 0;
+                        const total = dashStats.node_count || 1;
+                        const pct = (count / total) * 100;
+                        return (
+                          <div key={band} className={styles.confBandRow}>
+                            <span className={styles.confBandLabel} style={{ color: CONF_COLORS[band] }}>
+                              {CONF_LABELS[band]}
+                            </span>
+                            <div className={styles.bloomBarTrack}>
+                              <div
+                                className={styles.bloomBarFill}
+                                style={{ width: `${pct}%`, background: CONF_COLORS[band] }}
+                              />
+                            </div>
+                            <span className={styles.bloomCount}>{count}</span>
+                            <span className={styles.bloomPct}>{pct.toFixed(0)}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Labeling progress */}
+                    {dashStats.node_count > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>Прогресс разметки</div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+                          <span>{dashStats.labeled_count} размечено</span>
+                          <span>{dashStats.node_count - dashStats.labeled_count} осталось</span>
                         </div>
-                      );
-                    })}
+                        <div className={styles.labelProgress}>
+                          <div
+                            className={styles.labelProgressFill}
+                            style={{ width: `${Math.min(100, (dashStats.labeled_count / dashStats.node_count) * 100)}%` }}
+                          />
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                          {Math.round((dashStats.labeled_count / dashStats.node_count) * 100)}% завершено
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Embedding model distribution */}
+                    {Object.keys(dashStats.model_distribution ?? {}).length > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>Модель эмбеддингов</div>
+                        <div style={{ display: "flex", flexWrap: "wrap" }}>
+                          {Object.entries(dashStats.model_distribution).map(([model, cnt]: any) => (
+                            <span key={model} className={styles.modelChip}>
+                              {model.split("/").pop()}
+                              <span className={styles.modelChipCount}>{cnt}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Datasets list */}
+                    {dashDatasets.length > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>Все датасеты</div>
+                        {dashDatasets.map((d: any) => (
+                          <div
+                            key={d.id}
+                            className={styles.dashDatasetRow}
+                            style={{ border: d.id === ds ? "1px solid var(--accent-border)" : undefined,
+                              background: d.id === ds ? "var(--accent-light)" : undefined }}
+                            onClick={() => { setDs(d.id); loadDashboard(); }}
+                          >
+                            <span className={styles.dashDatasetId}>#{d.id}</span>
+                            <span className={styles.dashDatasetName}>{d.name}</span>
+                            {d.id !== ds && (
+                              <button
+                                className={styles.btnCompact}
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setDs(d.id); setActiveTab("analysis"); addToast(`Переключён на ${d.name}`, "info"); }}
+                              >
+                                Открыть
+                              </button>
+                            )}
+                            {d.id === ds && (
+                              <span style={{ fontSize: 10, color: "var(--accent)", fontWeight: 600 }}>ACTIVE</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* ── RIGHT: Documents + Jobs + Metrics ── */}
+              <div className={styles.tabPaneRight}>
+
+                {/* Loading skeletons */}
+                {isDashLoading && !dashStats && (
+                  <div style={{ padding: "6px 0" }}>
+                    {Array.from({ length: 10 }).map((_, i) => (
+                      <div key={i} className={styles.skeletonRow} style={{ width: `${60 + (i % 4) * 8}%` }} />
+                    ))}
                   </div>
-                ) : (
-                  <div className={styles.emptyState}>
-                    <div className={styles.emptyText}>Загрузи текст в Analysis чтобы увидеть распределение.</div>
-                  </div>
+                )}
+
+                {dashStats && (
+                  <>
+                    {/* Documents breakdown */}
+                    {dashStats.documents?.length > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>
+                          Документы / курсы — {dashStats.document_count}
+                        </div>
+                        {(() => {
+                          const maxNodes = Math.max(...dashStats.documents.map((d: any) => d.node_count), 1);
+                          return dashStats.documents.map((doc: any) => {
+                            const srcType = doc.source.startsWith("canvas:") ? "Canvas"
+                              : doc.source.startsWith("upload://") ? "Файл"
+                              : "Текст";
+                            return (
+                              <div key={doc.id} className={styles.docEntry}>
+                                <div className={styles.docName} title={doc.title}>{doc.title}</div>
+                                <span className={styles.docTag}>{srcType}</span>
+                                <div className={styles.docMiniBar}>
+                                  <div
+                                    className={styles.docMiniFill}
+                                    style={{ width: `${(doc.node_count / maxNodes) * 100}%` }}
+                                  />
+                                </div>
+                                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)", width: 28, textAlign: "right", flexShrink: 0 }}>
+                                  {doc.node_count}
+                                </span>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+
+                    {/* Quality metrics */}
+                    {dashMetrics && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle} style={{ display: "flex", alignItems: "center" }}>
+                          Качество классификации
+                          <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 400, color: "var(--text-muted)" }}>
+                            n={dashMetrics.samples}
+                          </span>
+                        </div>
+                        {/* Global metrics */}
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                          {[
+                            { label: "F1 micro", val: dashMetrics.f1_micro?.toFixed(3) },
+                            { label: "F1 macro", val: dashMetrics.f1_macro?.toFixed(3) },
+                            { label: "Cohen κ",  val: dashMetrics.cohen_kappa?.toFixed(3) },
+                            { label: "Hamming ↓", val: dashMetrics.hamming_loss?.toFixed(3) },
+                          ].map(m => (
+                            <div key={m.label} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 12px", minWidth: 72, textAlign: "center" }}>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{m.val}</div>
+                              <div style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{m.label}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Per-level table */}
+                        <div className={styles.metricsTableWrap}>
+                          <table className={styles.metricsTable}>
+                            <thead>
+                              <tr>
+                                <th>Уровень</th>
+                                <th>P</th>
+                                <th>R</th>
+                                <th>F1</th>
+                                <th>TP</th>
+                                <th>FP</th>
+                                <th>FN</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {BLOOM_LEVELS.map(lvl => {
+                                const m = dashMetrics.per_level?.[lvl];
+                                if (!m) return null;
+                                return (
+                                  <tr key={lvl}>
+                                    <td style={{ color: LEVEL_COLORS[lvl] }}>{LEVEL_LABELS[lvl]}</td>
+                                    <td>{m.precision.toFixed(2)}</td>
+                                    <td>{m.recall.toFixed(2)}</td>
+                                    <td style={{ fontWeight: 600, color: m.f1 > 0.7 ? "var(--success)" : m.f1 > 0.4 ? "var(--warning)" : "var(--error)" }}>
+                                      {m.f1.toFixed(2)}
+                                    </td>
+                                    <td>{m.tp}</td>
+                                    <td>{m.fp}</td>
+                                    <td>{m.fn}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Recent jobs */}
+                    {dashStats.recent_jobs?.length > 0 && (
+                      <div className={styles.dashSection}>
+                        <div className={styles.dashSectionTitle}>Последние задачи</div>
+                        {dashStats.recent_jobs.map((job: any) => (
+                          <div key={job.id} className={styles.jobEntry}>
+                            <span className={[styles.jobBadge, jobBadgeClass(job.status)].join(" ")}>
+                              {job.status}
+                            </span>
+                            <span className={styles.jobType}>
+                              {JOB_TYPE_LABELS[job.type] ?? job.type}
+                              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", marginLeft: 4 }}>
+                                #{job.id}
+                              </span>
+                            </span>
+                            {job.error && (
+                              <span style={{ fontSize: 10, color: "var(--error)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={job.error}>
+                                {job.error}
+                              </span>
+                            )}
+                            <span className={styles.jobTime}>
+                              {job.finished_at ? fmtRelTime(job.finished_at) : fmtRelTime(job.created_at)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Empty right pane */}
+                    {!dashStats.documents?.length && !dashStats.recent_jobs?.length && !dashMetrics && (
+                      <div className={styles.emptyState} style={{ marginTop: 40 }}>
+                        <div className={styles.emptyTitle}>Нет данных анализа</div>
+                        <div className={styles.emptyText}>Запусти анализ текста или импорт курса Canvas.</div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
               </div>
@@ -3109,7 +3433,7 @@ const analysisFlowSteps = [
                   )}
 
                   {canvasCourses.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 340, overflowY: "auto", marginTop: 8 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
                       {canvasCourses
                         .filter(c => !canvasCourseSearch || c.name.toLowerCase().includes(canvasCourseSearch.toLowerCase()) || (c.course_code || "").toLowerCase().includes(canvasCourseSearch.toLowerCase()))
                         .map(course => (
