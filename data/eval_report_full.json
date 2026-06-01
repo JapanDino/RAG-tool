@@ -1,0 +1,45 @@
+{
+  "samples": 109,
+  "hamming_loss": 0.1621,
+  "f1_micro": 0.6294,
+  "f1_macro": 0.6403,
+  "cohen_kappa_macro": 0.5426,
+  "per_level": {
+    "remember": {
+      "support": 19,
+      "precision": 0.56,
+      "recall": 0.737,
+      "f1": 0.636
+    },
+    "understand": {
+      "support": 23,
+      "precision": 0.438,
+      "recall": 0.913,
+      "f1": 0.592
+    },
+    "apply": {
+      "support": 19,
+      "precision": 0.394,
+      "recall": 0.684,
+      "f1": 0.5
+    },
+    "analyze": {
+      "support": 24,
+      "precision": 0.867,
+      "recall": 0.542,
+      "f1": 0.667
+    },
+    "evaluate": {
+      "support": 23,
+      "precision": 0.8,
+      "recall": 0.696,
+      "f1": 0.744
+    },
+    "create": {
+      "support": 17,
+      "precision": 0.65,
+      "recall": 0.765,
+      "f1": 0.703
+    }
+  }
+}
