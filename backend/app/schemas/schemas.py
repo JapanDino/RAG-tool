@@ -316,3 +316,22 @@ class GraphRebuildIn(BaseModel):
 
 class GraphRebuildOut(BaseModel):
     job_id: int
+
+
+class GraphClusterOut(BaseModel):
+    """Single cluster summary for collapsed-graph view (>200 nodes)."""
+    cluster_id: int
+    size: int
+    member_ids: List[int]
+    representative_title: str
+    dominant_level: Optional[BloomLevel] = None
+    avg_prob_vector: List[float]
+    sample_titles: List[str]
+
+
+class GraphClustersOut(BaseModel):
+    dataset_id: Optional[int] = None
+    total_nodes: int
+    total_clusters: int
+    threshold: float
+    clusters: List[GraphClusterOut]
