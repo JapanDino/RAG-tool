@@ -9,7 +9,15 @@ from sqlalchemy import text
 
 from ..db.session import get_db
 from ..models.models import KnowledgeNode, KnowledgeEdge, Job, JobType, JobStatus
-from ..schemas.schemas import GraphOut, GraphNodeOut, GraphEdgeOut, GraphRebuildIn, GraphRebuildOut
+from ..schemas.schemas import (
+    GraphOut,
+    GraphNodeOut,
+    GraphEdgeOut,
+    GraphRebuildIn,
+    GraphRebuildOut,
+    GraphClusterOut,
+    GraphClustersOut,
+)
 from ..utils.bloom import LEVEL_ORDER
 from ..tasks.queue import enqueue_or_mark
 
@@ -352,3 +360,213 @@ def get_zpd(
         "next_level": next_level,
         "suggestions": suggestions,
     }
+
+
+# ---------------------------------------------------------------------------
+# Clustering — collapse similar nodes into groups for large-graph view (>200)
+# ---------------------------------------------------------------------------
+
+class _DSU:
+    """Union-Find / Disjoint Set Union for greedy clustering."""
+
+    def __init__(self, ids: list[int]):
+        self.parent: dict[int, int] = {i: i for i in ids}
+        self.size: dict[int, int] = {i: 1 for i in ids}
+
+    def find(self, x: int) -> int:
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]
+            x = self.parent[x]
+        return x
+
+    def union(self, a: int, b: int) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra == rb:
+            return
+        if self.size[ra] < self.size[rb]:
+            ra, rb = rb, ra
+        self.parent[rb] = ra
+        self.size[ra] += self.size[rb]
+
+
+@router.get("/clusters", response_model=GraphClustersOut)
+def get_clusters(
+    dataset_id: int | None = None,
+    document_id: int | None = None,
+    embedding_model: str | None = None,
+    threshold: float = Query(0.55, ge=0.0, le=1.0, description="Min cosine similarity to merge nodes"),
+    top_k: int = Query(8, ge=1, le=50, description="kNN per node when building edges on the fly"),
+    limit_nodes: int = Query(2000, ge=1, le=20000),
+    min_cluster_size: int = Query(1, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Collapse nodes into clusters of semantically close items.
+
+    Designed for the >200-node regime where rendering every node individually
+    degrades graph performance.  Uses persisted similarity edges when available
+    (faster, deterministic) and falls back to live pgvector kNN otherwise.
+
+    Algorithm: build a similarity graph with edge weight >= ``threshold``, then
+    run Union-Find to obtain connected components.  Each component becomes a
+    cluster.  For every cluster we return:
+
+    * ``representative_title`` — the highest-frequency node title in the
+      component (or first by id if frequencies are equal);
+    * ``dominant_level`` — the Bloom level appearing most often across
+      ``top_levels`` of cluster members;
+    * ``avg_prob_vector`` — element-wise mean of probability vectors,
+      re-normalised to sum to 1.
+    """
+    # --- 1. fetch candidate nodes ----------------------------------------
+    filters = ["kn.vec IS NOT NULL"]
+    params: dict[str, object] = {"limit": limit_nodes}
+    if dataset_id is not None:
+        filters.append("kn.dataset_id = :ds")
+        params["ds"] = dataset_id
+    if document_id is not None:
+        filters.append("kn.document_id = :doc")
+        params["doc"] = document_id
+    if embedding_model is not None:
+        filters.append("kn.embedding_model = :em")
+        params["em"] = embedding_model
+    where_clause = " AND ".join(filters)
+    ids_sql = f"""
+        SELECT kn.id FROM knowledge_nodes kn
+        WHERE {where_clause}
+        ORDER BY kn.id ASC
+        LIMIT :limit
+    """
+    node_ids = [row[0] for row in db.execute(text(ids_sql), params).all()]
+    if not node_ids:
+        return GraphClustersOut(
+            dataset_id=dataset_id,
+            total_nodes=0,
+            total_clusters=0,
+            threshold=threshold,
+            clusters=[],
+        )
+
+    nodes = (
+        db.query(KnowledgeNode)
+        .filter(KnowledgeNode.id.in_(node_ids))
+        .all()
+    )
+    node_by_id = {n.id: n for n in nodes}
+
+    # --- 2. collect similarity edges -------------------------------------
+    edges: list[tuple[int, int, float]] = []
+
+    # 2a. persisted edges (preferred)
+    method_filters = [KnowledgeEdge.method.like("similarity|%")]
+    persisted_rows = (
+        db.query(KnowledgeEdge.from_node_id, KnowledgeEdge.to_node_id, KnowledgeEdge.weight)
+        .filter(
+            KnowledgeEdge.from_node_id.in_(node_ids),
+            KnowledgeEdge.to_node_id.in_(node_ids),
+            or_(*method_filters),
+            KnowledgeEdge.weight >= threshold,
+        )
+        .all()
+    )
+    for a, b, w in persisted_rows:
+        edges.append((int(a), int(b), float(w)))
+
+    # 2b. fall back to live pgvector kNN when no persisted edges
+    if not edges:
+        in_clause_params: dict[str, object] = {"k": top_k, "threshold": threshold}
+        ds_filter = ""
+        if dataset_id is not None:
+            ds_filter = "AND kn2.dataset_id = :ds"
+            in_clause_params["ds"] = dataset_id
+        sql = text(f"""
+            SELECT kn2.id AS node_id,
+                   1.0 - (kn2.vec <=> (SELECT vec FROM knowledge_nodes WHERE id = :id)) AS score
+            FROM knowledge_nodes kn2
+            WHERE kn2.id != :id
+              AND kn2.vec IS NOT NULL
+              {ds_filter}
+            ORDER BY kn2.vec <=> (SELECT vec FROM knowledge_nodes WHERE id = :id)
+            LIMIT :k
+        """)
+        for node_id in node_ids:
+            p = dict(in_clause_params)
+            p["id"] = node_id
+            rows = db.execute(sql, p).mappings().all()
+            for row in rows:
+                score = float(row["score"])
+                if score < threshold:
+                    continue
+                edges.append((node_id, int(row["node_id"]), score))
+
+    # --- 3. Union-Find ----------------------------------------------------
+    dsu = _DSU(node_ids)
+    for a, b, _w in edges:
+        if a in node_by_id and b in node_by_id:
+            dsu.union(a, b)
+
+    # --- 4. group nodes by root ------------------------------------------
+    groups: dict[int, list[int]] = defaultdict(list)
+    for nid in node_ids:
+        groups[dsu.find(nid)].append(nid)
+
+    # --- 5. summarise each cluster ---------------------------------------
+    out: list[GraphClusterOut] = []
+    for cid, (root, member_ids) in enumerate(sorted(groups.items(), key=lambda kv: -len(kv[1]))):
+        if len(member_ids) < min_cluster_size:
+            continue
+        members = [node_by_id[m] for m in member_ids if m in node_by_id]
+        if not members:
+            continue
+
+        # representative — highest frequency, ties → smallest id
+        def _freq(n: KnowledgeNode) -> int:
+            mi = n.model_info or {}
+            f = mi.get("frequency") if isinstance(mi, dict) else None
+            try:
+                return int(f) if f is not None else 1
+            except (TypeError, ValueError):
+                return 1
+        rep = max(members, key=lambda n: (_freq(n), -n.id))
+
+        # dominant Bloom level across top_levels
+        level_counts: dict[str, int] = defaultdict(int)
+        for n in members:
+            for lvl in (n.top_levels or []):
+                level_counts[str(lvl)] += 1
+        dominant_level = max(level_counts.items(), key=lambda kv: kv[1])[0] if level_counts else None
+
+        # average prob vector (mean, then renormalise to sum=1)
+        avg = [0.0] * 6
+        denom = 0
+        for n in members:
+            pv = list(n.prob_vector or [])
+            if len(pv) == 6:
+                for i, p in enumerate(pv):
+                    avg[i] += float(p)
+                denom += 1
+        if denom > 0:
+            avg = [x / denom for x in avg]
+            s = sum(avg)
+            if s > 0:
+                avg = [round(x / s, 4) for x in avg]
+        else:
+            avg = [round(1 / 6, 4)] * 6
+
+        sample = [n.title for n in sorted(members, key=lambda n: (-_freq(n), n.id))[:5]]
+        out.append(GraphClusterOut(
+            cluster_id=cid,
+            size=len(members),
+            member_ids=[n.id for n in members],
+            representative_title=rep.title,
+            dominant_level=dominant_level if dominant_level in {"remember","understand","apply","analyze","evaluate","create"} else None,
+            avg_prob_vector=avg,
+            sample_titles=sample,
+        ))
+
+    return GraphClustersOut(
+        dataset_id=dataset_id,
+        total_nodes=len(node_ids),
+        total_clusters=len(out),
+        threshold=threshold,
+        clusters=out,
+    )

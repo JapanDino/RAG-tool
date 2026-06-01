@@ -48,7 +48,7 @@ def classify_bloom_multilabel(
 
     prompt = build_bloom_multilabel_prompt(text, rubric=rubric)
     try:
-        js = chat_completion_json(model, prompt, max_tokens=450)
+        js = chat_completion_json(model, prompt, max_tokens=1200)
     except Exception:
         # Network timeout, rate-limit, etc. — degrade gracefully to keyword classifier
         return keyword_classify(text, min_prob=min_prob, max_levels=max_levels)

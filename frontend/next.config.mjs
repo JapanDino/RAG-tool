@@ -8,6 +8,13 @@ const nextConfig = {
       },
     ];
   },
+  // Increase proxy timeout to 90s for slow Canvas API responses
+  httpAgentOptions: {
+    keepAlive: true,
+  },
+  experimental: {
+    proxyTimeout: 90000,
+  },
 };
 
 export default nextConfig;

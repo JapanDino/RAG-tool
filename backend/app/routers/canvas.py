@@ -15,6 +15,7 @@ from ..db.session import SessionLocal, get_db
 from ..models.models import Chunk, Dataset, Document, KnowledgeNode
 from ..services import canvas_client as cc
 from ..services.bloom_multilabel import classify_bloom_multilabel
+from ..services.topic_classifier import classify_topic
 from ..services.chunking import split_into_chunks
 from ..services.embedding import embed_texts
 from ..services.embedding_provider import current_embedding_model
@@ -73,8 +74,11 @@ class IngestRequest(BaseModel):
         "files",
     ]
     max_nodes_per_doc: int = 30
+    max_nodes_auto: bool = False
     min_prob: float = 0.2
     max_files: int = 20
+    topic_mode: str = "none"   # "none" | "auto" | "guided"
+    topic_tree: str | None = None  # indented topic tree for guided mode
 
 
 class IngestResponse(BaseModel):
@@ -291,13 +295,17 @@ def _process_document(
     db: Session,
     skipped: list[str],
     module_map: dict[str, dict] | None = None,
+    max_nodes_auto: bool = False,
+    topic_mode: str = "none",
+    topic_tree: str | None = None,
 ) -> ImportedDocumentOut | None:
     raw_text = raw_text.strip()
     if not raw_text:
         skipped.append(f"{source_label}: пустой текст")
         return None
 
-    raw_nodes = extractor.extract(raw_text, max_nodes=max_nodes, min_freq=1)
+    effective_max = 0 if max_nodes_auto else max_nodes
+    raw_nodes = extractor.extract(raw_text, max_nodes=effective_max, min_freq=1)
     if not raw_nodes:
         skipped.append(f"{source_label}: узлы не найдены")
         return None
@@ -334,6 +342,7 @@ def _process_document(
             min_prob=min_prob,
             max_levels=2,
         )
+        topic_meta = classify_topic(ctx, mode=topic_mode, topic_tree=topic_tree) if topic_mode != "none" else None
         module_meta = (module_map or {}).get(source_label)
         model_info = {
             "extractor": extractor.name,
@@ -346,6 +355,7 @@ def _process_document(
             "frequency": node.get("frequency"),
             "node_type": node.get("node_type"),
             "rationale": cls.get("rationale"),
+            **({"topic": topic_meta} if topic_meta else {}),
             **({"module": module_meta} if module_meta else {}),
         }
 
@@ -431,14 +441,24 @@ def _process_document(
     )
 
 
+_courses_cache: dict = {"data": None, "at": 0.0}
+_COURSES_TTL = 300  # seconds
+
+
 @router.get("/courses")
 def list_courses():
+    import time
     _check_canvas_configured()
+    now = time.monotonic()
+    if _courses_cache["data"] is not None and now - _courses_cache["at"] < _COURSES_TTL:
+        return _courses_cache["data"]
     try:
         courses = cc.list_courses()
     except Exception as exc:
+        if _courses_cache["data"] is not None:
+            return _courses_cache["data"]
         raise HTTPException(502, f"Canvas API error: {exc}")
-    return [
+    result = [
         {
             "id": c["id"],
             "name": c["name"],
@@ -448,6 +468,9 @@ def list_courses():
         }
         for c in courses
     ]
+    _courses_cache["data"] = result
+    _courses_cache["at"] = now
+    return result
 
 
 @router.get("/courses/{course_id}/files")
@@ -503,6 +526,9 @@ def ingest_course(payload: IngestRequest, db: Session = Depends(get_db)):
             db,
             skipped,
             module_map=module_map,
+            max_nodes_auto=payload.max_nodes_auto,
+            topic_mode=payload.topic_mode,
+            topic_tree=payload.topic_tree,
         )
         if imported and (imported.nodes_created > 0 or imported.nodes_updated > 0):
             documents.append(imported)
@@ -667,6 +693,9 @@ def ingest_course_stream(payload: IngestRequest, db: Session = Depends(get_db)):
                     gen_db,
                     skipped,
                     module_map=module_map,
+                    max_nodes_auto=payload.max_nodes_auto,
+                    topic_mode=payload.topic_mode,
+                    topic_tree=payload.topic_tree,
                 )
                 if imported and (imported.nodes_created > 0 or imported.nodes_updated > 0):
                     documents.append(imported)

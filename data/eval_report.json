@@ -1,0 +1,11 @@
+{
+  "samples": 109,
+  "hamming_loss": 0.1621,
+  "f1_micro": 0.6294,
+  "f1_macro": 0.6402,
+  "min_prob": 0.2,
+  "max_levels": 2,
+  "from_db": false,
+  "dataset_id": null,
+  "annotator": null
+}
