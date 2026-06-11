@@ -1,230 +1,280 @@
-# RAG-tool — Bloom's Taxonomy Knowledge Graph
+# Bloom RAG Studio
 
-> An educational content analysis pipeline that extracts concepts from text, classifies them across Bloom's six cognitive levels, and renders an interactive knowledge graph.
+> RAG-инструмент для анализа учебных материалов: выделяет смысловые узлы, классифицирует их по таксономии Блума, строит интерактивный граф знаний и помогает проверять качество разметки.
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green?logo=fastapi)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-blue?logo=postgresql)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker)
-![Tests](https://img.shields.io/badge/tests-46%20passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-brightgreen)
 
----
+## Зачем проект
 
-## What it does
+Bloom RAG Studio помогает быстро понять, какие когнитивные уровни преобладают в учебном тексте, задании, модуле курса или наборе документов.
 
-1. **Upload or paste** educational text (lectures, syllabi, textbook chapters).
-2. **Extract knowledge nodes** — key concepts and terms using NER (natasha) or regex heuristics.
-3. **Classify each node** across Bloom's Taxonomy (Remember → Understand → Apply → Analyze → Evaluate → Create) using a fast keyword + morphology classifier (offline, no GPU required).
-4. **Visualise** the result as an interactive graph where node colour = Bloom level, node size = concept frequency, and split-pie nodes show multi-level concepts.
-5. **Evaluate** classifier quality with multilabel F1 / Hamming loss metrics via a built-in annotation queue.
+Проект полезен для:
 
----
+- преподавателей, которые хотят увидеть когнитивный профиль материала;
+- методистов, проверяющих баланс уровней Блума;
+- исследовательских и школьных ИВР-проектов, где нужны метрики качества;
+- разработчиков, которым нужен воспроизводимый RAG-прототип на FastAPI, pgvector и Next.js.
 
-## Stack
+## Что умеет
 
-| Layer | Technology |
-|---|---|
-| **API** | FastAPI · Uvicorn · Pydantic v2 |
-| **NLP** | pymorphy3 · natasha NER · sentence-transformers (`intfloat/multilingual-e5-large`) |
-| **Database** | PostgreSQL 16 + pgvector extension |
-| **Queue / Cache** | Redis · Celery |
-| **Frontend** | Next.js 14 · React · Cytoscape.js |
-| **OCR** | Tesseract · pdf2image · pdfminer |
-| **Containerisation** | Docker Compose |
+- Принимать текст и документы, включая PDF.
+- Извлекать смысловые узлы: понятия, темы, цели, действия и ключевые термины.
+- Классифицировать узлы по 6 уровням таксономии Блума: Remember, Understand, Apply, Analyze, Evaluate, Create.
+- Работать offline-first: keyword + morphology baseline не требует GPU и API-ключей.
+- Подключать LLM-режим для более сильной классификации через OpenAI-compatible API.
+- Хранить документы, чанки, узлы, эмбеддинги и связи в PostgreSQL + pgvector.
+- Строить интерактивный граф знаний с фильтрами по уровням Блума.
+- Давать поиск по документам и узлам знаний.
+- Поддерживать ручную multi-label разметку и экспорт датасета.
+- Интегрироваться с Canvas LMS для загрузки структуры курса.
+- Показывать dashboard по датасетам, задачам и качеству прототипа.
+- Предоставлять RAG-chat поверх базы знаний.
 
----
+## Быстрый старт
 
-## Architecture
+### Требования
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      Frontend (Next.js)                  │
-│  Upload → Analyze → Graph View → Label Queue → Metrics  │
-└────────────────────────┬────────────────────────────────┘
-                         │ HTTP / REST
-┌────────────────────────▼────────────────────────────────┐
-│                    FastAPI Backend                        │
-│                                                          │
-│  /analyze/content   ←──── NodeExtractor (natasha/regex) │
-│  /analyze/classify  ←──── BloomClassifier (keyword/llm) │
-│  /search            ←──── EmbeddingProvider (local/oai) │
-│  /datasets          ←──── DatasetManager                │
-│  /evaluate          ←──── MultilabelMetrics              │
-└───────┬──────────────────────────────┬──────────────────┘
-        │                              │
-   PostgreSQL + pgvector            Redis + Celery
-   (knowledge_nodes, docs)         (async jobs)
-```
+- Docker Desktop 24+ с Compose v2.
+- 4 GB свободной RAM.
+- Git.
+- Опционально: `OPENAI_API_KEY` или совместимый LLM endpoint для LLM-режима.
 
-### Bloom classifier pipeline
-
-```
-raw text
-   │
-   ▼
-_normalize_text()          ← pymorphy3 lemmatisation (Russian/mixed)
-   │
-   ├─ keyword matching     ← bloom_verbs_ru.json  (6 × ~30 lemmatised verbs)
-   │
-   └─ heuristic regex      ← HEURISTIC_PATTERNS   (structural cues: "семинар", "лабораторная"…)
-          │
-          ▼
-   Laplace-smoothed probability vector [6]
-          │
-          ▼
-   top_levels (≥ 0.20 threshold, max 2)
-```
-
----
-
-## Quick start
-
-### Prerequisites
-- Docker Desktop ≥ 24 (with Compose v2)
-- 4 GB RAM free (the e5-large embedding model loads on first run)
-
-### 1. Clone and configure
+### Запуск через Docker
 
 ```bash
 git clone https://github.com/JapanDino/RAG-tool.git
 cd RAG-tool
 cp backend/.env.example backend/.env
-```
-
-Edit `backend/.env` — only two keys are mandatory:
-
-| Key | Default | Notes |
-|---|---|---|
-| `DATABASE_URL` | `postgresql+psycopg://rag:rag_pass@db:5432/rag_db` | Change password in production |
-| `EMBEDDING_PROVIDER` | `local` | `local` needs no API key; `openai` needs `OPENAI_API_KEY` |
-
-### 2. Start
-
-```bash
 docker compose up --build
 ```
 
-- Frontend: <http://localhost:3000>
+После запуска:
+
+- UI: <http://localhost:3000>
 - API docs: <http://localhost:8000/docs>
+- Health check: <http://localhost:8000/health>
 
-### 3. First use
+Первый запуск может занять больше времени: локальная embedding-модель скачивается в cache.
 
-1. Open <http://localhost:3000>
-2. Create a dataset (e.g. "Алгоритмы")
-3. Paste or upload a lecture PDF
-4. Click **Analyze** — the knowledge graph appears in ~5 seconds
+### Локальный запуск
 
----
+Подробный вариант для локальной разработки описан в [README_DOCKER_SETUP.md](README_DOCKER_SETUP.md).
 
-## Environment variables
+Коротко:
 
-Full reference in [`backend/.env.example`](backend/.env.example).
-
-| Variable | Values | Description |
-|---|---|---|
-| `EMBEDDING_PROVIDER` | `local` · `hash` · `openai` | Embedding backend |
-| `EMBEDDING_MODEL_LOCAL` | `intfloat/multilingual-e5-large` | HuggingFace model ID |
-| `BLOOM_CLASSIFIER` | `keyword` · `llm` | Classifier mode |
-| `BLOOM_VERBS_PATH` | path | Override verb dictionary |
-| `NODE_EXTRACTOR` | `local_ner` · `heuristic` | Concept extractor |
-| `OPENAI_API_KEY` | `sk-…` | Required only for `openai` / `llm` modes |
-| `OCR_PAGE_TIMEOUT_S` | `30` | Tesseract timeout per page (0 = off) |
-
----
-
-## Project structure
-
+```bash
+pip install -r backend/requirements.txt
+cd frontend && npm install
 ```
+
+API:
+
+```bash
+scripts/run_api.sh
+```
+
+Frontend:
+
+```bash
+scripts/run_frontend.sh
+```
+
+Для Windows PowerShell в репозитории есть вспомогательные скрипты в `scripts/`.
+
+## Демо за 2 минуты
+
+1. Откройте <http://localhost:3000>.
+2. Создайте датасет, например `Алгоритмы`.
+3. Вставьте текст:
+
+```text
+Решите уравнение и покажите ход решения. Проанализируйте ошибки в вычислениях.
+```
+
+4. Нажмите **Анализировать**.
+5. Посмотрите таблицу узлов и перейдите во вкладку **Граф знаний**.
+
+Ожидаемый профиль: `apply` + `analyze`.
+
+Больше готовых примеров: [docs/DEMO_EXAMPLES.md](docs/DEMO_EXAMPLES.md).
+
+## Интерфейс
+
+Основные вкладки приложения:
+
+| Вкладка | Что делает |
+|---|---|
+| Анализ контента | Принимает текст/файл, извлекает узлы, показывает Bloom-профиль |
+| Граф знаний | Визуализирует узлы и связи, дает фильтры по уровням |
+| Разметка | Позволяет экспертно исправлять multi-label уровни |
+| Поиск | Ищет по чанкам и узлам знаний |
+| Dashboard | Сводит состояние датасетов, документов, задач и метрик |
+| Canvas | Загружает материалы курса из Canvas LMS |
+| RAG-chat | Отвечает с опорой на найденные фрагменты базы знаний |
+
+## Архитектура
+
+```mermaid
+flowchart LR
+    UI["Next.js UI<br/>analysis, graph, labeling, search"] --> API["FastAPI backend"]
+    API --> DB[("PostgreSQL + pgvector")]
+    API --> Redis[("Redis")]
+    Redis --> Worker["Celery worker"]
+    API --> NLP["Node extraction<br/>Bloom classification<br/>Embeddings"]
+    API --> Canvas["Canvas LMS API"]
+    API --> LLM["OpenAI-compatible LLM<br/>optional"]
+    DB --> Graph["Knowledge graph"]
+```
+
+Ключевой pipeline:
+
+```mermaid
+flowchart TD
+    A["Учебный текст или PDF"] --> B["Text extraction / OCR"]
+    B --> C["Sentence-aware chunking"]
+    C --> D["Node extraction"]
+    D --> E["Bloom multi-label classification"]
+    E --> F["Embeddings"]
+    F --> G["pgvector storage"]
+    G --> H["Search, graph, RAG-chat, metrics"]
+```
+
+## Стек
+
+| Слой | Технологии |
+|---|---|
+| API | FastAPI, Uvicorn, Pydantic v2 |
+| NLP | pymorphy3, natasha, sentence-transformers |
+| Vector search | PostgreSQL 16, pgvector |
+| Queue/cache | Redis, Celery |
+| Frontend | Next.js 14, React, Cytoscape.js |
+| OCR/PDF | Tesseract, pdf2image, pdfminer |
+| Infra | Docker Compose |
+
+## Качество классификации
+
+В репозитории есть размеченный датасет `data/bloom_dataset.jsonl` на 109 примеров.
+
+Текущий baseline из `data/eval_report_full.json`:
+
+| Метрика | Значение |
+|---|---:|
+| Samples | 109 |
+| Hamming loss | 0.162 |
+| F1-micro | 0.629 |
+| F1-macro | 0.640 |
+| Cohen's kappa macro | 0.543 |
+
+Запуск оценки:
+
+```bash
+python scripts/evaluate_multilabel.py --data data/bloom_dataset.jsonl --out data/eval_report.json
+```
+
+Интерпретация: baseline уже дает рабочую offline-классификацию без внешней модели, а LLM-режим можно использовать как более сильный, но более дорогой вариант.
+
+## Настройки
+
+Основные переменные лежат в [backend/.env.example](backend/.env.example).
+
+| Переменная | Значения | Назначение |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL URL | Подключение к базе |
+| `REDIS_URL` | Redis URL | Очереди и фоновые задачи |
+| `EMBEDDING_PROVIDER` | `local`, `hash`, `openai` | Источник эмбеддингов |
+| `EMBEDDING_MODEL_LOCAL` | HuggingFace model ID | Локальная embedding-модель |
+| `BLOOM_CLASSIFIER` | `keyword`, `llm` | Режим классификации |
+| `NODE_EXTRACTOR` | `local_ner`, `heuristic` | Извлечение узлов |
+| `OPENAI_API_KEY` | API key | Нужен только для OpenAI/LLM режимов |
+| `CANVAS_URL` | URL Canvas | Нужен для Canvas LMS |
+| `CANVAS_TOKEN` | token | Нужен для Canvas LMS |
+
+## Структура проекта
+
+```text
 RAG-tool/
 ├── backend/
 │   ├── app/
-│   │   ├── routers/          # FastAPI route handlers
-│   │   │   ├── analyze.py    # /analyze — chunking, extraction, Bloom classification
-│   │   │   ├── datasets.py   # /datasets — CRUD, labelling queue
-│   │   │   ├── evaluate.py   # /evaluate — multilabel metrics
-│   │   │   └── search.py     # /search — vector similarity search
-│   │   ├── services/
-│   │   │   ├── bloom_multilabel.py   # thin wrapper (env-driven classifier dispatch)
-│   │   │   ├── chunking.py           # sentence-aware text splitter
-│   │   │   ├── embedding.py          # embedding pipeline
-│   │   │   ├── embedding_provider.py # local / hash / openai
-│   │   │   └── node_extractor.py     # natasha NER + heuristic fallback
-│   │   └── utils/
-│   │       └── bloom.py      # keyword classifier, heuristic patterns, annotate_bloom()
-│   ├── requirements.txt
-│   └── .env.example
+│   │   ├── routers/       # FastAPI endpoints
+│   │   ├── services/      # NLP, embeddings, Canvas, LLM, text extraction
+│   │   ├── models/        # SQLAlchemy models
+│   │   ├── schemas/       # Pydantic contracts
+│   │   └── utils/         # Bloom, vector, quality helpers
+│   ├── migrations/        # SQL migrations
+│   └── requirements.txt
 ├── frontend/
-│   ├── components/
-│   │   ├── GraphView.tsx     # Cytoscape.js knowledge graph
-│   │   └── …
-│   ├── pages/
-│   │   └── index.tsx         # main SPA
-│   └── lib/
-│       └── bloom-constants.ts # level colours, shapes, labels
+│   ├── components/        # Graph, job status, UI widgets
+│   ├── pages/             # Next.js pages
+│   ├── styles/            # CSS modules and globals
+│   └── lib/               # Bloom constants
 ├── data/
-│   ├── bloom_verbs_ru.json   # Russian Bloom verb dictionary (6 levels, ~200 entries)
-│   └── bloom_dataset.jsonl   # labelled evaluation dataset
-├── tests/
-│   ├── test_bloom_classifier.py
-│   ├── test_bloom_tz.py
-│   ├── test_chunking.py
-│   ├── test_evaluate_multilabel.py
-│   └── test_smoke.py
+│   ├── bloom_dataset.jsonl
+│   ├── bloom_verbs_ru.json
+│   └── eval_report*.json
+├── docs/
+│   ├── DEMO_EXAMPLES.md
+│   ├── DEFENSE_MATERIALS.md
+│   ├── DEVELOPMENT_PLAN_TZ_BLOOM.md
+│   └── canvas_integration.md
 ├── scripts/
-│   └── seed_dataset.py
+├── tests/
 └── docker-compose.yml
 ```
 
----
+## API
 
-## Running tests
+После запуска доступен Swagger UI:
+
+- <http://localhost:8000/docs>
+- <http://localhost:8000/openapi.json>
+
+Ключевые группы endpoint'ов:
+
+| Prefix | Назначение |
+|---|---|
+| `/analyze` | Анализ текста, извлечение и классификация узлов |
+| `/datasets` | Датасеты, документы, индексация |
+| `/nodes` | Узлы знаний и поиск по ним |
+| `/graph` | Граф знаний, ребра, кластеры |
+| `/labeling` | Очередь экспертной разметки |
+| `/evaluate` | Метрики качества |
+| `/canvas` | Canvas LMS интеграция |
+| `/chat` | RAG-chat stream |
+
+## Тесты
 
 ```bash
 cd backend
 pip install -r requirements.txt
-pytest ../tests/ -v
-# 46 passed in ~5 s (no network, no GPU required)
+python -m pytest ../tests -v
 ```
 
----
+Если работаете через Docker, сначала поднимите инфраструктуру:
 
-## Bloom's Taxonomy levels
+```bash
+docker compose up -d db redis
+```
 
-| Level | Russian label | Colour | Typical verbs |
-|---|---|---|---|
-| Remember | Факты | blue | назовите, перечислите, определите |
-| Understand | Понимание | green | объясните, сравните, почему |
-| Apply | Применение | amber | решите, вычислите, используйте |
-| Analyze | Анализ | orange | проанализируйте, выделите, структурируйте |
-| Evaluate | Оценивание | violet | оцените, аргументируйте, докажите |
-| Create | Создание | rose | создайте, разработайте, спроектируйте |
+## Документы
 
-Graph nodes with two dominant levels show a split-pie (proportional to probability share between the top two levels).
+- [docs/DEMO_EXAMPLES.md](docs/DEMO_EXAMPLES.md) - готовые тексты для демонстрации.
+- [docs/DEFENSE_MATERIALS.md](docs/DEFENSE_MATERIALS.md) - сценарий защиты и список артефактов.
+- [docs/DEVELOPMENT_PLAN_TZ_BLOOM.md](docs/DEVELOPMENT_PLAN_TZ_BLOOM.md) - план разработки по ТЗ.
+- [docs/canvas_integration.md](docs/canvas_integration.md) - интеграция с Canvas LMS.
+- [REVIEW.md](REVIEW.md) - ревью проекта.
+- [TODO_TECH.md](TODO_TECH.md) - технический backlog.
 
----
+## Ограничения
 
-## Classifier accuracy
-
-Manual evaluation on 12 educational text fragments (mixed Russian):
-
-| Metric | Value |
-|---|---|
-| Exact match (top level) | 75 % (9/12) |
-| Partial match (level in top-2) | 83 % (10/12) |
-
-Known limitation: heuristic pattern `\bвычисл` can fire on the adjective _вычислительный_ (computational), occasionally boosting **Apply** in text that belongs to **Analyze**. This is documented in `HEURISTIC_PATTERNS` and can be narrowed by replacing the regex with a verb-only lemma match.
-
----
-
-## Contributing
-
-1. Fork and create a feature branch.
-2. Add / extend tests in `tests/`.
-3. Run `pytest` — all 46 must pass.
-4. Open a PR against `main`.
-
----
+- Keyword baseline иногда переоценивает уровни, если в тексте есть сильные глаголы-маркеры без явного учебного действия.
+- Локальная embedding-модель требует времени на первую загрузку.
+- OCR зависит от установленного Tesseract и качества исходного PDF.
+- LLM-режим зависит от внешнего API и может быть медленнее offline baseline.
 
 ## License
 
