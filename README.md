@@ -1,5 +1,11 @@
 # Bloom RAG Studio
 
+> **Portfolio summary (EN).** Bloom RAG Studio is an offline-first platform for analyzing learning materials. It turns documents into reviewable knowledge nodes, classifies them against Bloom's taxonomy, and makes the results searchable through an interactive graph.
+>
+> **Engineering highlights:** FastAPI + Next.js, PostgreSQL/pgvector, Redis/Celery, local or OpenAI-compatible models, Docker Compose, human-in-the-loop labeling, and reproducible baseline evaluation.
+>
+> The detailed documentation below is maintained in Russian.
+
 > RAG-инструмент для анализа учебных материалов: выделяет смысловые узлы, классифицирует их по таксономии Блума, строит интерактивный граф знаний и помогает проверять качество разметки.
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
