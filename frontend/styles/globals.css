@@ -171,3 +171,9 @@ button, input, textarea, select {
   0%   { background-position: -400px 0; }
   100% { background-position:  400px 0; }
 }
+
+@keyframes canvasSlide {
+  0% { transform: translateX(-150%); }
+  50% { transform: translateX(100%); }
+  100% { transform: translateX(300%); }
+}
