@@ -3,13 +3,18 @@ from __future__ import annotations
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 from ..db.session import get_db
-from ..models.models import KnowledgeNode, KnowledgeEdge, Job, JobType, JobStatus
-from ..schemas.schemas import GraphOut, GraphNodeOut, GraphEdgeOut, GraphRebuildIn, GraphRebuildOut
+from ..models.models import Job, JobStatus, JobType, KnowledgeEdge, KnowledgeNode
+from ..schemas.schemas import (
+    GraphEdgeOut,
+    GraphNodeOut,
+    GraphOut,
+    GraphRebuildIn,
+    GraphRebuildOut,
+)
 from ..tasks.queue import enqueue_or_mark
 
 router = APIRouter(prefix="/graph", tags=["graph"])
@@ -38,7 +43,13 @@ def rebuild_graph(payload: GraphRebuildIn, db: Session = Depends(get_db)):
     return GraphRebuildOut(job_id=job.id)
 
 
-def _add_edge(edge_map: dict[tuple[int, int, str], float], a: int, b: int, weight: float, method: str):
+def _add_edge(
+    edge_map: dict[tuple[int, int, str], float],
+    a: int,
+    b: int,
+    weight: float,
+    method: str,
+):
     if a == b:
         return
     key = (min(a, b), max(a, b), method)
@@ -205,7 +216,9 @@ def get_graph(
                 score = float(row["score"])
                 if score < min_score:
                     continue
-                _add_edge(edges, node_id, int(row["node_id"]), round(score, 4), "similarity")
+                _add_edge(
+                    edges, node_id, int(row["node_id"]), round(score, 4), "similarity"
+                )
                 if len(edges) >= max_edges:
                     break
             if len(edges) >= max_edges:

@@ -11,7 +11,14 @@ from ..models.models import BloomAnnotation, BloomLevel, Chunk, Document
 def calculate_score_distribution(annotations: Iterable[BloomAnnotation]) -> dict:
     scores = [a.score for a in annotations]
     if not scores:
-        return {"count": 0, "min": None, "max": None, "mean": None, "median": None, "stdev": None}
+        return {
+            "count": 0,
+            "min": None,
+            "max": None,
+            "mean": None,
+            "median": None,
+            "stdev": None,
+        }
     return {
         "count": len(scores),
         "min": min(scores),
@@ -32,7 +39,9 @@ def calculate_level_distribution(annotations: Iterable[BloomAnnotation]) -> dict
 
 
 def calculate_consistency_metrics(chunk_id: int, db: Session) -> dict:
-    annotations = db.query(BloomAnnotation).filter(BloomAnnotation.chunk_id == chunk_id).all()
+    annotations = (
+        db.query(BloomAnnotation).filter(BloomAnnotation.chunk_id == chunk_id).all()
+    )
     scores = [a.score for a in annotations]
     levels_present = len({a.level for a in annotations})
     levels_total = len(BloomLevel)
@@ -74,4 +83,3 @@ __all__ = [
     "calculate_consistency_metrics",
     "calculate_coverage_metrics",
 ]
-

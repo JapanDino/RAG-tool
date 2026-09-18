@@ -8,4 +8,3 @@ The actual Celery instance lives in `app.tasks.celery_app`.
 from .tasks.celery_app import celery_app
 
 __all__ = ["celery_app"]
-

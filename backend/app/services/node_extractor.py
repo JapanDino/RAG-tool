@@ -5,10 +5,9 @@ import re
 import warnings
 from abc import ABC, abstractmethod
 from functools import lru_cache
-from typing import Any, Sequence
+from typing import Any
 
-from ..utils.node_extract import extract_nodes_from_text as heuristic_extract
-
+from ..utils.node_extract import extract_semantic_nodes_from_text
 
 SENT_SPLIT_RE = re.compile(r"[.!?\\n]+")
 
@@ -44,15 +43,21 @@ class NodeExtractor(ABC):
     name = "base"
 
     @abstractmethod
-    def extract(self, text: str, max_nodes: int = 30, min_freq: int = 1) -> list[dict[str, Any]]:
+    def extract(
+        self, text: str, max_nodes: int = 30, min_freq: int = 1
+    ) -> list[dict[str, Any]]:
         raise NotImplementedError
 
 
-class HeuristicExtractor(NodeExtractor):
-    name = "heuristic"
+class SemanticExtractor(NodeExtractor):
+    name = "semantic"
 
-    def extract(self, text: str, max_nodes: int = 30, min_freq: int = 1) -> list[dict[str, Any]]:
-        nodes = heuristic_extract(text, max_nodes=max_nodes, min_freq=min_freq)
+    def extract(
+        self, text: str, max_nodes: int = 30, min_freq: int = 1
+    ) -> list[dict[str, Any]]:
+        nodes = extract_semantic_nodes_from_text(
+            text, max_nodes=max_nodes, min_freq=min_freq
+        )
         sentences = split_sentences_with_offsets(text)
         enriched = []
         for n in nodes:
@@ -61,7 +66,11 @@ class HeuristicExtractor(NodeExtractor):
             m = re.search(re.escape(title), text, flags=re.IGNORECASE)
             if m:
                 sent_idx, sent_text = locate_sentence(sentences, m.start())
-                src = {"sentence_idx": sent_idx, "char_start": m.start(), "char_end": m.end()}
+                src = {
+                    "sentence_idx": sent_idx,
+                    "char_start": m.start(),
+                    "char_end": m.end(),
+                }
                 context = sent_text[:240]
             else:
                 src = {"sentence_idx": 0, "char_start": None, "char_end": None}
@@ -78,6 +87,10 @@ class HeuristicExtractor(NodeExtractor):
         return enriched
 
 
+class HeuristicExtractor(SemanticExtractor):
+    name = "heuristic"
+
+
 class NatashaNerExtractor(NodeExtractor):
     name = "local_ner"
 
@@ -85,13 +98,15 @@ class NatashaNerExtractor(NodeExtractor):
         try:
             from natasha import (  # type: ignore
                 Doc,
-                Segmenter,
                 MorphVocab,
                 NewsEmbedding,
                 NewsNERTagger,
+                Segmenter,
             )
         except Exception as e:  # pragma: no cover
-            raise RuntimeError("natasha is required for NODE_EXTRACTOR=local_ner") from e
+            raise RuntimeError(
+                "natasha is required for NODE_EXTRACTOR=local_ner"
+            ) from e
 
         self._Doc = Doc
         self._segmenter = Segmenter()
@@ -99,7 +114,9 @@ class NatashaNerExtractor(NodeExtractor):
         self._emb = NewsEmbedding()
         self._tagger = NewsNERTagger(self._emb)
 
-    def extract(self, text: str, max_nodes: int = 30, min_freq: int = 1) -> list[dict[str, Any]]:
+    def extract(
+        self, text: str, max_nodes: int = 30, min_freq: int = 1
+    ) -> list[dict[str, Any]]:
         sentences = split_sentences_with_offsets(text)
 
         doc = self._Doc(text)
@@ -124,7 +141,9 @@ class NatashaNerExtractor(NodeExtractor):
 
         # If NER found too little, fall back to heuristics to meet UX expectations.
         if not spans:
-            return HeuristicExtractor().extract(text, max_nodes=max_nodes, min_freq=min_freq)
+            return SemanticExtractor().extract(
+                text, max_nodes=max_nodes, min_freq=min_freq
+            )
 
         # Dedup and rank by frequency (simple count by substring).
         uniq: dict[str, dict[str, Any]] = {}
@@ -137,13 +156,19 @@ class NatashaNerExtractor(NodeExtractor):
             if freq < min_freq:
                 continue
             sent_idx, sent_text = locate_sentence(sentences, start)
-            node_type = "proper_noun" if ent_type in ("PER", "LOC", "ORG") else "concept"
+            node_type = (
+                "proper_noun" if ent_type in ("PER", "LOC", "ORG") else "concept"
+            )
             uniq[key] = {
                 "title": title,
                 "context_snippet": sent_text[:240],
                 "frequency": max(freq, 1),
                 "node_type": node_type,
-                "source": {"sentence_idx": sent_idx, "char_start": start, "char_end": end},
+                "source": {
+                    "sentence_idx": sent_idx,
+                    "char_start": start,
+                    "char_end": end,
+                },
             }
 
         items = list(uniq.values())
@@ -152,7 +177,7 @@ class NatashaNerExtractor(NodeExtractor):
 
         # Only fill remaining slots with proper nouns from heuristics, not generic keywords
         if len(items) < max_nodes:
-            extra = HeuristicExtractor().extract(
+            extra = SemanticExtractor().extract(
                 text,
                 max_nodes=max_nodes,
                 min_freq=min_freq,
@@ -174,17 +199,19 @@ class NatashaNerExtractor(NodeExtractor):
 
 @lru_cache(maxsize=1)
 def get_node_extractor() -> NodeExtractor:
-    name = os.getenv("NODE_EXTRACTOR", "local_ner").strip().lower()
+    name = os.getenv("NODE_EXTRACTOR", "semantic").strip().lower()
+    if name == "semantic":
+        return SemanticExtractor()
     if name == "local_ner":
         try:
             return NatashaNerExtractor()
         except Exception as exc:
             warnings.warn(
-                f"Falling back to heuristic extraction because local NER is unavailable: {exc}",
+                f"Falling back to semantic extraction because local NER is unavailable: {exc}",
                 RuntimeWarning,
                 stacklevel=2,
             )
-            return HeuristicExtractor()
+            return SemanticExtractor()
     if name == "heuristic":
         return HeuristicExtractor()
     # LLM extractor is optional; not enabled by default.
@@ -193,5 +220,7 @@ def get_node_extractor() -> NodeExtractor:
     raise RuntimeError(f"Unknown NODE_EXTRACTOR: {name}")
 
 
-def extract_nodes(text: str, max_nodes: int = 30, min_freq: int = 1) -> list[dict[str, Any]]:
+def extract_nodes(
+    text: str, max_nodes: int = 30, min_freq: int = 1
+) -> list[dict[str, Any]]:
     return get_node_extractor().extract(text, max_nodes=max_nodes, min_freq=min_freq)

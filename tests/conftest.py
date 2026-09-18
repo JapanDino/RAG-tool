@@ -1,7 +1,6 @@
-import sys
 import os
+import sys
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -13,3 +12,4 @@ def pytest_configure():
     os.environ.setdefault("EMBEDDING_PROVIDER", "random")
     os.environ.setdefault("NODE_EXTRACTOR", "heuristic")
     os.environ.setdefault("BLOOM_CLASSIFIER", "keyword")
+    os.environ.setdefault("AUTH_MODE", "disabled")

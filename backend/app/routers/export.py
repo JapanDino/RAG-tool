@@ -1,9 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, Query
-from sqlalchemy.orm import Session
+import csv
+import io
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 from ..db.session import get_db
-import csv, io, json
+
 router = APIRouter(prefix="/export", tags=["export"])
+
 
 @router.get("/datasets/{dataset_id}")
 def export_dataset(
@@ -42,34 +48,61 @@ def export_dataset(
         params["minsc"] = float(min_score)
     rows = db.execute(text(base_sql), params).mappings().all()
 
-    if format=="jsonl":
+    if format == "jsonl":
         buf = io.StringIO()
-        for r in rows: buf.write(json.dumps(dict(r), ensure_ascii=False)+"\n")
+        for r in rows:
+            buf.write(json.dumps(dict(r), ensure_ascii=False) + "\n")
         return Response(buf.getvalue(), media_type="application/x-ndjson")
-    if format=="csv":
+    if format == "csv":
         buf = io.StringIO()
-        w = csv.DictWriter(buf, fieldnames=list(rows[0].keys()) if rows else ["chunk_id","text","document_title","level","label","rationale","score"])
-        w.writeheader(); [w.writerow(dict(r)) for r in rows]
+        w = csv.DictWriter(
+            buf,
+            fieldnames=(
+                list(rows[0].keys())
+                if rows
+                else [
+                    "chunk_id",
+                    "text",
+                    "document_title",
+                    "level",
+                    "label",
+                    "rationale",
+                    "score",
+                ]
+            ),
+        )
+        w.writeheader()
+        [w.writerow(dict(r)) for r in rows]
         return Response(buf.getvalue(), media_type="text/csv")
-    if format=="qti":
+    if format == "qti":
         # Простейший QTI XML-плейсхолдер
         from xml.sax.saxutils import escape
+
         items = []
-        for i,r in enumerate(rows,1):
+        for i, r in enumerate(rows, 1):
             body = escape(r["text"][:200])
-            items.append(f'<item ident="item{i}"><presentation><material><mattext>{body}</mattext></material></presentation></item>')
+            items.append(
+                f'<item ident="item{i}"><presentation><material><mattext>{body}</mattext></material></presentation></item>'
+            )
         xml = f'<?xml version="1.0" encoding="UTF-8"?><questestinterop>{"".join(items)}</questestinterop>'
         return Response(xml, media_type="application/xml")
-    if format=="moodle_xml":
+    if format == "moodle_xml":
         from xml.sax.saxutils import escape
+
         qs = []
-        for i,r in enumerate(rows,1):
+        for i, r in enumerate(rows, 1):
             body = escape(r["text"][:200])
-            qs.append(f'<question type="essay"><name><text>chunk{i}</text></name><questiontext format="html"><text><![CDATA[{body}]]></text></questiontext></question>')
+            qs.append(
+                f'<question type="essay"><name><text>chunk{i}</text></name><questiontext format="html"><text><![CDATA[{body}]]></text></questiontext></question>'
+            )
         xml = f'<?xml version="1.0" encoding="UTF-8"?><quiz>{"".join(qs)}</quiz>'
         return Response(xml, media_type="application/xml")
-    if format=="ragpkg":
-        pkg = {"version":"0.1","dataset_id":dataset_id,"items":[dict(r) for r in rows]}
+    if format == "ragpkg":
+        pkg = {
+            "version": "0.1",
+            "dataset_id": dataset_id,
+            "items": [dict(r) for r in rows],
+        }
         return pkg
 
     raise HTTPException(400, "unsupported format")

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from ..db.session import get_db
 from ..models.models import KnowledgeNode
@@ -115,7 +115,9 @@ def get_node(node_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{node_id}", response_model=KnowledgeNodeOut)
-def update_node(node_id: int, payload: KnowledgeNodeUpdateIn, db: Session = Depends(get_db)):
+def update_node(
+    node_id: int, payload: KnowledgeNodeUpdateIn, db: Session = Depends(get_db)
+):
     node = db.get(KnowledgeNode, node_id)
     if not node:
         raise HTTPException(404, "node not found")

@@ -12,4 +12,3 @@ CREATE TABLE IF NOT EXISTS rubrics (
 CREATE INDEX IF NOT EXISTS idx_rubrics_level ON rubrics (level);
 CREATE INDEX IF NOT EXISTS idx_rubrics_is_active ON rubrics (is_active);
 CREATE INDEX IF NOT EXISTS idx_rubrics_level_active ON rubrics (level, is_active);
-

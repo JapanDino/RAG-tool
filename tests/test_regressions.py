@@ -1,5 +1,6 @@
-import pytest
+import json
 
+import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("sqlalchemy")
@@ -59,15 +60,22 @@ def test_export_labels_does_not_hide_non_current_embedding_model():
     db.commit()
     db.refresh(node)
 
-    label = NodeLabel(node_id=node.id, labels=["apply"], annotator="teacher", source="human")
+    label = NodeLabel(
+        node_id=node.id, labels=["apply"], annotator="teacher", source="human"
+    )
     db.add(label)
     db.commit()
+    dataset_id = dataset.id
     db.close()
 
-    resp = client.get(f"/datasets/{dataset.id}/labeling/export?annotator=teacher")
+    resp = client.get(f"/datasets/{dataset_id}/labeling/export?annotator=teacher")
     assert resp.status_code == 200
     assert "Fractions" in resp.text
     assert "local:intfloat/multilingual-e5-small:padded1536" in resp.text
+    exported = json.loads(resp.text.strip())
+    assert exported["prob_vector"] == [0.1, 0.1, 0.6, 0.1, 0.05, 0.05]
+    assert exported["context_text"] == "Compare simple fractions"
+    assert "model_info" in exported
 
     app.dependency_overrides.clear()
     engine.dispose()
@@ -105,17 +113,22 @@ def test_evaluate_prefers_stored_top_levels(monkeypatch):
     db.commit()
     db.refresh(node)
 
-    label = NodeLabel(node_id=node.id, labels=["understand"], annotator="teacher", source="human")
+    label = NodeLabel(
+        node_id=node.id, labels=["understand"], annotator="teacher", source="human"
+    )
     db.add(label)
     db.commit()
+    dataset_id = dataset.id
     db.close()
 
     def should_not_be_used(*args, **kwargs):
         return {"top_levels": ["create"]}
 
-    monkeypatch.setattr("backend.app.routers.evaluate.classify_bloom_multilabel", should_not_be_used)
+    monkeypatch.setattr(
+        "backend.app.routers.evaluate.classify_bloom_multilabel", should_not_be_used
+    )
 
-    resp = client.get(f"/evaluate/metrics?dataset_id={dataset.id}&annotator=teacher")
+    resp = client.get(f"/evaluate/metrics?dataset_id={dataset_id}&annotator=teacher")
     assert resp.status_code == 200
     body = resp.json()
     assert body["prediction_source"] == "stored_top_levels"

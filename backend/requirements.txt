@@ -9,6 +9,7 @@ celery>=5.3,<5.4
 numpy>=1.26,<2.1
 python-multipart>=0.0.9,<0.0.10
 requests>=2.31,<2.33
+PyJWT[crypto]>=2.8,<3.0
 pypdf>=4.0,<5.0
 pdfminer.six>=20221105
 pdf2image>=1.16,<1.18

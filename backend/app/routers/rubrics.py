@@ -10,7 +10,9 @@ router = APIRouter(prefix="/rubrics", tags=["rubrics"])
 
 @router.get("", response_model=RubricListOut)
 def list_rubrics(
-    level: str | None = Query(None, pattern="^(remember|understand|apply|analyze|evaluate|create)$"),
+    level: str | None = Query(
+        None, pattern="^(remember|understand|apply|analyze|evaluate|create)$"
+    ),
     is_active: bool | None = None,
     db: Session = Depends(get_db),
 ):
@@ -33,9 +35,7 @@ def get_rubric(rubric_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/levels/{level}", response_model=RubricListOut)
-def get_rubrics_for_level(
-    level: str, db: Session = Depends(get_db)
-):
+def get_rubrics_for_level(level: str, db: Session = Depends(get_db)):
     items = (
         db.query(Rubric)
         .filter(Rubric.level == level, Rubric.is_active == True)  # noqa: E712
@@ -90,4 +90,3 @@ def delete_rubric(rubric_id: int, db: Session = Depends(get_db)):
     rubric.is_active = False
     db.commit()
     return {"ok": True}
-

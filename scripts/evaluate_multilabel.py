@@ -1,16 +1,14 @@
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Iterable
 
-import sys
-
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from backend.app.services.bloom_multilabel import classify_bloom_multilabel
 from backend.app.db.session import SessionLocal
 from backend.app.models.models import KnowledgeNode, NodeLabel
-
+from backend.app.services.bloom_multilabel import classify_bloom_multilabel
 
 LEVELS = ["remember", "understand", "apply", "analyze", "evaluate", "create"]
 
@@ -39,7 +37,7 @@ def _f1_micro(y_true: list[list[int]], y_pred: list[list[int]]) -> float:
                 fp += 1
             elif tv == 1 and pv == 0:
                 fn += 1
-    denom = (2 * tp + fp + fn)
+    denom = 2 * tp + fp + fn
     return (2 * tp / denom) if denom else 0.0
 
 
@@ -55,9 +53,38 @@ def _f1_macro(y_true: list[list[int]], y_pred: list[list[int]]) -> float:
                 fp += 1
             elif tv == 1 and pv == 0:
                 fn += 1
-        denom = (2 * tp + fp + fn)
+        denom = 2 * tp + fp + fn
         f1s.append((2 * tp / denom) if denom else 0.0)
     return sum(f1s) / len(f1s)
+
+
+def _per_level(
+    y_true: list[list[int]], y_pred: list[list[int]]
+) -> dict[str, dict[str, float]]:
+    out: dict[str, dict[str, float]] = {}
+    for idx, level in enumerate(LEVELS):
+        tp = fp = fn = 0
+        for t, p in zip(y_true, y_pred):
+            tv, pv = t[idx], p[idx]
+            if tv == 1 and pv == 1:
+                tp += 1
+            elif tv == 0 and pv == 1:
+                fp += 1
+            elif tv == 1 and pv == 0:
+                fn += 1
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        denom = 2 * tp + fp + fn
+        f1 = (2 * tp / denom) if denom else 0.0
+        out[level] = {
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "tp": float(tp),
+            "fp": float(fp),
+            "fn": float(fn),
+        }
+    return out
 
 
 def load_dataset(path: Path) -> list[dict]:
@@ -72,13 +99,17 @@ def load_dataset(path: Path) -> list[dict]:
     return items
 
 
-def load_from_db(dataset_id: int, annotator: str = "default", embedding_model: str | None = None) -> list[dict]:
+def load_from_db(
+    dataset_id: int, annotator: str = "default", embedding_model: str | None = None
+) -> list[dict]:
     db = SessionLocal()
     try:
         q = (
             db.query(NodeLabel, KnowledgeNode)
             .join(KnowledgeNode, NodeLabel.node_id == KnowledgeNode.id)
-            .filter(KnowledgeNode.dataset_id == dataset_id, NodeLabel.annotator == annotator)
+            .filter(
+                KnowledgeNode.dataset_id == dataset_id, NodeLabel.annotator == annotator
+            )
         )
         if embedding_model:
             q = q.filter(KnowledgeNode.embedding_model == embedding_model)
@@ -100,7 +131,11 @@ def load_from_db(dataset_id: int, annotator: str = "default", embedding_model: s
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="data/bloom_dataset.jsonl")
-    parser.add_argument("--from-db", action="store_true", help="Load labeled nodes from DB (node_labels)")
+    parser.add_argument(
+        "--from-db",
+        action="store_true",
+        help="Load labeled nodes from DB (node_labels)",
+    )
     parser.add_argument("--dataset-id", type=int, default=0)
     parser.add_argument("--annotator", default="default")
     parser.add_argument("--embedding-model", default="")
@@ -140,6 +175,7 @@ def main():
         "hamming_loss": round(_hamming_loss(y_true, y_pred), 4),
         "f1_micro": round(_f1_micro(y_true, y_pred), 4),
         "f1_macro": round(_f1_macro(y_true, y_pred), 4),
+        "per_level": _per_level(y_true, y_pred),
         "min_prob": args.min_prob,
         "max_levels": args.max_levels,
         "from_db": bool(args.from_db),

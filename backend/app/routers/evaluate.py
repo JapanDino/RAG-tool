@@ -7,11 +7,34 @@ from sqlalchemy.orm import Session
 
 from ..db.session import get_db
 from ..models.models import KnowledgeNode, NodeLabel
-from ..utils.bloom import LEVEL_ORDER
+from ..schemas.evaluation import CourseAuditEvaluationIn
 from ..services.bloom_multilabel import classify_bloom_multilabel
-
+from ..services.course_evaluation import exact_label_metrics, extraction_metrics
+from ..utils.bloom import LEVEL_ORDER
 
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
+
+
+@router.post("/course-audit")
+def evaluate_course_audit(payload: CourseAuditEvaluationIn):
+    return {
+        "objective_extraction": extraction_metrics(
+            payload.objectives.predicted,
+            payload.objectives.expected,
+            payload.similarity_threshold,
+        ),
+        "assessment_extraction": extraction_metrics(
+            payload.assessments.predicted,
+            payload.assessments.expected,
+            payload.similarity_threshold,
+        ),
+        "relation_classification": exact_label_metrics(
+            payload.predicted_relations, payload.expected_relations
+        ),
+        "finding_detection": exact_label_metrics(
+            payload.predicted_findings, payload.expected_findings
+        ),
+    }
 
 
 def _vectorize(labels: Iterable[str]) -> list[int]:
@@ -38,7 +61,7 @@ def _f1_micro(y_true: list[list[int]], y_pred: list[list[int]]) -> float:
                 fp += 1
             elif tv == 1 and pv == 0:
                 fn += 1
-    denom = (2 * tp + fp + fn)
+    denom = 2 * tp + fp + fn
     return (2 * tp / denom) if denom else 0.0
 
 
@@ -54,12 +77,14 @@ def _f1_macro(y_true: list[list[int]], y_pred: list[list[int]]) -> float:
                 fp += 1
             elif tv == 1 and pv == 0:
                 fn += 1
-        denom = (2 * tp + fp + fn)
+        denom = 2 * tp + fp + fn
         f1s.append((2 * tp / denom) if denom else 0.0)
     return sum(f1s) / len(f1s) if f1s else 0.0
 
 
-def _per_level(y_true: list[list[int]], y_pred: list[list[int]]) -> dict[str, dict[str, float]]:
+def _per_level(
+    y_true: list[list[int]], y_pred: list[list[int]]
+) -> dict[str, dict[str, float]]:
     out: dict[str, dict[str, float]] = {}
     for idx, lvl in enumerate(LEVEL_ORDER):
         tp = fp = fn = 0
@@ -73,7 +98,7 @@ def _per_level(y_true: list[list[int]], y_pred: list[list[int]]) -> dict[str, di
                 fn += 1
         precision = tp / (tp + fp) if (tp + fp) else 0.0
         recall = tp / (tp + fn) if (tp + fn) else 0.0
-        denom = (2 * tp + fp + fn)
+        denom = 2 * tp + fp + fn
         f1 = (2 * tp / denom) if denom else 0.0
         out[lvl] = {
             "precision": round(precision, 4),
@@ -122,7 +147,9 @@ def evaluate_multilabel(
             used_stored_predictions += 1
         else:
             text = f"{kn.title}. {kn.context_text}".strip()
-            pred = classify_bloom_multilabel(text, min_prob=min_prob, max_levels=max_levels)
+            pred = classify_bloom_multilabel(
+                text, min_prob=min_prob, max_levels=max_levels
+            )
             y_pred.append(_vectorize(pred.get("top_levels") or []))
             used_recomputed_predictions += 1
 
@@ -137,9 +164,7 @@ def evaluate_multilabel(
         "embedding_model": embedding_model or "all",
         "annotator": annotator,
         "prediction_source": (
-            "stored_top_levels"
-            if used_recomputed_predictions == 0
-            else "mixed"
+            "stored_top_levels" if used_recomputed_predictions == 0 else "mixed"
         ),
         "stored_predictions": used_stored_predictions,
         "recomputed_predictions": used_recomputed_predictions,

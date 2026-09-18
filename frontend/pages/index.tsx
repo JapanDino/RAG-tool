@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import JobStatus from "../components/JobStatus";
+import CourseAuditor from "../components/CourseAuditor";
 import styles from "../styles/home.module.css";
 
 type BloomLevel = "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
@@ -59,6 +61,8 @@ type AnalyzeNode = {
   top_levels: BloomLevel[];
   frequency?: number | null;
   rationale?: string | null;
+  triggers?: Record<string, string[]> | null;
+  competing_levels?: { level: BloomLevel; probability: number }[] | null;
 };
 
 type SearchResult = {
@@ -75,6 +79,14 @@ type GraphEdge = {
   from_id: number;
   to_id: number;
   weight: number;
+};
+
+type HealthQuality = {
+  extractor?: string;
+  embedding_model?: string;
+  embedding_degraded?: boolean;
+  classifier?: string;
+  llm_available?: boolean;
 };
 
 const getSortedLevels = (probs: number[]) =>
@@ -136,6 +148,36 @@ function getExplainabilityLines(node: AnalyzeNode) {
   }
   lines.push(`Разрыв между 1-м и 2-м уровнем: ${(meta.gap * 100).toFixed(0)} п.п.`);
   return lines;
+}
+
+function getQualitySummary(quality: HealthQuality | null) {
+  if (!quality) {
+    return {
+      extractorLabel: "неизвестно",
+      embeddingLabel: "неизвестно",
+      embeddingTone: "neutral" as HeroStatTone,
+      classifierLabel: "неизвестно",
+      classifierTone: "neutral" as HeroStatTone,
+    };
+  }
+
+  const extractorLabel = quality.extractor || "неизвестно";
+  const embeddingLabel = quality.embedding_degraded
+    ? "hash degraded"
+    : quality.embedding_model || "semantic";
+  const classifier = quality.classifier || "keyword";
+  const classifierLabel =
+    classifier === "llm"
+      ? (quality.llm_available ? "LLM" : "LLM недоступен")
+      : classifier;
+
+  return {
+    extractorLabel,
+    embeddingLabel,
+    embeddingTone: quality.embedding_degraded ? "warning" as HeroStatTone : "success" as HeroStatTone,
+    classifierLabel,
+    classifierTone: classifier === "llm" && !quality.llm_available ? "warning" as HeroStatTone : "info" as HeroStatTone,
+  };
 }
 
 // ── SVG Icons (inline, no deps) ───────────────────────────────
@@ -386,7 +428,7 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [lastJob, setLastJob] = useState<number | undefined>();
-  const [activeTab, setActiveTab] = useState<"analysis" | "graph" | "labeling" | "search" | "dashboard">("analysis");
+  const [activeTab, setActiveTab] = useState<"courses" | "analysis" | "graph" | "labeling" | "search" | "dashboard">("courses");
   const [textInput, setTextInput] = useState("");
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [analyzeFileName, setAnalyzeFileName] = useState<string | null>(null);
@@ -438,6 +480,7 @@ export default function Home() {
   const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
   const [apiBase, setApiBase] = useState(DEFAULT_API);
   const [apiStatus, setApiStatus] = useState<"unknown" | "ok" | "down">("unknown");
+  const [healthQuality, setHealthQuality] = useState<HealthQuality | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // ── Dashboard ────────────────────────────────────────────────
@@ -579,12 +622,23 @@ export default function Home() {
         const t = setTimeout(() => controller.abort(), 2000);
         const r = await fetch(`${apiBase}/health`, { signal: controller.signal });
         clearTimeout(t);
-        if (!cancelled) setApiStatus(r.ok ? "ok" : "down");
+        let data: any = null;
+        try {
+          data = await r.json();
+        } catch {}
+        if (!cancelled) {
+          setApiStatus(r.ok ? "ok" : "down");
+          setHealthQuality(r.ok ? data?.quality || null : null);
+        }
       } catch {
-        if (!cancelled) setApiStatus("down");
+        if (!cancelled) {
+          setApiStatus("down");
+          setHealthQuality(null);
+        }
       }
     };
     setApiStatus("unknown");
+    setHealthQuality(null);
     check();
     const it = setInterval(check, 6000);
     return () => {
@@ -1031,6 +1085,7 @@ export default function Home() {
         if (e.key === "3") { e.preventDefault(); setActiveTab("labeling"); }
         if (e.key === "4") { e.preventDefault(); setActiveTab("search"); }
         if (e.key === "5") { e.preventDefault(); setActiveTab("dashboard"); }
+        if (e.key === "6") { e.preventDefault(); setActiveTab("courses"); }
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && activeTab === "labeling") {
         e.preventDefault();
@@ -1078,6 +1133,7 @@ const hasAnalysisSource = Boolean(textInput.trim() || analyzeFileName);
 const hasNodes = nodes.length > 0;
 const hasGraph = graphNodesData.length > 0 || graphEdgesData.length > 0;
 const lowConfidenceCount = nodes.filter((n) => getConfidenceMeta(n).band === "low").length;
+const qualitySummary = getQualitySummary(healthQuality);
 const contextLead = !hasDataset
   ? "Сначала выбери или создай активный датасет."
   : !hasAnalysisSource
@@ -1131,22 +1187,29 @@ const analysisFlowSteps = [
               </span>
             </div>
             <div className={styles.brandText}>
-              <span className={styles.title}>Bloom RAG Studio</span>
-              <span className={styles.subtitle}>multi-label knowledge taxonomy</span>
+              <span className={styles.title}>Контур · лаборатория качества</span>
+              <span className={styles.subtitle}>
+                {activeTab === "courses" ? "аудит и улучшение учебных курсов" : "таксономия знаний с multi-label разметкой"}
+              </span>
             </div>
           </div>
 
           <div className={styles.metaRow}>
+            <Link className={styles.workspaceLink} href="/workspace">
+              Рабочее пространство
+            </Link>
             {/* API status */}
             <div className={styles.pill}>
               <span className={[styles.dot, apiStatusDotClass].join(" ")} />
               <span>API</span>
-              <span className={styles.kbd}>{apiStatus}</span>
+              <span className={styles.kbd}>
+                {apiStatus === "ok" ? "работает" : apiStatus === "down" ? "нет связи" : "проверка"}
+              </span>
             </div>
 
             {/* Dataset badge */}
             <div className={styles.pill}>
-              <span style={{ color: "var(--text-muted)" }}>dataset</span>
+              <span style={{ color: "var(--text-muted)" }}>датасет</span>
               <span className={styles.kbd} style={{ color: ds ? "var(--text-accent)" : undefined }}>
                 {ds ?? "—"}
               </span>
@@ -1193,12 +1256,27 @@ const analysisFlowSteps = [
       </header>
 
       {/* ── Shell ──────────────────────────────────────── */}
-      <div className={styles.shell}>
+      <div className={[styles.shell, activeTab === "courses" ? styles.shellCourses : ""].join(" ")}>
 
         {/* ── Sidebar nav ──────────────────────────────── */}
         <nav className={styles.nav}>
           <div className={styles.navCard}>
             <div className={styles.navSectionTitle}>Инструменты</div>
+
+            <button
+              className={[styles.navBtn, activeTab === "courses" ? styles.navBtnActive : ""].join(" ")}
+              onClick={() => setActiveTab("courses")}
+            >
+              <span className={styles.navIcon}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                </svg>
+              </span>
+              <span className={styles.navLabel}>Курсы</span>
+              <span className={styles.navHint}>audit</span>
+            </button>
+
+            <div className={styles.navGroupLabel}>ML-лаборатория</div>
 
             <button
               className={[styles.navBtn, activeTab === "analysis" ? styles.navBtnActive : ""].join(" ")}
@@ -1287,6 +1365,8 @@ const analysisFlowSteps = [
             </div>
           )}
 
+          {activeTab === "courses" && <CourseAuditor apiBase={apiBase} />}
+
           {/* ── Analysis Tab ─────────────────────────── */}
           {activeTab === "analysis" && (
             <div className={styles.card}>
@@ -1296,7 +1376,10 @@ const analysisFlowSteps = [
   title="От текста к карте знаний"
   description="Загрузи материал и запусти анализ, чтобы получить узлы знаний с уровнями Блума. Когда основа готова, переходи к графу, поиску и ручной проверке."
   stats={[
-    { label: "API", value: apiStatus === "ok" ? "online" : "offline", tone: apiStatus === "ok" ? "success" : "warning" },
+    { label: "API", value: apiStatus === "ok" ? "работает" : "нет связи", tone: apiStatus === "ok" ? "success" : "warning" },
+    { label: "Извлечение", value: qualitySummary.extractorLabel, tone: healthQuality?.extractor === "semantic" ? "success" : "warning" },
+    { label: "Эмбеддинги", value: qualitySummary.embeddingLabel, tone: qualitySummary.embeddingTone },
+    { label: "Классификатор", value: qualitySummary.classifierLabel, tone: qualitySummary.classifierTone },
     { label: "Датасет", value: hasDataset ? `#${ds}` : "Не выбран", tone: hasDataset ? "accent" : "warning" },
     { label: "Узлы", value: nodes.length, tone: hasNodes ? "info" : "neutral" },
     { label: "Нужна проверка", value: lowConfidenceCount, tone: lowConfidenceCount ? "warning" : "success" },
@@ -2371,7 +2454,8 @@ const analysisFlowSteps = [
   stats={[
     { label: "Датасеты", value: dashDatasets.length, tone: "accent" },
     { label: "Узлы в DS", value: dashNodeCount ?? "?", tone: dashNodeCount ? "info" : "neutral" },
-    { label: "API", value: apiStatus === "ok" ? "online" : "offline", tone: apiStatus === "ok" ? "success" : "warning" },
+    { label: "API", value: apiStatus === "ok" ? "работает" : "нет связи", tone: apiStatus === "ok" ? "success" : "warning" },
+    { label: "Эмбеддинги", value: qualitySummary.embeddingLabel, tone: qualitySummary.embeddingTone },
   ]}
   actions={
     <button
@@ -2410,9 +2494,15 @@ const analysisFlowSteps = [
                     </div>
                     <div className={styles.dashCard}>
                       <div className={styles.dashCardVal} style={{ color: "var(--success)" }}>
-                        {apiStatus === "ok" ? "Online" : "Offline"}
+                        {apiStatus === "ok" ? "Работает" : "Нет связи"}
                       </div>
                       <div className={styles.dashCardLabel}>API статус</div>
+                    </div>
+                    <div className={styles.dashCard}>
+                      <div className={styles.dashCardVal}>
+                        {qualitySummary.embeddingLabel}
+                      </div>
+                      <div className={styles.dashCardLabel}>Качество эмбеддингов</div>
                     </div>
                   </div>
 
@@ -2484,7 +2574,7 @@ const analysisFlowSteps = [
         </main>
 
         {/* ── Aside (right sidebar) ────────────────────── */}
-        <aside className={styles.aside}>
+        {activeTab !== "courses" && <aside className={styles.aside}>
 
           {/* Connection card */}
           <div className={styles.asideCard}>
@@ -2499,15 +2589,15 @@ const analysisFlowSteps = [
                   className={styles.input}
                   value={apiBase}
                   onChange={(e) => setApiBase(e.target.value)}
-                  placeholder="http://localhost:8000"
+                  placeholder={DEFAULT_API}
                 />
               </label>
               <div className={styles.row}>
                 <button
                   className={styles.btnCompact}
-                  onClick={() => setApiBase("http://localhost:8000")}
+                  onClick={() => setApiBase(DEFAULT_API)}
                 >
-                  localhost
+                  default
                 </button>
                 <button
                   className={styles.btnCompact}
@@ -2733,7 +2823,7 @@ const analysisFlowSteps = [
             </div>
           </div>
 
-        </aside>
+        </aside>}
       </div>
 
       {/* ── Node detail modal ──────────────────────────── */}
@@ -2915,17 +3005,17 @@ const analysisFlowSteps = [
       {showOnboarding && (
         <div className={styles.onboardOverlay}>
           <div className={styles.onboardCard}>
-            <div className={styles.onboardIcon}>🌸</div>
-            <div className={styles.onboardTitle}>Добро пожаловать в Bloom RAG Studio</div>
+            <div className={styles.onboardIcon}>К</div>
+            <div className={styles.onboardTitle}>Добро пожаловать в лабораторию «Контура»</div>
             <div className={styles.onboardSubtitle}>
-              Инструмент для автоматической классификации знаний по таксономии Блума с RAG-индексацией.
+              Проверьте, согласованы ли учебные цели, материалы и задания курса.
             </div>
             <div className={styles.onboardSteps}>
               {[
-                { n: "1", text: "Создай датасет в правой панели или введи ID существующего" },
-                { n: "2", text: "Вставь текст на вкладке «Анализ» и нажми Анализировать" },
-                { n: "3", text: "Загрузи документ и проиндексируй для семантического поиска" },
-                { n: "4", text: "Перейди на вкладку «Разметка» для ручной аннотации (1–6 + Enter)" },
+                { n: "1", text: "Создайте курс или импортируйте его из Canvas" },
+                { n: "2", text: "Добавьте цели, учебные материалы и задания" },
+                { n: "3", text: "Запустите проверку и изучите связи курса" },
+                { n: "4", text: "Откройте доказательства и примите решение по находкам" },
               ].map(({ n, text }) => (
                 <div key={n} className={styles.onboardStep}>
                   <div className={styles.onboardStepNum}>{n}</div>
@@ -2956,7 +3046,7 @@ const analysisFlowSteps = [
               <div className={styles.guideHeaderIcon}>📖</div>
               <div style={{ flex: 1 }}>
                 <div className={styles.guideTitle}>Как пользоваться</div>
-                <div className={styles.guideSubtitle}>Bloom RAG Studio — краткое руководство</div>
+                <div className={styles.guideSubtitle}>Лаборатория «Контура» — краткое руководство</div>
               </div>
               <button className={styles.guideClose} onClick={() => setShowGuide(false)}>×</button>
             </div>
@@ -3098,46 +3188,36 @@ const analysisFlowSteps = [
           <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 200 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{
-                width: 32, height: 32, borderRadius: 8,
-                background: "linear-gradient(135deg, #6366f1 0%, #06b6d4 100%)",
+                width: 32, height: 32, borderRadius: "6px 12px 6px 12px",
+                background: "var(--workshop-cobalt)", color: "white",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 16, boxShadow: "0 0 12px rgba(99,102,241,0.3)",
-              }}>🌸</div>
+                fontSize: 16, fontWeight: 800, boxShadow: "4px 4px 0 var(--workshop-apricot)",
+              }}>К</div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)", letterSpacing: "-0.2px" }}>
-                  Bloom RAG Studio
+                  Контур · лаборатория качества
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
-                  Knowledge Taxonomy Engine
+                  Проверяемая карта учебного курса
                 </div>
               </div>
             </div>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, maxWidth: 260 }}>
-              Инструмент для автоматической классификации учебных материалов по таксономии Блума с RAG-индексацией и визуализацией графа знаний.
+            <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, maxWidth: 300 }}>
+              Связывает цели, материалы, задания и доказательства, чтобы преподаватель мог проверить курс и принять решение без автоматической публикации в Canvas.
             </p>
-            {/* tech badges */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
-              {[["Next.js", "#fff"], ["FastAPI", "#009688"], ["PostgreSQL", "#336791"], ["pgvector", "#c084fc"], ["OpenAI", "#10a37f"]].map(([label, color]) => (
-                <span key={label} style={{
-                  fontSize: 10, fontWeight: 600, letterSpacing: "0.3px",
-                  padding: "2px 7px", borderRadius: 4,
-                  border: `1px solid ${color}33`,
-                  background: `${color}11`,
-                  color: color === "#fff" ? "var(--text-secondary)" : color,
-                }}>{label}</span>
-              ))}
-            </div>
           </div>
 
           {/* ── Center: quick links ── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.6px", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>
-              Ресурсы
-            </div>
+            <details>
+              <summary style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.6px", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 8, cursor: "pointer" }}>
+                Инструменты разработчика
+              </summary>
+              <div style={{ display: "grid", gap: 8, paddingLeft: 4 }}>
             {[
-              { label: "API Docs", href: "http://localhost:8000/docs", icon: "📄" },
-              { label: "Health Check", href: "http://localhost:8000/health", icon: "🟢" },
-              { label: "OpenAPI JSON", href: "http://localhost:8000/openapi.json", icon: "⚙️" },
+              { label: "API Docs", href: `${apiBase}/docs`, icon: "📄" },
+              { label: "Health Check", href: `${apiBase}/health`, icon: "🟢" },
+              { label: "OpenAPI JSON", href: `${apiBase}/openapi.json`, icon: "⚙️" },
             ].map(({ label, href, icon }) => (
               <a key={label} href={href} target="_blank" rel="noopener noreferrer" style={{
                 display: "flex", alignItems: "center", gap: 7,
@@ -3150,13 +3230,15 @@ const analysisFlowSteps = [
                 <span style={{ fontSize: 11 }}>{icon}</span>
                 {label}
               </a>
-            ))}
+              ))}
+              </div>
+            </details>
           </div>
 
           {/* ── Developer column ── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
             <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.6px", color: "var(--text-muted)", textTransform: "uppercase" }}>
-              Разработчик
+              Связь
             </div>
             <a
               href="https://t.me/JapanDino"
@@ -3190,8 +3272,8 @@ const analysisFlowSteps = [
               <span>JapanDino</span>
             </a>
             <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "right", lineHeight: 1.5 }}>
-              Bloom RAG Studio © {new Date().getFullYear()}<br/>
-              <span style={{ opacity: 0.6 }}>MIT License</span>
+              Контур © {new Date().getFullYear()}<br/>
+              <span style={{ opacity: 0.6 }}>Локальная установка</span>
             </div>
           </div>
         </div>

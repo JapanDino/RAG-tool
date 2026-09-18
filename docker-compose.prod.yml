@@ -1,0 +1,120 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rag_db}
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag_pass}
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: [./backend/.env]
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-rag_db}
+      DB_USER: ${POSTGRES_USER:-rag}
+      DB_PASS: ${POSTGRES_PASSWORD:-rag_pass}
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+      AUTH_MODE: ${AUTH_MODE:-external}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    working_dir: /app/backend
+    command: >
+      bash -lc "bash ../scripts/apply_migrations.sh && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: [./backend/.env]
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-rag_db}
+      DB_USER: ${POSTGRES_USER:-rag}
+      DB_PASS: ${POSTGRES_PASSWORD:-rag_pass}
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+      AUTH_MODE: ${AUTH_MODE:-external}
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    working_dir: /app/backend
+    command: celery -A app.celery_app:celery_app worker -l INFO
+
+  beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: [./backend/.env]
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-rag_db}
+      DB_USER: ${POSTGRES_USER:-rag}
+      DB_PASS: ${POSTGRES_PASSWORD:-rag_pass}
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+      AUTH_MODE: ${AUTH_MODE:-external}
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    working_dir: /app/backend
+    command: celery -A app.celery_app:celery_app beat -l INFO --schedule=/tmp/celerybeat-schedule
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+
+volumes:
+  dbdata:
+  redisdata:

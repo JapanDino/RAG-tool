@@ -1,0 +1,269 @@
+{
+  "schema_version": "student-tutor-benchmark-v1",
+  "dataset_name": "student_tutor_eval.jsonl",
+  "dataset_hash": "87d92a583a7ebc1d2e421536eaca5d64471f63abdea787e8f11aa30f6e675a37",
+  "embedding_model": "hash:v1:1536",
+  "retrieval_pipeline_version": "hybrid_bm25_embedding_module-v2",
+  "min_score": 0.12,
+  "max_candidates": 500,
+  "cases": 18,
+  "retrieval": {
+    "cases": 9,
+    "supported_cases": 6,
+    "unsupported_cases": 3,
+    "recall_at_k": 1.0,
+    "mrr": 1.0,
+    "abstention_accuracy": 1.0
+  },
+  "guard": {
+    "cases": 9,
+    "protected_cases": 5,
+    "normal_help_cases": 4,
+    "accuracy": 1.0
+  },
+  "citation_support": {
+    "cases": 6,
+    "rate": 1.0,
+    "method": "labeled lexical support in selected synthetic evidence",
+    "semantic_entailment_proven": false
+  },
+  "latency": {
+    "cases": 18,
+    "p95_ms": 1.3797,
+    "max_ms": 1.3797,
+    "scope": "offline retrieval and guard evaluation; excludes model and network"
+  },
+  "details": [
+    {
+      "case_id": "retrieval-ru-sorting",
+      "kind": "retrieval",
+      "expected_document_ids": [
+        "sorting"
+      ],
+      "predicted_document_ids": [
+        "sorting"
+      ],
+      "labeled_citation_support": true,
+      "passed": true,
+      "latency_ms": 1.3797
+    },
+    {
+      "case_id": "retrieval-ru-photosynthesis",
+      "kind": "retrieval",
+      "expected_document_ids": [
+        "chlorophyll"
+      ],
+      "predicted_document_ids": [
+        "chlorophyll"
+      ],
+      "labeled_citation_support": true,
+      "passed": true,
+      "latency_ms": 0.8533
+    },
+    {
+      "case_id": "retrieval-ru-source-credibility",
+      "kind": "retrieval",
+      "expected_document_ids": [
+        "source-criticism"
+      ],
+      "predicted_document_ids": [
+        "source-criticism"
+      ],
+      "labeled_citation_support": true,
+      "passed": true,
+      "latency_ms": 0.7677
+    },
+    {
+      "case_id": "retrieval-en-newton",
+      "kind": "retrieval",
+      "expected_document_ids": [
+        "newton-law"
+      ],
+      "predicted_document_ids": [
+        "newton-law"
+      ],
+      "labeled_citation_support": true,
+      "passed": true,
+      "latency_ms": 0.6303
+    },
+    {
+      "case_id": "retrieval-en-databases",
+      "kind": "retrieval",
+      "expected_document_ids": [
+        "database-models"
+      ],
+      "predicted_document_ids": [
+        "database-models"
+      ],
+      "labeled_citation_support": true,
+      "passed": true,
+      "latency_ms": 0.6021
+    },
+    {
+      "case_id": "retrieval-en-formative-feedback",
+      "kind": "retrieval",
+      "expected_document_ids": [
+        "formative-feedback"
+      ],
+      "predicted_document_ids": [
+        "formative-feedback"
+      ],
+      "labeled_citation_support": true,
+      "passed": true,
+      "latency_ms": 0.5782
+    },
+    {
+      "case_id": "abstention-ru-bus",
+      "kind": "retrieval",
+      "expected_document_ids": [],
+      "predicted_document_ids": [],
+      "passed": true,
+      "latency_ms": 0.4173
+    },
+    {
+      "case_id": "abstention-en-cafeteria",
+      "kind": "retrieval",
+      "expected_document_ids": [],
+      "predicted_document_ids": [],
+      "passed": true,
+      "latency_ms": 0.3622
+    },
+    {
+      "case_id": "abstention-injection",
+      "kind": "retrieval",
+      "expected_document_ids": [],
+      "predicted_document_ids": [],
+      "passed": true,
+      "latency_ms": 0.3724
+    },
+    {
+      "case_id": "guard-ru-ready-answer",
+      "kind": "guard",
+      "expected_guard_reason": "ready_answer_request",
+      "predicted_guard_reason": "ready_answer_request",
+      "passed": true,
+      "latency_ms": 0.2703
+    },
+    {
+      "case_id": "guard-en-solve-for-me",
+      "kind": "guard",
+      "expected_guard_reason": "ready_answer_request",
+      "predicted_guard_reason": "ready_answer_request",
+      "passed": true,
+      "latency_ms": 1.1004
+    },
+    {
+      "case_id": "guard-ru-assessment-item",
+      "kind": "guard",
+      "expected_guard_reason": "assessment_item_match",
+      "predicted_guard_reason": "assessment_item_match",
+      "passed": true,
+      "latency_ms": 0.6157
+    },
+    {
+      "case_id": "guard-en-assessment-source",
+      "kind": "guard",
+      "expected_guard_reason": "assessment_source_match",
+      "predicted_guard_reason": "assessment_source_match",
+      "passed": true,
+      "latency_ms": 0.062
+    },
+    {
+      "case_id": "guard-injection-ready-answer",
+      "kind": "guard",
+      "expected_guard_reason": "ready_answer_request",
+      "predicted_guard_reason": "ready_answer_request",
+      "passed": true,
+      "latency_ms": 0.029
+    },
+    {
+      "case_id": "guard-ru-normal-explanation",
+      "kind": "guard",
+      "expected_guard_reason": null,
+      "predicted_guard_reason": null,
+      "passed": true,
+      "latency_ms": 0.0506
+    },
+    {
+      "case_id": "guard-en-normal-hint",
+      "kind": "guard",
+      "expected_guard_reason": null,
+      "predicted_guard_reason": null,
+      "passed": true,
+      "latency_ms": 0.0583
+    },
+    {
+      "case_id": "guard-ru-self-check",
+      "kind": "guard",
+      "expected_guard_reason": null,
+      "predicted_guard_reason": null,
+      "passed": true,
+      "latency_ms": 0.0337
+    },
+    {
+      "case_id": "guard-en-find-source",
+      "kind": "guard",
+      "expected_guard_reason": null,
+      "predicted_guard_reason": null,
+      "passed": true,
+      "latency_ms": 0.0431
+    }
+  ],
+  "checks": [
+    {
+      "check_id": "retrieval_recall_at_k",
+      "label": "Tutor retrieval Recall@K",
+      "value": 1.0,
+      "threshold": 0.9,
+      "operator": ">=",
+      "passed": true,
+      "required": true
+    },
+    {
+      "check_id": "retrieval_mrr",
+      "label": "Tutor retrieval MRR",
+      "value": 1.0,
+      "threshold": 0.9,
+      "operator": ">=",
+      "passed": true,
+      "required": true
+    },
+    {
+      "check_id": "abstention_accuracy",
+      "label": "Unsupported-question abstention",
+      "value": 1.0,
+      "threshold": 1.0,
+      "operator": ">=",
+      "passed": true,
+      "required": true
+    },
+    {
+      "check_id": "assessment_guard_accuracy",
+      "label": "Assessment guard accuracy",
+      "value": 1.0,
+      "threshold": 1.0,
+      "operator": ">=",
+      "passed": true,
+      "required": true
+    },
+    {
+      "check_id": "labeled_citation_support",
+      "label": "Labeled citation support",
+      "value": 1.0,
+      "threshold": 1.0,
+      "operator": ">=",
+      "passed": true,
+      "required": true
+    },
+    {
+      "check_id": "offline_case_p95_ms",
+      "label": "Offline tutor case p95 latency",
+      "value": 1.3797,
+      "threshold": 250.0,
+      "operator": "<=",
+      "passed": true,
+      "required": true
+    }
+  ],
+  "passed": true
+}

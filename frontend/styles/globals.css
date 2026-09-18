@@ -1,40 +1,49 @@
 ﻿/* ============================================================
-   Bloom Knowledge Studio Design Tokens
+   Workshop Route product tokens
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-
 :root {
-  --bg-base: #f7f3ec;
-  --bg-surface: #fffdf9;
-  --bg-card: #fffdf9;
-  --bg-card-2: #f3ecdf;
-  --bg-hover: #ece4d7;
-  --bg-overlay: rgba(255, 253, 249, 0.92);
+  --workshop-ink: #15315f;
+  --workshop-cobalt: #2457d6;
+  --workshop-cobalt-dark: #153f9e;
+  --workshop-apricot: #ff9b73;
+  --workshop-yellow: #ffd95a;
+  --workshop-mint: #83d8c7;
+  --workshop-grid: #f8fbff;
+  --workshop-warm: #fff9e9;
+  --workshop-slate: #5a6f8a;
+  --bg-base: var(--workshop-grid);
+  --bg-surface: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-2: #eef4ff;
+  --bg-hover: #e4edff;
+  --bg-input: #ffffff;
+  --bg-overlay: rgba(248, 251, 255, 0.94);
 
-  --border: rgba(70, 58, 44, 0.1);
-  --border-2: rgba(70, 58, 44, 0.18);
-  --border-focus: rgba(69, 107, 90, 0.42);
+  --border: rgba(21, 49, 95, 0.12);
+  --border-1: rgba(21, 49, 95, 0.12);
+  --border-2: rgba(21, 49, 95, 0.24);
+  --border-focus: rgba(36, 87, 214, 0.46);
 
-  --text-primary: #1f1f1b;
-  --text-secondary: #5f5a52;
-  --text-muted: #8c8378;
-  --text-accent: #456b5a;
+  --text-primary: var(--workshop-ink);
+  --text-secondary: #405979;
+  --text-muted: var(--workshop-slate);
+  --text-accent: var(--workshop-cobalt);
 
-  --accent: #456b5a;
-  --accent-hover: #385847;
-  --accent-light: #d9e7df;
-  --accent-border: rgba(69, 107, 90, 0.28);
-  --accent-glow: none;
+  --accent: var(--workshop-cobalt);
+  --accent-hover: var(--workshop-cobalt-dark);
+  --accent-light: #e3ebff;
+  --accent-border: rgba(36, 87, 214, 0.3);
+  --accent-glow: 0 0 0 5px rgba(255, 217, 90, 0.42);
 
-  --success: #5c7a5b;
-  --success-light: rgba(92, 122, 91, 0.12);
-  --warning: #b88a3c;
-  --warning-light: rgba(184, 138, 60, 0.14);
-  --error: #a85757;
-  --error-light: rgba(168, 87, 87, 0.12);
-  --info: #5b7392;
-  --info-light: rgba(91, 115, 146, 0.12);
+  --success: #16796b;
+  --success-light: rgba(131, 216, 199, 0.22);
+  --warning: #8b6200;
+  --warning-light: rgba(255, 217, 90, 0.28);
+  --error: #b94952;
+  --error-light: rgba(185, 73, 82, 0.12);
+  --info: var(--workshop-cobalt);
+  --info-light: rgba(36, 87, 214, 0.12);
 
   --bloom-remember: #5b7392;
   --bloom-understand: #456b5a;
@@ -50,21 +59,22 @@
   --bloom-evaluate-bg: rgba(138, 120, 175, 0.14);
   --bloom-create-bg: rgba(95, 139, 136, 0.14);
 
-  --shadow-sm: none;
-  --shadow-md: none;
-  --shadow-lg: 0 24px 48px rgba(74, 56, 35, 0.08);
-  --shadow-xl: 0 32px 64px rgba(74, 56, 35, 0.12);
+  --shadow-sm: 3px 4px 0 rgba(255, 155, 115, 0.28);
+  --shadow-md: 6px 7px 0 rgba(255, 155, 115, 0.38);
+  --shadow-lg: 0 22px 44px rgba(21, 49, 95, 0.1);
+  --shadow-xl: 0 30px 64px rgba(21, 49, 95, 0.14);
 
-  --r-xs: 8px;
-  --r-sm: 12px;
-  --r-md: 16px;
-  --r-lg: 22px;
-  --r-xl: 28px;
-  --r-2xl: 32px;
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-2xl: 24px;
   --r-pill: 999px;
 
-  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, ui-monospace, monospace;
 
   --transition-fast: all 0.12s ease;
   --transition-base: all 0.18s ease;
@@ -72,27 +82,28 @@
 }
 
 :root[data-theme="dark"] {
-  --bg-base: #151714;
-  --bg-surface: #1f221e;
-  --bg-card: #21251f;
-  --bg-card-2: #2a2e29;
-  --bg-hover: #30352f;
-  --bg-overlay: rgba(31, 34, 30, 0.92);
+  --bg-base: #0f2852;
+  --bg-surface: #15315f;
+  --bg-card: #193866;
+  --bg-card-2: #214577;
+  --bg-hover: #294f82;
+  --bg-input: #102c57;
+  --bg-overlay: rgba(21, 49, 95, 0.94);
 
   --border: rgba(255, 244, 228, 0.08);
   --border-2: rgba(255, 244, 228, 0.14);
   --border-focus: rgba(143, 179, 160, 0.4);
 
-  --text-primary: #f4f0e7;
-  --text-secondary: #b7b0a4;
-  --text-muted: #8e887d;
-  --text-accent: #8fb3a0;
+  --text-primary: #f8fbff;
+  --text-secondary: #d6e2f3;
+  --text-muted: #a9bdd8;
+  --text-accent: #a9c4ff;
 
-  --accent: #8fb3a0;
-  --accent-hover: #7aa08d;
-  --accent-light: #2b4036;
-  --accent-border: rgba(143, 179, 160, 0.24);
-  --accent-glow: none;
+  --accent: #8fb0ff;
+  --accent-hover: #b3c9ff;
+  --accent-light: #234a7d;
+  --accent-border: rgba(143, 176, 255, 0.32);
+  --accent-glow: 0 0 0 5px rgba(255, 217, 90, 0.28);
 
   --success: #8fb39a;
   --success-light: rgba(143, 179, 154, 0.12);
@@ -136,15 +147,16 @@ html, body {
 
 body {
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 400;
   line-height: 1.5;
   color: var(--text-primary);
   background-color: var(--bg-base);
   background-image:
-    radial-gradient(circle at top left, rgba(91, 115, 146, 0.08), transparent 24%),
-    radial-gradient(circle at top right, rgba(201, 112, 82, 0.08), transparent 22%),
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-base) 82%, white 18%), var(--bg-base));
+    linear-gradient(rgba(36, 87, 214, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 87, 214, 0.055) 1px, transparent 1px),
+    linear-gradient(180deg, #f8fbff, #eef4ff);
+  background-size: 28px 28px, 28px 28px, auto;
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -157,17 +169,7 @@ body {
     linear-gradient(180deg, #1a1c19, var(--bg-base));
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgba(70, 58, 44, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(70, 58, 44, 0.03) 1px, transparent 1px);
-  background-size: 36px 36px;
-  z-index: 0;
-}
+body::before { content: none; }
 
 :root[data-theme="dark"] body::before {
   background-image:
@@ -214,9 +216,9 @@ button, input, textarea, select {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 3px solid var(--workshop-ink);
   outline-offset: 2px;
-  border-radius: var(--r-sm);
+  box-shadow: 0 0 0 6px var(--workshop-yellow);
 }
 
 @keyframes fadeIn {
@@ -242,4 +244,13 @@ button, input, textarea, select {
 @keyframes backdropIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

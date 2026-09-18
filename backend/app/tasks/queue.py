@@ -1,10 +1,17 @@
 import logging
 import os
-from sqlalchemy.orm import Session
+
 from sqlalchemy import text
-from .celery_app import celery_app
-from .tasks import index_dataset, annotate_dataset, rebuild_graph_edges, parse_document
+from sqlalchemy.orm import Session
+
 from ..models.models import Job, JobStatus, JobType
+from .tasks import (
+    annotate_dataset,
+    audit_course,
+    index_dataset,
+    parse_document,
+    rebuild_graph_edges,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +47,15 @@ def _run_sync(db: Session, job: Job):
                 job.payload.get("limit_nodes", 500),
                 job.payload.get("co_window", 2),
             )
+        elif job.type == JobType.audit:
+            audit_course(job.payload["course_id"], job.payload["audit_run_id"], job.id)
         else:
-            db.execute(text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"), {"id": job.id})
+            db.execute(
+                text(
+                    "UPDATE jobs SET status='done', finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
+                {"id": job.id},
+            )
             db.commit()
     except Exception as e:
         logger.exception("Sync job %d (%s) failed: %s", job.id, job.type, e)
@@ -106,9 +120,20 @@ def enqueue_or_mark(db: Session, job: Job):
                 dict(st=JobStatus.queued.value, tid=async_result.id, id=job.id),
             )
             db.commit()
+        elif job.type == JobType.audit:
+            async_result = audit_course.delay(
+                job.payload["course_id"], job.payload["audit_run_id"], job.id
+            )
+            db.execute(
+                text("UPDATE jobs SET status=:st, task_id=:tid WHERE id=:id"),
+                dict(st=JobStatus.queued.value, tid=async_result.id, id=job.id),
+            )
+            db.commit()
     except Exception as e:
         db.execute(
-            text("UPDATE jobs SET status='failed', error=:err, finished_at=now() WHERE id=:id"),
+            text(
+                "UPDATE jobs SET status='failed', error=:err, finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+            ),
             dict(err=str(e), id=job.id),
         )
         db.commit()

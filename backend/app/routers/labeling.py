@@ -4,13 +4,12 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from ..db.session import get_db
 from ..models.models import Dataset, KnowledgeNode, NodeLabel
-from ..schemas.schemas import LabelQueueOut, LabelQueueItem, NodeLabelsIn, NodeLabelsOut
-
+from ..schemas.schemas import LabelQueueItem, LabelQueueOut, NodeLabelsIn, NodeLabelsOut
 
 router = APIRouter(prefix="/datasets", tags=["labeling"])
 
@@ -93,7 +92,9 @@ def labeling_queue(
     labeled_q = (
         db.query(NodeLabel)
         .join(KnowledgeNode, NodeLabel.node_id == KnowledgeNode.id)
-        .filter(KnowledgeNode.dataset_id == dataset_id, NodeLabel.annotator == annotator)
+        .filter(
+            KnowledgeNode.dataset_id == dataset_id, NodeLabel.annotator == annotator
+        )
     )
     if embedding_model:
         labeled_q = labeled_q.filter(KnowledgeNode.embedding_model == embedding_model)
@@ -133,6 +134,7 @@ def export_labels(
                     "prob_vector": kn.prob_vector,
                     "top_levels": kn.top_levels,
                     "embedding_model": kn.embedding_model,
+                    "model_info": kn.model_info,
                 },
                 ensure_ascii=False,
             )
@@ -164,7 +166,12 @@ def set_node_labels(
     if nl:
         nl.labels = list(payload.labels)
     else:
-        nl = NodeLabel(node_id=node_id, labels=list(payload.labels), annotator=payload.annotator, source="human")
+        nl = NodeLabel(
+            node_id=node_id,
+            labels=list(payload.labels),
+            annotator=payload.annotator,
+            source="human",
+        )
         db.add(nl)
     db.commit()
     db.refresh(nl)

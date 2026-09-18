@@ -7,8 +7,9 @@ logger = logging.getLogger(__name__)
 
 
 def extract_text(filename: str, content_type: str, data: bytes) -> str:
-    is_pdf = (content_type == "application/pdf" or
-              (filename or "").lower().endswith(".pdf"))
+    is_pdf = content_type == "application/pdf" or (filename or "").lower().endswith(
+        ".pdf"
+    )
     if is_pdf:
         return extract_pdf(data)
     try:
@@ -26,19 +27,22 @@ def extract_pdf(data: bytes) -> str:
     try:
         from pdfminer.high_level import extract_text as pdfminer_extract
         from pdfminer.layout import LAParams
+
         params = LAParams(char_margin=3.0, word_margin=0.2, line_margin=0.5)
         text = pdfminer_extract(io.BytesIO(data), laparams=params)
     except Exception:
         from pypdf import PdfReader
+
         reader = PdfReader(io.BytesIO(data))
         pages = [page.extract_text() or "" for page in reader.pages]
         text = "\n\n".join(pages)
 
-    text = re.sub(r'\n{3,}', '\n\n', text).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
     # Heuristic: if fewer than 50 meaningful characters per page, treat as scan
     try:
         from pypdf import PdfReader as _R
+
         page_count = max(1, len(_R(io.BytesIO(data)).pages))
     except Exception:
         page_count = 1
@@ -95,7 +99,8 @@ def ocr_pdf(data: bytes) -> str:
                     except concurrent.futures.TimeoutError:
                         logger.warning(
                             "OCR page %d timed out after %ds, skipping",
-                            page_num, OCR_PAGE_TIMEOUT,
+                            page_num,
+                            OCR_PAGE_TIMEOUT,
                         )
             except Exception as e:
                 logger.warning("OCR failed on page %d: %s", page_num, e)

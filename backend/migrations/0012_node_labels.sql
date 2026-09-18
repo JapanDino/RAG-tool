@@ -11,4 +11,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_node_labels_node_annotator
   ON node_labels (node_id, annotator);
 
 CREATE INDEX IF NOT EXISTS idx_node_labels_node_id ON node_labels (node_id);
-

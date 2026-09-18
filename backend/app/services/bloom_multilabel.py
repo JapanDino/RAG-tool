@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ..schemas.schemas import BloomLevel
 from ..services.openai_client import chat_completion_json
-from ..utils.bloom import LEVEL_ORDER, classify_bloom_multilabel as keyword_classify
+from ..utils.bloom import LEVEL_ORDER
+from ..utils.bloom import classify_bloom_multilabel as keyword_classify
 from ..utils.prompt import build_bloom_multilabel_prompt
 
 
@@ -29,7 +30,9 @@ def _normalize_probs(probs: list[float]) -> list[float]:
     return [p / s for p in probs]
 
 
-def classify_bloom_multilabel(text: str, min_prob: float = 0.2, max_levels: int = 2) -> dict[str, Any]:
+def classify_bloom_multilabel(
+    text: str, min_prob: float = 0.2, max_levels: int = 2
+) -> dict[str, Any]:
     """
     Hybrid bloom multi-label classifier.
     - keyword (default): offline baseline using `data/bloom_verbs_ru.json`
@@ -73,4 +76,3 @@ def classify_bloom_multilabel(text: str, min_prob: float = 0.2, max_levels: int 
         "rationale": obj.rationale,
         "triggers": {},
     }
-

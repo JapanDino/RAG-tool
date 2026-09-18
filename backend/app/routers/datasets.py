@@ -1,18 +1,18 @@
 import logging
-import uuid
 import os
+import uuid
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from ..db.session import get_db
-from ..models.models import Dataset, Document, Job, JobType, JobStatus, KnowledgeNode
-from ..tasks.queue import enqueue_or_mark
+from ..models.models import Dataset, Document, Job, JobStatus, JobType, KnowledgeNode
 from ..schemas.schemas import DatasetIn, DatasetOut
-from ..services.text_extract import extract_text
 from ..services.embedding import embed_texts
 from ..services.embedding_provider import current_embedding_model
+from ..services.text_extract import extract_text
+from ..tasks.queue import enqueue_or_mark
 from ..utils.vector import vector_literal
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,11 @@ def create_dataset(data: DatasetIn, db: Session = Depends(get_db)):
     if existing:
         return existing
     ds = Dataset(name=data.name)
-    db.add(ds); db.commit(); db.refresh(ds)
+    db.add(ds)
+    db.commit()
+    db.refresh(ds)
     return ds
+
 
 @router.post("/extract-text")
 def extract_text_from_file(file: UploadFile = File(...)):
@@ -44,7 +47,9 @@ def extract_text_from_file(file: UploadFile = File(...)):
 
 
 @router.post("/{dataset_id}/documents")
-def upload_document(dataset_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload_document(
+    dataset_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)
+):
     ds = db.get(Dataset, dataset_id)
     if not ds:
         raise HTTPException(404, "dataset not found")
@@ -88,17 +93,35 @@ def upload_document(dataset_id: int, file: UploadFile = File(...), db: Session =
 
     return {"document_id": doc.id, "job_id": job.id}
 
+
 @router.post("/{dataset_id}/index")
 def start_index(dataset_id: int, db: Session = Depends(get_db)):
-    job = Job(type=JobType.index, status=JobStatus.queued, payload={"dataset_id": dataset_id})
-    db.add(job); db.commit(); db.refresh(job)
+    job = Job(
+        type=JobType.index, status=JobStatus.queued, payload={"dataset_id": dataset_id}
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
     enqueue_or_mark(db, job)
     return {"job_id": job.id}
 
+
 @router.post("/{dataset_id}/annotate")
-def start_annotate(dataset_id: int, level: str = Query(..., pattern="^(remember|understand|apply|analyze|evaluate|create)$"), db: Session = Depends(get_db)):
-    job = Job(type=JobType.annotate, status=JobStatus.queued, payload={"dataset_id": dataset_id, "level": level})
-    db.add(job); db.commit(); db.refresh(job)
+def start_annotate(
+    dataset_id: int,
+    level: str = Query(
+        ..., pattern="^(remember|understand|apply|analyze|evaluate|create)$"
+    ),
+    db: Session = Depends(get_db),
+):
+    job = Job(
+        type=JobType.annotate,
+        status=JobStatus.queued,
+        payload={"dataset_id": dataset_id, "level": level},
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
     enqueue_or_mark(db, job)
     return {"job_id": job.id}
 
@@ -134,5 +157,10 @@ def reindex_nodes(dataset_id: int, db: Session = Depends(get_db)):
             {"v": vector_literal(vec), "m": model_name, "id": node.id},
         )
     db.commit()
-    logger.info("Reindexed %d nodes for dataset %d with model %s", len(nodes), dataset_id, model_name)
+    logger.info(
+        "Reindexed %d nodes for dataset %d with model %s",
+        len(nodes),
+        dataset_id,
+        model_name,
+    )
     return {"ok": True, "reindexed": len(nodes), "model": model_name}

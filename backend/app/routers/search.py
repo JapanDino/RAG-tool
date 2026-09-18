@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 from ..db.session import get_db
-from ..services.query_embed import embed_query
 from ..services.embedding_provider import current_embedding_model
+from ..services.query_embed import embed_query
 from ..utils.vector import vector_literal
 
 router = APIRouter(prefix="/search", tags=["search"])
+
 
 @router.get("")
 def search(
@@ -40,7 +42,9 @@ def search(
         filters.append("d.dataset_id = :ds")
         params["ds"] = dataset_id
     where_clause = "WHERE " + " AND ".join(filters)
-    rows = db.execute(text(sql.format(where_clause=where_clause)), {
-        **params
-    }).mappings().all()
+    rows = (
+        db.execute(text(sql.format(where_clause=where_clause)), {**params})
+        .mappings()
+        .all()
+    )
     return rows

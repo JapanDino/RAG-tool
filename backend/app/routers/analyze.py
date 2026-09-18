@@ -1,29 +1,30 @@
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from ..db.session import get_db
 from ..models.models import KnowledgeNode
 from ..schemas.schemas import (
+    AnalyzeChunkOut,
     AnalyzeContentIn,
     AnalyzeContentOut,
     AnalyzeEdgeOut,
     AnalyzeIn,
     AnalyzeOut,
-    AnalyzeChunkOut,
     ClassifyNodesIn,
     ClassifyNodesOut,
     ExtractNodesIn,
     ExtractNodesOut,
 )
 from ..services.bloom_classifier import bloom_probabilities
+from ..services.bloom_multilabel import classify_bloom_multilabel
 from ..services.chunking import split_into_chunks
 from ..services.embedding import embed_texts
-from ..services.bloom_multilabel import classify_bloom_multilabel
 from ..services.embedding_provider import current_embedding_model
 from ..services.node_extractor import get_node_extractor
+from ..utils.bloom import LEVEL_ORDER
 from ..utils.vector import vector_literal
 
 router = APIRouter(prefix="/analyze", tags=["analyze"])
@@ -41,6 +42,18 @@ def jaccard(a: set[str], b: set[str]) -> float:
     inter = a.intersection(b)
     union = a.union(b)
     return len(inter) / len(union)
+
+
+def competing_levels(prob_vector: list[float], limit: int = 3) -> list[dict]:
+    ranked = sorted(
+        (
+            {"level": level, "probability": float(prob_vector[idx] or 0)}
+            for idx, level in enumerate(LEVEL_ORDER)
+        ),
+        key=lambda item: item["probability"],
+        reverse=True,
+    )
+    return ranked[:limit]
 
 
 @router.post("", response_model=AnalyzeOut)
@@ -95,11 +108,16 @@ def classify_nodes(payload: ClassifyNodesIn):
             min_prob=payload.min_prob or 0.2,
             max_levels=payload.max_levels or 2,
         )
-        out_nodes.append({
-            "title": node.title,
-            "prob_vector": result["prob_vector"],
-            "top_levels": result["top_levels"],
-        })
+        out_nodes.append(
+            {
+                "title": node.title,
+                "prob_vector": result["prob_vector"],
+                "top_levels": result["top_levels"],
+                "rationale": result.get("rationale"),
+                "triggers": result.get("triggers"),
+                "competing_levels": competing_levels(result["prob_vector"]),
+            }
+        )
     return {"nodes": out_nodes}
 
 
@@ -114,7 +132,7 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
         return {"nodes": []}
 
     stored_nodes: list[KnowledgeNode] = []
-    node_rationales: list[str | None] = []
+    node_explanations: list[dict] = []
     embedding_dim = payload.embedding_dim or 1536
     if embedding_dim != 1536:
         raise HTTPException(400, "embedding_dim must be 1536 for current storage")
@@ -125,9 +143,15 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
 
     for node in nodes:
         text_for_cls = node.get("context_snippet") or node["title"]
-        cls = classify_bloom_multilabel(text_for_cls, min_prob=min_prob, max_levels=max_levels)
-        rationale = cls.get("rationale")
-        node_rationales.append(rationale)
+        cls = classify_bloom_multilabel(
+            text_for_cls, min_prob=min_prob, max_levels=max_levels
+        )
+        explanation = {
+            "rationale": cls.get("rationale"),
+            "triggers": cls.get("triggers") or {},
+            "competing_levels": competing_levels(cls["prob_vector"]),
+        }
+        node_explanations.append(explanation)
 
         # Avoid collapsing nodes from different documents or contexts into one record.
         existing = (
@@ -146,10 +170,17 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
             existing.top_levels = cls["top_levels"]
             existing.embedding_model = actual_embedding_model
             existing.model_info = {
-                "extractor": payload.extractor or "heuristic-v1",
+                "extractor": payload.extractor or "semantic-v1",
+                "extractor_version": payload.extractor or "semantic-v1",
                 "classifier": payload.classifier or "keyword-v1",
+                "classifier_version": payload.classifier or "keyword-v1",
+                "confidence_version": "prob-gap-v1",
                 "node_type": node.get("node_type"),
-                "rationale": rationale,
+                "frequency": node.get("frequency"),
+                "source": node.get("source"),
+                "rationale": explanation["rationale"],
+                "triggers": explanation["triggers"],
+                "competing_levels": explanation["competing_levels"],
                 "requested_embedding_model": requested_embedding_model,
             }
             kn = existing
@@ -164,10 +195,17 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
                 embedding_dim=embedding_dim,
                 embedding_model=actual_embedding_model,
                 model_info={
-                    "extractor": payload.extractor or "heuristic-v1",
+                    "extractor": payload.extractor or "semantic-v1",
+                    "extractor_version": payload.extractor or "semantic-v1",
                     "classifier": payload.classifier or "keyword-v1",
+                    "classifier_version": payload.classifier or "keyword-v1",
+                    "confidence_version": "prob-gap-v1",
                     "node_type": node.get("node_type"),
-                    "rationale": rationale,
+                    "frequency": node.get("frequency"),
+                    "source": node.get("source"),
+                    "rationale": explanation["rationale"],
+                    "triggers": explanation["triggers"],
+                    "competing_levels": explanation["competing_levels"],
                     "requested_embedding_model": requested_embedding_model,
                 },
             )
@@ -178,9 +216,7 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
     for kn in stored_nodes:
         db.refresh(kn)
 
-    embed_inputs = [
-        f"{kn.title}. {kn.context_text}".strip() for kn in stored_nodes
-    ]
+    embed_inputs = [f"{kn.title}. {kn.context_text}".strip() for kn in stored_nodes]
     vecs = embed_texts(embed_inputs, dim=embedding_dim)
     for kn, vec in zip(stored_nodes, vecs):
         db.execute(
@@ -197,8 +233,11 @@ def analyze_content(payload: AnalyzeContentIn, db: Session = Depends(get_db)):
                 "context_text": kn.context_text,
                 "prob_vector": kn.prob_vector,
                 "top_levels": kn.top_levels,
-                "rationale": rationale,
+                "frequency": (kn.model_info or {}).get("frequency"),
+                "rationale": explanation.get("rationale"),
+                "triggers": explanation.get("triggers"),
+                "competing_levels": explanation.get("competing_levels"),
             }
-            for kn, rationale in zip(stored_nodes, node_rationales)
+            for kn, explanation in zip(stored_nodes, node_explanations)
         ]
     }

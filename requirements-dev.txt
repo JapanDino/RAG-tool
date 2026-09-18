@@ -1,0 +1,6 @@
+-r backend/requirements.txt
+
+# Reproducible local and hosted-agent quality gates.
+pytest>=8,<10
+httpx>=0.27,<0.29
+pre-commit>=3.7,<5

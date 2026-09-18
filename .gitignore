@@ -4,13 +4,19 @@
 .env
 .env.*
 !.env.example
+/.secrets/
 .vscode
 .idea
 .cursor/
 .claude/
+.playwright-cli/
+.playwright-mcp/
+.tmp/
+output/
 
 # python
 .venv/
+.pytest_cache/
 __pycache__/
 *.pyc
 
@@ -18,3 +24,5 @@ __pycache__/
 node_modules/
 .next/
 out/
+playwright-report/
+test-results/

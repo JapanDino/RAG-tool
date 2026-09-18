@@ -89,6 +89,25 @@
   justify-content: flex-end;
 }
 
+.workspaceLink {
+  min-height: 32px;
+  padding: 7px 11px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.workspaceLink:hover {
+  color: var(--text-accent);
+  background: var(--accent-light);
+  border-color: var(--accent-border);
+}
+
 /* ── Status pills ────────────────────────────────────────── */
 
 .pill {
@@ -3983,5 +4002,98 @@
   .flowSteps,
   .contextActions {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Course Auditor is a focused teacher workspace: the dataset tooling belongs
+   to the ML laboratory tabs and must not compete with the course review. */
+.shellCourses {
+  grid-template-columns: 250px minmax(0, 1fr);
+}
+
+.navGroupLabel {
+  margin: 14px 18px 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 920px) {
+  .shellCourses {
+    grid-template-columns: 1fr;
+  }
+
+  .navCard {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 7px;
+    scrollbar-width: none;
+  }
+
+  .navCard::-webkit-scrollbar {
+    display: none;
+  }
+
+  .navSectionTitle {
+    display: none;
+  }
+
+  .navGroupLabel {
+    display: none;
+  }
+
+  .navBtn,
+  .navBtnActive {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: max-content;
+    min-height: 42px;
+    margin: 0;
+    padding: 9px 12px;
+  }
+
+  .navHint,
+  .navCount,
+  .navProgressChip {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .headerInner {
+    min-height: 56px;
+    padding: 8px 12px;
+    align-items: center;
+  }
+
+  .brandIcon {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+  }
+
+  .subtitle,
+  .pill:not(:first-child),
+  .themeToggle {
+    display: none;
+  }
+
+  .metaRow {
+    margin-left: auto;
+    gap: 6px;
+  }
+
+  .pill,
+  .gearBtn,
+  .helpBtn {
+    min-height: 40px;
+  }
+
+  .shell {
+    padding: 12px 12px 28px;
+    gap: 12px;
   }
 }

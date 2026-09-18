@@ -1,0 +1,95 @@
+{
+  "cases": 10,
+  "retrieval_cases": 9,
+  "recall_at_k": 1.0,
+  "mrr": 1.0,
+  "abstention_accuracy": 1.0,
+  "details": [
+    {
+      "id": "assessment-1",
+      "expected": [
+        "sorting"
+      ],
+      "predicted": [
+        "sorting"
+      ]
+    },
+    {
+      "id": "assessment-2",
+      "expected": [
+        "sources"
+      ],
+      "predicted": [
+        "sources"
+      ]
+    },
+    {
+      "id": "assessment-3",
+      "expected": [
+        "newton"
+      ],
+      "predicted": [
+        "newton"
+      ]
+    },
+    {
+      "id": "material-1",
+      "expected": [
+        "photosynthesis"
+      ],
+      "predicted": [
+        "photosynthesis"
+      ]
+    },
+    {
+      "id": "material-2",
+      "expected": [
+        "databases"
+      ],
+      "predicted": [
+        "databases"
+      ]
+    },
+    {
+      "id": "material-3",
+      "expected": [
+        "inflation"
+      ],
+      "predicted": [
+        "inflation"
+      ]
+    },
+    {
+      "id": "bloom-1",
+      "expected": [
+        "experiment"
+      ],
+      "predicted": [
+        "experiment"
+      ]
+    },
+    {
+      "id": "bloom-2",
+      "expected": [
+        "metrics"
+      ],
+      "predicted": [
+        "metrics"
+      ]
+    },
+    {
+      "id": "bloom-3",
+      "expected": [
+        "argumentation"
+      ],
+      "predicted": [
+        "argumentation"
+      ]
+    },
+    {
+      "id": "abstention-1",
+      "expected": [],
+      "predicted": []
+    }
+  ]
+}

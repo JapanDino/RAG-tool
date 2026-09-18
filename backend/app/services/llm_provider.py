@@ -14,7 +14,9 @@ class LLMProvider(ABC):
     name = "base"
 
     @abstractmethod
-    def annotate(self, chunk: str, level: str, rubric: str | None = None) -> Dict[str, Any]:
+    def annotate(
+        self, chunk: str, level: str, rubric: str | None = None
+    ) -> Dict[str, Any]:
         raise NotImplementedError
 
     def supports_streaming(self) -> bool:
@@ -24,7 +26,9 @@ class LLMProvider(ABC):
 class HeuristicProvider(LLMProvider):
     name = "heuristic"
 
-    def annotate(self, chunk: str, level: str, rubric: str | None = None) -> Dict[str, Any]:
+    def annotate(
+        self, chunk: str, level: str, rubric: str | None = None
+    ) -> Dict[str, Any]:
         return annotate_bloom(chunk, level, rubric)
 
 
@@ -34,7 +38,9 @@ class OpenAIProvider(LLMProvider):
     def __init__(self, model: str):
         self.model = model
 
-    def annotate(self, chunk: str, level: str, rubric: str | None = None) -> Dict[str, Any]:
+    def annotate(
+        self, chunk: str, level: str, rubric: str | None = None
+    ) -> Dict[str, Any]:
         prompt = build_bloom_prompt(chunk, level, rubric)
         js = chat_completion_json(self.model, prompt, max_tokens=400)
         data = _parse_json(js)
@@ -60,4 +66,3 @@ def get_provider(name: str, model: str, has_openai_key: bool) -> LLMProvider:
 
 
 __all__ = ["LLMProvider", "HeuristicProvider", "OpenAIProvider", "get_provider"]
-

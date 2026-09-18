@@ -1,0 +1,61 @@
+{
+  "samples": 100,
+  "hamming_loss": 0.01,
+  "f1_micro": 0.972,
+  "f1_macro": 0.9717,
+  "per_level": {
+    "remember": {
+      "precision": 0.8889,
+      "recall": 1.0,
+      "f1": 0.9412,
+      "tp": 16.0,
+      "fp": 2.0,
+      "fn": 0.0
+    },
+    "understand": {
+      "precision": 0.8947,
+      "recall": 1.0,
+      "f1": 0.9444,
+      "tp": 17.0,
+      "fp": 2.0,
+      "fn": 0.0
+    },
+    "apply": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 16.0,
+      "fp": 0.0,
+      "fn": 0.0
+    },
+    "analyze": {
+      "precision": 0.9444,
+      "recall": 0.9444,
+      "f1": 0.9444,
+      "tp": 17.0,
+      "fp": 1.0,
+      "fn": 1.0
+    },
+    "evaluate": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 20.0,
+      "fp": 0.0,
+      "fn": 0.0
+    },
+    "create": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 18.0,
+      "fp": 0.0,
+      "fn": 0.0
+    }
+  },
+  "min_prob": 0.2,
+  "max_levels": 2,
+  "from_db": false,
+  "dataset_id": null,
+  "annotator": null
+}

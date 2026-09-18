@@ -133,9 +133,21 @@ class OpenAIProvider(EmbeddingProvider):
         return f"openai:{self._model}"
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return self.embed_with_timeout(texts)
+
+    def embed_with_timeout(
+        self,
+        texts: Sequence[str],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> list[list[float]]:
         if not texts:
             return []
-        vecs = self._embeddings_fn(self._model, list(texts))
+        vecs = self._embeddings_fn(
+            self._model,
+            list(texts),
+            timeout_seconds=timeout_seconds,
+        )
         arr = np.asarray(vecs, dtype=np.float32)
         if arr.shape[1] != STORAGE_DIM:
             raise RuntimeError(

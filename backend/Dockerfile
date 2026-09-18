@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -18,8 +19,10 @@ RUN printf 'Acquire::https::Verify-Peer "false";\nAcquire::https::Verify-Host "f
   && rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/99no-ssl-verify
 
 COPY backend/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --default-timeout=120 --retries 10 -r /tmp/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --default-timeout=300 --retries 20 -r /tmp/requirements.txt
 
 COPY . /app
 
-CMD ["sleep","infinity"]
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

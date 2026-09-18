@@ -1,0 +1,460 @@
+/* Canonical production layer for the Workshop Route design system.
+   Feature modules own layout; this file keeps product-wide visual grammar in sync. */
+
+.workshop-product {
+  min-height: 100vh;
+  color: var(--workshop-ink);
+  font-family: var(--font-sans);
+}
+
+.workshop-product :where(h1, h2, h3) {
+  color: var(--workshop-ink);
+  font-family: var(--font-display);
+  font-weight: 780;
+  letter-spacing: -0.035em;
+}
+
+.workshop-product :where(button, [role="button"], input, select, textarea) {
+  transition: border-color 120ms ease, background-color 120ms ease,
+    color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.workshop-product :where(button, [role="button"]):not(:disabled) {
+  min-height: 44px;
+}
+
+.workshop-product :where(button, [role="button"]):disabled {
+  cursor: not-allowed;
+}
+
+.workshop-product :where(input, select, textarea) {
+  border-color: rgba(21, 49, 95, 0.24);
+  background: #fff;
+}
+
+.workshop-product :where(input, select, textarea):focus-visible {
+  border-color: var(--workshop-cobalt);
+}
+
+.workshop-product :where(
+  [class*="workspace_header__"],
+  [class*="teacher-workspace_header__"],
+  [class*="student-tutor_header__"],
+  [class*="curriculum-workspace_header__"],
+  [class*="program-overview_header__"],
+  [class*="lti-registration_header__"]
+) {
+  border-bottom: 2px solid var(--workshop-ink);
+  background: rgba(248, 251, 255, 0.95);
+  box-shadow: 0 8px 0 rgba(36, 87, 214, 0.07);
+  backdrop-filter: blur(16px);
+}
+
+.workshop-product :where(
+  [class*="workspace_brandMark__"],
+  [class*="curriculum-workspace_brandMark__"],
+  [class*="program-overview_brandMark__"],
+  [class*="lti-registration_brandMark__"]
+) {
+  border: 2px solid var(--workshop-ink);
+  border-radius: 7px 18px 7px 18px;
+  background: var(--workshop-cobalt);
+  box-shadow: 5px 5px 0 var(--workshop-apricot);
+  transform: rotate(-1deg);
+}
+
+.workshop-product :where(
+  [class*="workspace_eyebrow__"],
+  [class*="teacher-workspace_eyebrow__"],
+  [class*="student-tutor_eyebrow__"],
+  [class*="curriculum-workspace_eyebrow__"],
+  [class*="program-overview_eyebrow__"],
+  [class*="lti-registration_eyebrow__"]
+) {
+  color: var(--workshop-cobalt);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.workshop-product :where(
+  [class*="workspace_hero__"],
+  [class*="teacher-workspace_hero__"],
+  [class*="student-tutor_hero__"],
+  [class*="curriculum-workspace_hero__"],
+  [class*="program-overview_hero__"],
+  [class*="lti-registration_hero__"]
+) {
+  border-color: var(--workshop-cobalt);
+  background:
+    linear-gradient(rgba(36, 87, 214, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 87, 214, 0.045) 1px, transparent 1px),
+    rgba(255, 255, 255, 0.96);
+  background-size: 24px 24px;
+  box-shadow: 9px 10px 0 rgba(255, 155, 115, 0.2);
+}
+
+.workshop-product :where(
+  [class*="workspace_sidebar__"],
+  [class*="curriculum-workspace_sidebar__"],
+  [class*="lti-registration_sidebar__"]
+) {
+  color: #f8fbff;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    var(--workshop-ink);
+  background-size: 24px 24px;
+}
+
+.workshop-product :where(
+  [class*="workspace_card__"],
+  [class*="workspace_courseCard__"],
+  [class*="teacher-workspace_panel__"],
+  [class*="teacher-workspace_finding__"],
+  [class*="student-tutor_panel__"],
+  [class*="student-tutor_answer__"],
+  [class*="curriculum-workspace_panel__"],
+  [class*="curriculum-workspace_card__"],
+  [class*="program-overview_card__"],
+  [class*="lti-registration_panel__"],
+  [class*="lti-registration_card__"]
+) {
+  border-color: rgba(21, 49, 95, 0.22);
+  background-color: rgba(255, 255, 255, 0.97);
+}
+
+.workshop-product :where(
+  [class*="workspace_primary"],
+  [class*="teacher-workspace_primary"],
+  [class*="student-tutor_primary"],
+  [class*="curriculum-workspace_primary"],
+  [class*="program-overview_primary"],
+  [class*="lti-registration_primary"]
+) {
+  border: 0;
+  border-radius: 7px 15px 7px 15px;
+  color: #fff;
+  background: var(--workshop-cobalt);
+  box-shadow: 5px 6px 0 rgba(255, 155, 115, 0.55);
+}
+
+.workshop-product :where(
+  [class*="workspace_primary"],
+  [class*="teacher-workspace_primary"],
+  [class*="student-tutor_primary"],
+  [class*="curriculum-workspace_primary"],
+  [class*="program-overview_primary"],
+  [class*="lti-registration_primary"]
+):not(:disabled):hover {
+  background: var(--workshop-cobalt-dark);
+  transform: translate(-1px, -1px);
+}
+
+.workshop-product :where(
+  [class*="workspace_secondary"],
+  [class*="teacher-workspace_secondary"],
+  [class*="student-tutor_secondary"],
+  [class*="curriculum-workspace_secondary"],
+  [class*="program-overview_secondary"],
+  [class*="lti-registration_secondary"]
+) {
+  border-color: var(--workshop-ink);
+  border-radius: 7px 15px 7px 15px;
+  color: var(--workshop-ink);
+  background: #fff;
+}
+
+.workshop-product :where(
+  [class*="workspace_selected__"],
+  [class*="workspace_courseCardSelected__"],
+  [class*="teacher-workspace_selected__"],
+  [class*="student-tutor_selected__"],
+  [class*="curriculum-workspace_selected__"],
+  [class*="program-overview_selected__"],
+  [class*="lti-registration_selected__"]
+) {
+  border-color: var(--workshop-cobalt);
+  box-shadow: 6px 7px 0 rgba(255, 155, 115, 0.42);
+}
+
+.workshop-product :where(
+  [class*="error__"],
+  [class*="permission__"],
+  [class*="warning__"]
+) {
+  border-left-width: 5px;
+}
+
+.workshop-product :where([class*="home_header__"]) {
+  border-bottom: 2px solid var(--workshop-ink);
+  background: rgba(248, 251, 255, 0.95);
+  box-shadow: 0 8px 0 rgba(36, 87, 214, 0.07);
+}
+
+.workshop-product :where([class*="home_brandIcon__"]) {
+  border: 2px solid var(--workshop-ink);
+  border-radius: 7px 16px 7px 16px;
+  color: #fff;
+  background: var(--workshop-cobalt);
+  box-shadow: 5px 5px 0 var(--workshop-apricot);
+}
+
+.workshop-product :where([class*="home_title__"]) {
+  color: var(--workshop-ink);
+  font-family: var(--font-display);
+}
+
+.workshop-product :where([class*="home_navCard__"]) {
+  color: #f8fbff;
+  border-color: var(--workshop-ink);
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    var(--workshop-ink);
+  background-size: 24px 24px;
+}
+
+.workshop-product :where([class*="home_navCard__"]) :where(button, span, div) {
+  color: inherit;
+}
+
+.workshop-product :where([class*="home_navBtnActive__"]) {
+  color: var(--workshop-ink);
+  background: #fff;
+  box-shadow: 5px 5px 0 var(--workshop-apricot);
+}
+
+.workshop-product :where(
+  [class*="home_card__"],
+  [class*="home_cardSm__"],
+  [class*="home_asideCard__"],
+  [class*="home_sectionHero__"]
+) {
+  border-color: rgba(21, 49, 95, 0.22);
+  background: rgba(255, 255, 255, 0.97);
+}
+
+.workshop-product :where([class*="home_sectionHero__"]) {
+  background:
+    linear-gradient(rgba(36, 87, 214, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 87, 214, 0.045) 1px, transparent 1px),
+    rgba(255, 255, 255, 0.97);
+  background-size: 24px 24px;
+  box-shadow: 8px 9px 0 rgba(255, 155, 115, 0.2);
+}
+
+.workshop-product :where(
+  [class*="home_btnPrimary__"],
+  [class*="home_onboardBtn__"]
+) {
+  border-radius: 7px 15px 7px 15px;
+  color: #fff;
+  background: var(--workshop-cobalt);
+  box-shadow: 5px 6px 0 rgba(255, 155, 115, 0.52);
+}
+
+.workshop-product :where([class*="home_onboardOverlay__"]) {
+  background: rgba(238, 244, 255, 0.76);
+  backdrop-filter: blur(8px);
+}
+
+.workshop-product :where([class*="home_onboardCard__"]) {
+  position: relative;
+  overflow: visible;
+  border: 2px solid var(--workshop-cobalt);
+  border-radius: 8px 28px 8px 28px;
+  background:
+    linear-gradient(rgba(36, 87, 214, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 87, 214, 0.045) 1px, transparent 1px),
+    #fff;
+  background-size: 24px 24px;
+  box-shadow: 10px 11px 0 rgba(255, 155, 115, 0.42);
+}
+
+.workshop-product :where([class*="home_onboardCard__"])::before {
+  position: absolute;
+  top: -10px;
+  left: calc(50% - 38px);
+  width: 76px;
+  height: 20px;
+  background: rgba(255, 217, 90, 0.88);
+  content: "";
+  transform: rotate(-5deg);
+}
+
+.workshop-product :where([class*="home_onboardIcon__"]) {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  border: 2px solid var(--workshop-ink);
+  border-radius: 7px 18px 7px 18px;
+  color: #fff;
+  background: var(--workshop-cobalt);
+  box-shadow: 5px 5px 0 var(--workshop-apricot);
+  font-family: var(--font-display);
+  font-size: 24px !important;
+  font-weight: 800;
+}
+
+.workshop-product :where([class*="home_onboardStep__"]) {
+  border-color: rgba(21, 49, 95, 0.2);
+  border-radius: 7px 15px 7px 15px;
+  background: rgba(248, 251, 255, 0.92);
+}
+
+.workshop-product :where([class*="home_onboardStepNum__"]) {
+  color: var(--workshop-ink);
+  background: var(--workshop-yellow);
+}
+
+.workshop-product [class*="permissionPage"],
+.workshop-product [class*="statePage"] {
+  position: relative;
+  width: min(calc(100% - 32px), 860px);
+  min-height: auto;
+  margin: clamp(32px, 10vh, 96px) auto;
+  padding: clamp(34px, 6vw, 72px);
+  border: 2px solid var(--workshop-cobalt);
+  border-radius: 8px 28px 8px 28px;
+  background:
+    linear-gradient(rgba(36, 87, 214, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 87, 214, 0.045) 1px, transparent 1px),
+    #fff;
+  background-size: 24px 24px;
+  box-shadow: 10px 11px 0 rgba(255, 155, 115, 0.38);
+}
+
+.workshop-product [class*="permissionPage"]::before,
+.workshop-product [class*="statePage"]::before {
+  position: absolute;
+  top: -10px;
+  right: 13%;
+  width: 76px;
+  height: 20px;
+  background: rgba(255, 217, 90, 0.88);
+  content: "";
+  transform: rotate(6deg);
+}
+
+.workshop-product [class*="permissionPage"] > span,
+.workshop-product [class*="statePage"] > span {
+  color: var(--workshop-cobalt);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.workshop-product [class*="permissionPage"] > a,
+.workshop-product [class*="statePage"] > a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border: 2px solid var(--workshop-ink);
+  border-radius: 7px 15px 7px 15px;
+  color: #fff;
+  background: var(--workshop-cobalt);
+  box-shadow: 5px 6px 0 rgba(255, 155, 115, 0.5);
+  font-weight: 750;
+}
+
+@media (max-width: 600px) {
+  .workshop-product :where(h1) { letter-spacing: -0.045em; }
+
+  .workshop-product :where(
+    [class*="workspace_hero__"],
+    [class*="teacher-workspace_hero__"],
+    [class*="student-tutor_hero__"],
+    [class*="curriculum-workspace_hero__"],
+    [class*="program-overview_hero__"],
+    [class*="lti-registration_hero__"]
+  ) {
+    box-shadow: 5px 6px 0 rgba(255, 155, 115, 0.18);
+  }
+
+  .workshop-product [class*="home_shell"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .workshop-product :where(
+    [class*="home_nav__"],
+    [class*="home_main__"],
+    [class*="course-auditor_root__"],
+    [class*="course-auditor_workspace__"],
+    [class*="course-auditor_sidebar__"],
+    [class*="course-auditor_content__"]
+  ) {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .workshop-product :where(
+    [class*="home_pill"],
+    [class*="home_themeToggle"],
+    [class*="home_helpBtn"]
+  ) {
+    display: none;
+  }
+
+  .workshop-product [class*="home_metaRow"] {
+    width: auto;
+    min-width: 98px;
+    flex-wrap: nowrap;
+  }
+
+  .workshop-product [class*="home_brandText"] {
+    display: none;
+  }
+
+  .workshop-product [class*="home_workspaceLink"] {
+    display: inline-flex;
+    width: 48px;
+    min-width: 48px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 0;
+    border: 2px solid var(--workshop-ink);
+    border-radius: 7px 14px 7px 14px;
+    color: var(--workshop-ink);
+    background: #fff;
+    font-size: 0;
+  }
+
+  .workshop-product [class*="home_workspaceLink"]::after {
+    content: "Роли";
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .workshop-product [class*="home_gearBtn"] {
+    display: inline-flex;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workshop-product *,
+  .workshop-product *::before,
+  .workshop-product *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

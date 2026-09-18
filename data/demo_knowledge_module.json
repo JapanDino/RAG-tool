@@ -1,0 +1,35 @@
+{
+  "title": "Демо-модуль: энергия и движение",
+  "text": "Объясните закон сохранения энергии. Используйте формулу F=ma для решения задачи о силе. Проанализируйте, как изменение массы влияет на ускорение тела, и оцените точность измерений.",
+  "expected_nodes": [
+    "закон сохранения энергии",
+    "F=ma",
+    "массы",
+    "ускорение",
+    "точность",
+    "измерений"
+  ],
+  "expected_levels": [
+    "understand",
+    "apply",
+    "analyze",
+    "evaluate"
+  ],
+  "expected_edges": [
+    {
+      "from": "F=ma",
+      "to": "массы",
+      "method": "semantic_or_co_occurrence"
+    },
+    {
+      "from": "массы",
+      "to": "ускорение",
+      "method": "semantic_or_co_occurrence"
+    },
+    {
+      "from": "точность",
+      "to": "F=ma",
+      "method": "semantic_or_co_occurrence"
+    }
+  ]
+}

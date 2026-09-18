@@ -9,7 +9,9 @@ def validate_score_range(score: float) -> bool:
     return 0.0 <= score <= 1.0
 
 
-def validate_rationale_length(rationale: str, min_len: int = 1, max_len: int = 4000) -> bool:
+def validate_rationale_length(
+    rationale: str, min_len: int = 1, max_len: int = 4000
+) -> bool:
     return min_len <= len(rationale) <= max_len
 
 
@@ -39,4 +41,3 @@ __all__ = [
     "validate_rationale_length",
     "validate_label_length",
 ]
-

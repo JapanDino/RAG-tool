@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 from ..db.session import get_db
 from ..models.models import Dataset
 
 router = APIRouter(prefix="/datasets", tags=["status"])
+
 
 @router.get("/{dataset_id}/status")
 def dataset_status(dataset_id: int, db: Session = Depends(get_db)):

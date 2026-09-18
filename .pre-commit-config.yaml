@@ -15,7 +15,7 @@ repos:
     rev: 24.4.2
     hooks:
       - id: black
-        language_version: python3.11
+        language_version: python
   - repo: https://github.com/pycqa/isort
     rev: 5.13.2
     hooks:
@@ -24,3 +24,5 @@ repos:
     rev: 7.1.0
     hooks:
       - id: flake8
+        # Black owns line wrapping; E402 is expected in dependency-gated tests.
+        args: ["--extend-ignore=E203,W503,E402,E501"]

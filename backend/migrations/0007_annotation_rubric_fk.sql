@@ -3,4 +3,3 @@ ALTER TABLE bloom_annotations
 
 CREATE INDEX IF NOT EXISTS idx_bloom_annotations_rubric_id
   ON bloom_annotations (rubric_id);
-

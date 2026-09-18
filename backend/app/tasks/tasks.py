@@ -1,21 +1,62 @@
 import logging
 import os
 
-from .celery_app import celery_app
+from sqlalchemy import text
+
 from ..db.session import SessionLocal
-from ..models.models import Chunk, Document
+from ..models.models import Chunk
+from ..services.chunking import chunk_text_with_offsets
+from ..services.course_audit import CourseAuditService
 from ..services.embedding import embed_texts
-from ..services.text_extract import extract_text as _extract_text
 from ..services.embedding_provider import current_embedding_model
+from ..services.llm import ENABLE_LLM, llm_annotate
+from ..services.lti_binding import expire_overdue_binding_candidates
+from ..services.text_extract import extract_text as _extract_text
+from ..services.tutor_data import purge_all_expired_tutor_history
 from ..services.validation import validate_annotation
 from ..utils.bloom import annotate_bloom
 from ..utils.rubrics import get_active_rubric
-from ..services.llm import llm_annotate, ENABLE_LLM
-from sqlalchemy import text
-from datetime import datetime
 from ..utils.vector import vector_literal
+from .celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+@celery_app.task(name="expire_lti_binding_candidates")
+def expire_lti_binding_candidates_task():
+    db = SessionLocal()
+    try:
+        expired = expire_overdue_binding_candidates(db)
+        db.commit()
+        return {"candidates_expired": expired}
+    except Exception:
+        db.rollback()
+        logger.exception("Scheduled LTI binding-candidate expiry failed")
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task(name="purge_expired_tutor_history")
+def purge_expired_tutor_history_task():
+    db = SessionLocal()
+    try:
+        results = purge_all_expired_tutor_history(db)
+        db.commit()
+        return {
+            "organizations_checked": len(results),
+            "answers_deleted": sum(item.answers_deleted for item in results),
+            "feedback_events_deleted": sum(
+                item.feedback_events_deleted for item in results
+            ),
+        }
+    except Exception:
+        db.rollback()
+        logger.exception("Scheduled tutor-history purge failed")
+        raise
+    finally:
+        db.close()
+
 
 @celery_app.task
 def index_dataset(dataset_id: int, job_id: int | None = None, dim: int = 1536):
@@ -27,11 +68,18 @@ def index_dataset(dataset_id: int, job_id: int | None = None, dim: int = 1536):
                 {"id": job_id},
             )
             db.commit()
-        chunks = db.query(Chunk).join(Chunk.document).filter(Chunk.document.has(dataset_id=dataset_id)).all()
+        chunks = (
+            db.query(Chunk)
+            .join(Chunk.document)
+            .filter(Chunk.document.has(dataset_id=dataset_id))
+            .all()
+        )
         if not chunks:
             if job_id is not None:
                 db.execute(
-                    text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"),
+                    text(
+                        "UPDATE jobs SET status='done', finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                    ),
                     {"id": job_id},
                 )
                 db.commit()
@@ -55,7 +103,9 @@ def index_dataset(dataset_id: int, job_id: int | None = None, dim: int = 1536):
         db.commit()
         if job_id is not None:
             db.execute(
-                text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"),
+                text(
+                    "UPDATE jobs SET status='done', finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
                 {"id": job_id},
             )
             db.commit()
@@ -63,13 +113,16 @@ def index_dataset(dataset_id: int, job_id: int | None = None, dim: int = 1536):
     except Exception as e:
         if job_id is not None:
             db.execute(
-                text("UPDATE jobs SET status='failed', error=:err, finished_at=now() WHERE id=:id"),
+                text(
+                    "UPDATE jobs SET status='failed', error=:err, finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
                 {"err": str(e), "id": job_id},
             )
             db.commit()
         raise
     finally:
         db.close()
+
 
 @celery_app.task
 def annotate_dataset(dataset_id: int, level: str, job_id: int | None = None):
@@ -81,7 +134,12 @@ def annotate_dataset(dataset_id: int, level: str, job_id: int | None = None):
                 {"id": job_id},
             )
             db.commit()
-        chunks = db.query(Chunk).join(Chunk.document).filter(Chunk.document.has(dataset_id=dataset_id)).all()
+        chunks = (
+            db.query(Chunk)
+            .join(Chunk.document)
+            .filter(Chunk.document.has(dataset_id=dataset_id))
+            .all()
+        )
         for c in chunks:
             rubric = get_active_rubric(level, db)
             rubric_text = rubric.description if rubric else None
@@ -92,13 +150,21 @@ def annotate_dataset(dataset_id: int, level: str, job_id: int | None = None):
             )
             ok, err = validate_annotation(a)
             if not ok:
-                logger.warning("Invalid annotation from LLM, falling back", extra={"error": err, "chunk_id": c.id})
+                logger.warning(
+                    "Invalid annotation from LLM, falling back",
+                    extra={"error": err, "chunk_id": c.id},
+                )
                 a = annotate_bloom(c.text, level)
                 ok, err = validate_annotation(a)
                 if not ok:
-                    logger.error("Invalid heuristic annotation; skipping", extra={"error": err, "chunk_id": c.id})
+                    logger.error(
+                        "Invalid heuristic annotation; skipping",
+                        extra={"error": err, "chunk_id": c.id},
+                    )
                     continue
-            db.execute(text("""
+            db.execute(
+                text(
+                    """
                 INSERT INTO bloom_annotations (chunk_id, level, label, rationale, score)
                 VALUES (:cid, :level, :label, :rationale, :score)
                 ON CONFLICT (chunk_id, level)
@@ -106,12 +172,17 @@ def annotate_dataset(dataset_id: int, level: str, job_id: int | None = None):
                               rationale = EXCLUDED.rationale,
                               score = EXCLUDED.score,
                               version = COALESCE(bloom_annotations.version, 1) + 1,
-                              created_at = now()
-            """), dict(cid=c.id, **a))
+                              created_at = CURRENT_TIMESTAMP
+            """
+                ),
+                dict(cid=c.id, **a),
+            )
         db.commit()
         if job_id is not None:
             db.execute(
-                text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"),
+                text(
+                    "UPDATE jobs SET status='done', finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
                 {"id": job_id},
             )
             db.commit()
@@ -119,7 +190,9 @@ def annotate_dataset(dataset_id: int, level: str, job_id: int | None = None):
     except Exception as e:
         if job_id is not None:
             db.execute(
-                text("UPDATE jobs SET status='failed', error=:err, finished_at=now() WHERE id=:id"),
+                text(
+                    "UPDATE jobs SET status='failed', error=:err, finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
                 {"err": str(e), "id": job_id},
             )
             db.commit()
@@ -144,12 +217,12 @@ def rebuild_graph_edges(
     Rebuilds and persists graph edges into `knowledge_edges`.
     Similarity edges are computed with pgvector (<->) over `knowledge_nodes.vec`.
     """
-    from ..models.models import KnowledgeNode  # avoid circular import at module import time
-
     db = SessionLocal()
     try:
         if job_id is not None:
-            db.execute(text("UPDATE jobs SET status='running' WHERE id=:id"), {"id": job_id})
+            db.execute(
+                text("UPDATE jobs SET status='running' WHERE id=:id"), {"id": job_id}
+            )
             db.commit()
 
         em = embedding_model or current_embedding_model()
@@ -157,9 +230,10 @@ def rebuild_graph_edges(
         co_method = "co_occurrence_window"
 
         # Fetch candidate nodes.
-        rows = db.execute(
-            text(
-                """
+        rows = (
+            db.execute(
+                text(
+                    """
                 SELECT id, document_id, model_info
                 FROM knowledge_nodes
                 WHERE dataset_id = :ds
@@ -168,15 +242,26 @@ def rebuild_graph_edges(
                 ORDER BY id ASC
                 LIMIT :limit
                 """
-            ),
-            {"ds": dataset_id, "em": em, "limit": limit_nodes},
-        ).mappings().all()
+                ),
+                {"ds": dataset_id, "em": em, "limit": limit_nodes},
+            )
+            .mappings()
+            .all()
+        )
         node_ids = [int(r["id"]) for r in rows]
         if not node_ids:
-            db.execute(text("DELETE FROM knowledge_edges WHERE dataset_id=:ds"), {"ds": dataset_id})
+            db.execute(
+                text("DELETE FROM knowledge_edges WHERE dataset_id=:ds"),
+                {"ds": dataset_id},
+            )
             db.commit()
             if job_id is not None:
-                db.execute(text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"), {"id": job_id})
+                db.execute(
+                    text(
+                        "UPDATE jobs SET status='done', finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                    ),
+                    {"id": job_id},
+                )
                 db.commit()
             return {"ok": True, "nodes": 0, "edges": 0}
 
@@ -207,10 +292,14 @@ def rebuild_graph_edges(
         for nid in node_ids:
             if len(edge_map) >= max_edges:
                 break
-            r2 = db.execute(
-                text(sql),
-                {"id": nid, "ds": dataset_id, "em": em, "k": top_k},
-            ).mappings().all()
+            r2 = (
+                db.execute(
+                    text(sql),
+                    {"id": nid, "ds": dataset_id, "em": em, "k": top_k},
+                )
+                .mappings()
+                .all()
+            )
             for row in r2:
                 score = float(row["score"])
                 if score < min_score:
@@ -251,7 +340,9 @@ def rebuild_graph_edges(
                     break
 
         # Persist edges.
-        db.execute(text("DELETE FROM knowledge_edges WHERE dataset_id=:ds"), {"ds": dataset_id})
+        db.execute(
+            text("DELETE FROM knowledge_edges WHERE dataset_id=:ds"), {"ds": dataset_id}
+        )
         if edge_map:
             payload = [
                 {
@@ -277,13 +368,20 @@ def rebuild_graph_edges(
         db.commit()
 
         if job_id is not None:
-            db.execute(text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"), {"id": job_id})
+            db.execute(
+                text(
+                    "UPDATE jobs SET status='done', finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
+                {"id": job_id},
+            )
             db.commit()
         return {"ok": True, "nodes": len(node_ids), "edges": len(edge_map)}
     except Exception as e:
         if job_id is not None:
             db.execute(
-                text("UPDATE jobs SET status='failed', error=:err, finished_at=now() WHERE id=:id"),
+                text(
+                    "UPDATE jobs SET status='failed', error=:err, finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
                 {"err": str(e), "id": job_id},
             )
             db.commit()
@@ -293,8 +391,13 @@ def rebuild_graph_edges(
 
 
 @celery_app.task
-def parse_document(document_id: int, file_path: str, filename: str,
-                   content_type: str, job_id: int | None = None):
+def parse_document(
+    document_id: int,
+    file_path: str,
+    filename: str,
+    content_type: str,
+    job_id: int | None = None,
+):
     """Read a saved file, run text extraction (full OCR if needed), create Chunks,
     mark Document as ready, delete the temp file, and mark the job done."""
     db = SessionLocal()
@@ -310,14 +413,26 @@ def parse_document(document_id: int, file_path: str, filename: str,
             data = f.read()
 
         text_str = _extract_text(filename, content_type, data)
-        parts = [text_str[i:i+800] for i in range(0, len(text_str), 800)]
+        parts = chunk_text_with_offsets(text_str)
 
         db.execute(
             text("DELETE FROM chunks WHERE document_id=:did"),
             {"did": document_id},
         )
-        for i, p in enumerate(parts):
-            db.add(Chunk(document_id=document_id, idx=i, text=p, meta={}))
+        for i, part in enumerate(parts):
+            db.add(
+                Chunk(
+                    document_id=document_id,
+                    idx=i,
+                    text=part["text"],
+                    meta={
+                        "source_start": part["start"],
+                        "source_end": part["end"],
+                        "sentence_start": part["sentence_start"],
+                        "sentence_end": part["sentence_end"],
+                    },
+                )
+            )
 
         db.execute(
             text("UPDATE documents SET status='ready' WHERE id=:id"),
@@ -325,14 +440,11 @@ def parse_document(document_id: int, file_path: str, filename: str,
         )
         db.commit()
 
-        try:
-            os.remove(file_path)
-        except Exception as e:
-            logger.warning("Could not delete temp file %s: %s", file_path, e)
-
         if job_id is not None:
             db.execute(
-                text("UPDATE jobs SET status='done', finished_at=now() WHERE id=:id"),
+                text(
+                    "UPDATE jobs SET status='done', finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
                 {"id": job_id},
             )
             db.commit()
@@ -345,10 +457,50 @@ def parse_document(document_id: int, file_path: str, filename: str,
         )
         if job_id is not None:
             db.execute(
-                text("UPDATE jobs SET status='failed', error=:err, finished_at=now() WHERE id=:id"),
+                text(
+                    "UPDATE jobs SET status='failed', error=:err, finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
                 {"err": str(e), "id": job_id},
             )
         db.commit()
+        raise
+    finally:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as exc:
+            logger.warning("Could not delete temp file %s: %s", file_path, exc)
+        db.close()
+
+
+@celery_app.task
+def audit_course(course_id: int, audit_run_id: int, job_id: int | None = None):
+    db = SessionLocal()
+    try:
+        if job_id is not None:
+            db.execute(
+                text("UPDATE jobs SET status='running' WHERE id=:id"), {"id": job_id}
+            )
+            db.commit()
+        metrics = CourseAuditService(db).run(course_id, audit_run_id)
+        if job_id is not None:
+            db.execute(
+                text(
+                    "UPDATE jobs SET status='done', finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
+                {"id": job_id},
+            )
+            db.commit()
+        return {"ok": True, "audit_run_id": audit_run_id, "metrics": metrics}
+    except Exception as exc:
+        if job_id is not None:
+            db.execute(
+                text(
+                    "UPDATE jobs SET status='failed', error=:error, finished_at=CURRENT_TIMESTAMP WHERE id=:id"
+                ),
+                {"id": job_id, "error": str(exc)[:4000]},
+            )
+            db.commit()
         raise
     finally:
         db.close()

@@ -21,4 +21,3 @@ WHERE NOT EXISTS (SELECT 1 FROM rubrics WHERE level = 'evaluate' AND is_active =
 INSERT INTO rubrics (level, name, description, criteria, version, is_active)
 SELECT 'create', 'Create', 'Синтезируйте новое решение/план/вариант.', '{}'::jsonb, 1, TRUE
 WHERE NOT EXISTS (SELECT 1 FROM rubrics WHERE level = 'create' AND is_active = TRUE);
-

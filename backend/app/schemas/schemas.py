@@ -1,65 +1,96 @@
-from pydantic import BaseModel, field_validator
-from typing import Optional, Literal, List, Union
 from datetime import datetime
+from typing import List, Literal, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 def _enum_to_str(v):
     """Coerce SQLAlchemy str-enum objects to plain strings for Pydantic Literal validation."""
     return v.value if hasattr(v, "value") else v
 
-BloomLevel = Literal["remember","understand","apply","analyze","evaluate","create"]
-NodeType = Literal["proper_noun","concept","skill","keyword","formula","other"]
 
-class DatasetIn(BaseModel): name: str
+BloomLevel = Literal["remember", "understand", "apply", "analyze", "evaluate", "create"]
+NodeType = Literal["proper_noun", "concept", "skill", "keyword", "formula", "other"]
+
+
+class DatasetIn(BaseModel):
+    name: str
+
+
 class DatasetOut(BaseModel):
-    id:int; name:str
-    class Config: from_attributes=True
+    id: int
+    name: str
+    model_config = ConfigDict(from_attributes=True)
+
 
 class DocumentOut(BaseModel):
-    id:int; dataset_id:int; title:str; source:str; mime:str
-    class Config: from_attributes=True
+    id: int
+    dataset_id: int
+    title: str
+    source: str
+    mime: str
+    model_config = ConfigDict(from_attributes=True)
+
 
 class SearchHit(BaseModel):
-    chunk_id:int; text:str; score:float; document_id:int; document_title:str
+    chunk_id: int
+    text: str
+    score: float
+    document_id: int
+    document_title: str
+
 
 class AnnotateIn(BaseModel):
     level: BloomLevel
-    rubric: Optional[str]=None
+    rubric: Optional[str] = None
+
 
 class AnnotationOut(BaseModel):
-    id:int; chunk_id:int; level:BloomLevel; label:str; rationale:str; score:float; version:int
-    class Config: from_attributes=True
+    id: int
+    chunk_id: int
+    level: BloomLevel
+    label: str
+    rationale: str
+    score: float
+    version: int
+    model_config = ConfigDict(from_attributes=True)
 
     @field_validator("level", mode="before")
     @classmethod
-    def coerce_level(cls, v): return _enum_to_str(v)
+    def coerce_level(cls, v):
+        return _enum_to_str(v)
+
 
 class AnnotationUpdateIn(BaseModel):
     label: Optional[str] = None
     rationale: Optional[str] = None
     score: Optional[float] = None
 
+
 class AnnotationWithChunkOut(BaseModel):
-    id:int
-    chunk_id:int
-    level:BloomLevel
-    label:str
-    rationale:str
-    score:float
-    version:int
-    chunk_text:str
-    chunk_idx:int
-    document_id:int
-    document_title:str
-    class Config: from_attributes=True
+    id: int
+    chunk_id: int
+    level: BloomLevel
+    label: str
+    rationale: str
+    score: float
+    version: int
+    chunk_text: str
+    chunk_idx: int
+    document_id: int
+    document_title: str
+    model_config = ConfigDict(from_attributes=True)
 
     @field_validator("level", mode="before")
     @classmethod
-    def coerce_level(cls, v): return _enum_to_str(v)
+    def coerce_level(cls, v):
+        return _enum_to_str(v)
+
 
 class AnnotationListOut(BaseModel):
-    total:int
+    total: int
     items: List[AnnotationWithChunkOut]
+
 
 class RubricIn(BaseModel):
     level: BloomLevel
@@ -69,28 +100,33 @@ class RubricIn(BaseModel):
     version: Optional[int] = 1
     is_active: Optional[bool] = True
 
+
 class RubricOut(BaseModel):
-    id:int
-    level:BloomLevel
-    name:str
-    description:str
-    criteria:dict
-    version:int
-    is_active:bool
-    class Config: from_attributes=True
+    id: int
+    level: BloomLevel
+    name: str
+    description: str
+    criteria: dict
+    version: int
+    is_active: bool
+    model_config = ConfigDict(from_attributes=True)
 
     @field_validator("level", mode="before")
     @classmethod
-    def coerce_level(cls, v): return _enum_to_str(v)
+    def coerce_level(cls, v):
+        return _enum_to_str(v)
+
 
 class RubricListOut(BaseModel):
-    total:int
+    total: int
     items: List[RubricOut]
+
 
 class ExtractNodesIn(BaseModel):
     text: str
     max_nodes: int = 30
     min_freq: int = 1
+
 
 class ExtractNodeOut(BaseModel):
     title: str
@@ -99,46 +135,58 @@ class ExtractNodeOut(BaseModel):
     node_type: NodeType
     source: Optional[dict] = None
 
+
 class ExtractNodesOut(BaseModel):
     nodes: List[ExtractNodeOut]
+
 
 class ClassifyNodeIn(BaseModel):
     title: str
     context_snippet: Optional[str] = None
+
 
 class ClassifyNodesIn(BaseModel):
     nodes: List[ClassifyNodeIn]
     min_prob: Optional[float] = 0.2
     max_levels: Optional[int] = 2
 
+
 class ClassifyNodeOut(BaseModel):
     title: str
     prob_vector: List[float]
     top_levels: List[BloomLevel]
     rationale: Optional[str] = None
+    triggers: Optional[dict] = None
+    competing_levels: Optional[List[dict]] = None
+
 
 class ClassifyNodesOut(BaseModel):
     nodes: List[ClassifyNodeOut]
+
 
 class AnalyzeIn(BaseModel):
     text: str
     edge_threshold: Optional[float] = 0.2
     max_edges: Optional[int] = 50
 
+
 class AnalyzeChunkOut(BaseModel):
     idx: int
     text: str
     bloom: dict[str, float]
+
 
 class AnalyzeEdgeOut(BaseModel):
     source: int
     target: int
     weight: float
 
+
 class AnalyzeOut(BaseModel):
     total: int
     items: List[AnalyzeChunkOut]
     edges: List[AnalyzeEdgeOut]
+
 
 class KnowledgeNodeIn(BaseModel):
     dataset_id: int
@@ -152,6 +200,7 @@ class KnowledgeNodeIn(BaseModel):
     embedding_model: Optional[str] = None
     version: Optional[int] = 1
     model_info: Optional[dict] = None
+
 
 class KnowledgeNodeOut(BaseModel):
     id: int
@@ -168,8 +217,8 @@ class KnowledgeNodeOut(BaseModel):
     model_info: dict
     created_at: Optional[Union[datetime, str]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class KnowledgeNodeUpdateIn(BaseModel):
     title: Optional[str] = None
@@ -181,12 +230,15 @@ class KnowledgeNodeUpdateIn(BaseModel):
     version: Optional[int] = None
     model_info: Optional[dict] = None
 
+
 class KnowledgeNodeBulkIn(BaseModel):
     nodes: List[KnowledgeNodeIn]
+
 
 class KnowledgeNodeListOut(BaseModel):
     total: int
     items: List[KnowledgeNodeOut]
+
 
 class KnowledgeNodeSearchHit(BaseModel):
     node_id: int
@@ -197,15 +249,18 @@ class KnowledgeNodeSearchHit(BaseModel):
     document_id: Optional[int] = None
     chunk_id: Optional[int] = None
 
+
 class NodeLabelsIn(BaseModel):
     labels: List[BloomLevel]
     annotator: str = "default"
+
 
 class NodeLabelsOut(BaseModel):
     node_id: int
     annotator: str
     labels: List[BloomLevel]
     created_at: Optional[Union[datetime, str]] = None
+
 
 class LabelQueueItem(BaseModel):
     id: int
@@ -218,19 +273,23 @@ class LabelQueueItem(BaseModel):
     labeled: bool = False
     labels: Optional[List[BloomLevel]] = None
 
+
 class LabelQueueOut(BaseModel):
     total: int
     labeled: int
     items: List[LabelQueueItem]
 
+
 class NodeMergeIn(BaseModel):
     target_id: int
     source_ids: List[int]
+
 
 class NodeMergeOut(BaseModel):
     ok: bool
     target_id: int
     merged: int
+
 
 class AnalyzeContentIn(BaseModel):
     text: str
@@ -242,8 +301,9 @@ class AnalyzeContentIn(BaseModel):
     max_levels: Optional[int] = 2
     embedding_dim: Optional[int] = 1536
     embedding_model: Optional[str] = None
-    extractor: Optional[str] = "heuristic-v1"
+    extractor: Optional[str] = "semantic-v1"
     classifier: Optional[str] = "keyword-v1"
+
 
 class AnalyzeNodeOut(BaseModel):
     id: int
@@ -253,9 +313,13 @@ class AnalyzeNodeOut(BaseModel):
     top_levels: List[BloomLevel]
     frequency: Optional[int] = None
     rationale: Optional[str] = None
+    triggers: Optional[dict] = None
+    competing_levels: Optional[List[dict]] = None
+
 
 class AnalyzeContentOut(BaseModel):
     nodes: List[AnalyzeNodeOut]
+
 
 class GraphNodeOut(BaseModel):
     id: int
@@ -266,14 +330,17 @@ class GraphNodeOut(BaseModel):
     frequency: Optional[int] = None
     rationale: Optional[str] = None
 
+
 class GraphEdgeOut(BaseModel):
     from_id: int
     to_id: int
     weight: float
 
+
 class GraphOut(BaseModel):
     nodes: List[GraphNodeOut]
     edges: List[GraphEdgeOut]
+
 
 class GraphRebuildIn(BaseModel):
     dataset_id: int
@@ -284,6 +351,7 @@ class GraphRebuildIn(BaseModel):
     include_cooccurrence: bool = True
     limit_nodes: int = 500
     co_window: int = 2
+
 
 class GraphRebuildOut(BaseModel):
     job_id: int

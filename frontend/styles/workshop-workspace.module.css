@@ -1,0 +1,616 @@
+.page {
+  --cobalt: #2457d6;
+  --cobalt-dark: #153f9e;
+  --ink: #15315f;
+  --apricot: #ff9b73;
+  --yellow: #ffd95a;
+  --mint: #83d8c7;
+  --paper: #f8fbff;
+  --slate: #5a6f8a;
+  min-height: 100vh;
+  color: var(--ink);
+  background: #eaf1fb;
+  font-family: "Segoe UI Variable Text", "Source Sans 3", "Segoe UI", sans-serif;
+}
+
+.page *,
+.page *::before,
+.page *::after { box-sizing: border-box; }
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto minmax(270px, 1fr);
+  min-height: 82px;
+  align-items: center;
+  padding: 12px clamp(18px, 3vw, 46px);
+  border-bottom: 2px solid var(--ink);
+  background: rgba(248, 251, 255, .94);
+  box-shadow: 0 8px 0 rgba(36, 87, 214, .08);
+  backdrop-filter: blur(16px);
+}
+
+.brandBlock {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brandMark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 7px 18px 7px 18px;
+  color: white;
+  background: var(--cobalt);
+  box-shadow: 6px 6px 0 var(--apricot);
+  font-size: 20px;
+  font-weight: 850;
+  text-decoration: none;
+  transform: rotate(-1deg);
+}
+
+.brandBlock > div,
+.roleBlock {
+  display: grid;
+  gap: 2px;
+}
+
+.brandBlock strong { font-size: 17px; }
+.brandBlock span,
+.roleBlock span { color: var(--slate); font-size: 11px; }
+
+.headerRoute {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.headerRoute > span,
+.eyebrow,
+.sidebarEyebrow,
+.detailEyebrow,
+.sectionHeading > div > span {
+  color: var(--cobalt);
+  font: 800 10px/1.2 "Cascadia Mono", monospace;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.roleBlock { justify-self: end; text-align: right; }
+.roleBlock strong { font-size: 13px; }
+
+.shell {
+  display: grid;
+  grid-template-columns: 235px minmax(560px, 1fr) 318px;
+  max-width: 1720px;
+  min-height: calc(100vh - 82px);
+  margin: 0 auto;
+}
+
+.sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 38px 20px 26px;
+  overflow: hidden;
+  border-right: 2px solid var(--ink);
+  color: white;
+  background:
+    linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px),
+    var(--ink);
+  background-size: 24px 24px;
+}
+
+.sidebarTape {
+  position: absolute;
+  top: 17px;
+  right: -9px;
+  width: 64px;
+  height: 19px;
+  background: rgba(255, 217, 90, .85);
+  transform: rotate(7deg);
+}
+
+.sidebarEyebrow { color: #9bb9ff; }
+.sidebar h2 {
+  margin: 8px 0 28px;
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: 29px;
+  letter-spacing: -.045em;
+}
+
+.sidebar nav { display: grid; gap: 9px; }
+
+.navActive,
+.navPending {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  min-height: 48px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: 7px 15px 7px 15px;
+  color: rgba(255,255,255,.65);
+  text-decoration: none;
+}
+
+.navActive {
+  color: var(--ink);
+  background: white;
+  box-shadow: 7px 7px 0 var(--apricot);
+}
+
+.navActive i,
+.navPending i {
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.navActive i { border-color: var(--cobalt); background: var(--yellow); }
+.navActive span,
+.navPending span { font-size: 13px; font-weight: 750; }
+.navActive small,
+.navPending small { font-size: 9px; text-transform: uppercase; }
+
+.organizationNote {
+  display: grid;
+  gap: 5px;
+  margin-top: auto;
+  padding: 18px;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 5px 18px 5px 18px;
+  color: var(--ink);
+  background: var(--yellow);
+  box-shadow: 8px 8px 0 rgba(255,155,115,.65);
+  transform: rotate(-1.2deg);
+}
+
+.organizationNote span,
+.organizationNote small { font-size: 10px; }
+.organizationNote small { color: #6a5c2b; }
+
+.backLink {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  margin-top: 28px;
+  color: #a9c1ff;
+  font-size: 11px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.main {
+  min-width: 0;
+  padding: clamp(24px, 3.4vw, 52px);
+  background:
+    linear-gradient(rgba(36,87,214,.065) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36,87,214,.065) 1px, transparent 1px),
+    var(--paper);
+  background-size: 26px 26px;
+}
+
+.hero {
+  position: relative;
+  min-height: 590px;
+  padding: clamp(34px, 5vw, 64px);
+  overflow: hidden;
+  border: 2px solid var(--cobalt);
+  border-radius: 9px 30px 9px 30px;
+  background: rgba(255,255,255,.76);
+  box-shadow: 12px 14px 0 rgba(36,87,214,.1);
+}
+
+.heroCopy {
+  position: relative;
+  z-index: 4;
+  width: min(62%, 670px);
+}
+
+.hero h1 {
+  margin: 14px 0 20px;
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: clamp(48px, 5.4vw, 78px);
+  font-weight: 780;
+  line-height: .96;
+  letter-spacing: -.068em;
+}
+
+.heroCopy > p {
+  max-width: 610px;
+  margin: 0;
+  color: var(--slate);
+  font-size: clamp(16px, 1.4vw, 19px);
+  line-height: 1.55;
+}
+
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.heroActionGroup {
+  display: grid;
+  justify-items: start;
+}
+
+.primaryAction,
+.secondaryAction,
+.detailAction {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 17px;
+  border: 0;
+  border-radius: 7px 15px 7px 15px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.primaryAction { color: white; background: var(--cobalt); box-shadow: 6px 7px 0 rgba(255,155,115,.55); transform: rotate(-.7deg); }
+.secondaryAction { border: 2px solid var(--ink); color: var(--ink); background: white; transform: rotate(.6deg); }
+
+.heroActions button:disabled,
+.detailAction:disabled {
+  opacity: .82;
+  cursor: not-allowed;
+}
+
+.prototypeHint {
+  margin-top: 10px;
+  color: var(--slate);
+  font: 750 9px/1.3 "Cascadia Mono", monospace;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.heroMap {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.mapLabel {
+  position: absolute;
+  top: 7%;
+  right: 4%;
+  padding: 8px 12px;
+  color: var(--ink);
+  background: var(--mint);
+  font: 800 9px/1 "Cascadia Mono", monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  transform: rotate(2deg);
+}
+
+.roleNote {
+  position: absolute;
+  top: 31%;
+  right: 9%;
+  display: grid;
+  gap: 4px;
+  width: 190px;
+  padding: 22px;
+  border: 2px solid var(--ink);
+  border-radius: 6px 22px 6px 22px;
+  background: #fff2c4;
+  box-shadow: 11px 11px 0 var(--apricot);
+  transform: rotate(2deg);
+}
+
+.roleNote small { color: #6b603a; font-size: 9px; text-transform: uppercase; }
+.roleNote strong { font-size: 15px; }
+
+.heroMap .courseRoute {
+  position: absolute;
+  right: 4%;
+  bottom: 11%;
+  left: 58%;
+  color: var(--cobalt);
+  transform: rotate(-4deg);
+}
+
+.heroTape {
+  position: absolute;
+  top: 37px;
+  left: 45%;
+  z-index: 3;
+  width: 72px;
+  height: 20px;
+  background: rgba(255,155,115,.7);
+  transform: rotate(-12deg);
+}
+
+.heroMarker {
+  position: absolute;
+  right: 4%;
+  bottom: 4%;
+  z-index: 3;
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--cobalt);
+  border-radius: 50%;
+}
+
+.courseRoute {
+  display: grid;
+  grid-template-columns: auto minmax(24px, 1fr) auto minmax(24px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--cobalt);
+}
+
+.routeStation {
+  display: grid;
+  min-width: 56px;
+  justify-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  color: var(--ink);
+  background: white;
+  box-shadow: 5px 6px 0 rgba(36,87,214,.12);
+}
+
+.routeStation i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--apricot);
+}
+
+.routeStation:nth-of-type(3) i { background: var(--mint); }
+.routeStation:nth-of-type(5) i { background: var(--yellow); }
+.routeStation strong { font-size: 9px; }
+.routeLine { border-top: 2px dashed currentColor; }
+
+.courseRouteCompact .routeStation {
+  min-width: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.courseRouteCompact .routeStation strong { display: none; }
+.courseRouteCompact .routeStation i { border: 2px solid white; box-shadow: 0 0 0 2px currentColor; }
+.headerRoute .courseRoute { width: 145px; }
+
+.courseSection { margin-top: 48px; }
+
+.sectionHeading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.sectionHeading h2 {
+  margin: 5px 0 0;
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: clamp(31px, 3vw, 44px);
+  letter-spacing: -.05em;
+}
+
+.courseCount {
+  padding: 9px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 5px 13px 5px 13px;
+  background: var(--yellow);
+  font: 800 10px/1 "Cascadia Mono", monospace;
+  transform: rotate(1.5deg);
+}
+
+.courseList { display: grid; gap: 13px; }
+
+.courseCard {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px minmax(170px, 1fr) 110px minmax(120px, auto) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 110px;
+  width: 100%;
+  padding: 17px 18px;
+  overflow: hidden;
+  border: 1px solid #bac9e3;
+  border-radius: 7px 20px 7px 20px;
+  color: var(--ink);
+  background: rgba(255,255,255,.9);
+  box-shadow: 8px 9px 0 rgba(36,87,214,.07);
+  font: inherit;
+  text-align: left;
+  transition: transform 170ms ease, border-color 170ms ease, box-shadow 170ms ease;
+}
+
+.courseCard:hover { transform: translateY(-2px); border-color: var(--cobalt); }
+.courseCardSelected { border: 2px solid var(--cobalt); background: #f5f9ff; box-shadow: 9px 10px 0 rgba(255,155,115,.5); }
+
+.coursePin {
+  display: grid;
+  width: 43px;
+  height: 43px;
+  place-items: center;
+  border: 2px solid var(--cobalt);
+  border-radius: 50%;
+  color: var(--cobalt-dark);
+  background: white;
+  font: 800 10px/1 "Cascadia Mono", monospace;
+}
+
+.courseCopy { display: grid; gap: 5px; min-width: 0; }
+.courseCopy strong { font-size: 15px; }
+.courseCopy small { color: var(--slate); line-height: 1.4; }
+.courseStatus { color: var(--slate); font-size: 11px; font-weight: 650; }
+.courseAction { color: var(--cobalt); font-size: 11px; font-weight: 800; text-align: right; }
+
+.safetyNote {
+  display: grid;
+  grid-template-columns: auto minmax(180px, .5fr) minmax(250px, 1fr);
+  gap: 18px;
+  align-items: center;
+  margin-top: 36px;
+  padding: 19px 22px;
+  border-left: 7px solid var(--yellow);
+  border-radius: 4px 16px 16px 4px;
+  background: #fff8dc;
+}
+
+.safetyNote > span { color: #79631b; font: 800 9px/1 "Cascadia Mono", monospace; text-transform: uppercase; }
+.safetyNote strong { font-size: 13px; }
+.safetyNote p { margin: 0; color: #6e6346; font-size: 12px; line-height: 1.45; }
+
+.detailPanel {
+  position: relative;
+  min-width: 0;
+  padding: 42px 25px;
+  overflow: hidden;
+  border-left: 2px solid var(--ink);
+  background:
+    linear-gradient(rgba(21,49,95,.045) 1px, transparent 1px),
+    #fff9e8;
+  background-size: 100% 26px;
+}
+
+.detailTape {
+  position: absolute;
+  top: 13px;
+  right: 26px;
+  width: 67px;
+  height: 20px;
+  background: rgba(255,155,115,.78);
+  transform: rotate(5deg);
+}
+
+.detailPanel h2 {
+  margin: 10px 0 14px;
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: 31px;
+  line-height: 1.02;
+  letter-spacing: -.05em;
+}
+
+.roleTag {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #0d7064;
+  background: #dff7f2;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.detailRoute { margin: 28px 0; }
+.detailRoute .routeStation { min-width: 45px; padding: 8px 5px; }
+.detailRoute .routeStation strong { font-size: 8px; }
+
+.detailStatus {
+  display: grid;
+  gap: 5px;
+  padding: 16px;
+  border: 2px solid var(--ink);
+  border-radius: 5px 17px 5px 17px;
+  background: var(--yellow);
+  box-shadow: 7px 8px 0 rgba(255,155,115,.45);
+  transform: rotate(-1deg);
+}
+
+.detailStatus span { font-size: 9px; text-transform: uppercase; }
+.detailStatus strong { font-size: 14px; }
+.detailText { margin: 27px 0 20px; color: var(--slate); line-height: 1.55; }
+.detailAction { width: 100%; color: white; background: var(--cobalt); box-shadow: 7px 8px 0 rgba(255,155,115,.55); }
+
+.detailPanel > .prototypeHint {
+  justify-self: center;
+  width: 100%;
+  text-align: center;
+}
+
+.detailHint {
+  display: grid;
+  gap: 6px;
+  margin-top: 26px;
+  padding: 16px;
+  border-left: 5px solid var(--mint);
+  background: white;
+}
+
+.detailHint strong { font-size: 13px; }
+.detailHint span { color: var(--slate); font-size: 12px; line-height: 1.45; }
+
+.page a:focus-visible,
+.page button:focus-visible {
+  outline: 3px solid var(--ink) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px var(--yellow), 0 0 0 9px var(--ink) !important;
+}
+
+@media (max-width: 1180px) {
+  .shell { grid-template-columns: 220px minmax(0, 1fr); }
+  .detailPanel { grid-column: 2; border-top: 2px solid var(--ink); border-left: 0; }
+  .courseCard { grid-template-columns: 48px minmax(170px, 1fr) 95px auto; }
+  .courseCard > .courseRoute { display: none; }
+}
+
+@media (max-width: 900px) {
+  .header { position: relative; grid-template-columns: 1fr; gap: 12px; }
+  .headerRoute { display: none; }
+  .roleBlock { justify-self: start; padding-left: 60px; margin-top: -10px; text-align: left; }
+  .shell { display: block; }
+  .sidebar { min-height: auto; padding: 27px 18px; border-right: 0; border-bottom: 2px solid var(--ink); }
+  .sidebar nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .navActive,
+  .navPending { grid-template-columns: 1fr; min-height: 65px; justify-items: center; text-align: center; }
+  .navActive i,
+  .navPending i { display: none; }
+  .organizationNote { margin-top: 24px; }
+  .backLink { margin-top: 18px; }
+  .main { padding: 20px 14px 38px; }
+  .hero { min-height: 880px; padding: 37px 21px; }
+  .heroCopy { width: 100%; }
+  .hero h1 { font-size: clamp(46px, 13vw, 67px); }
+  .heroActions { display: grid; }
+  .heroMap { top: auto; height: 390px; }
+  .mapLabel { top: 3%; }
+  .roleNote { top: 20%; right: 6%; }
+  .heroMap .courseRoute { right: 1%; bottom: 9%; left: 1%; }
+  .heroTape { top: 52%; left: 12%; }
+  .courseCard { grid-template-columns: 42px minmax(0, 1fr); gap: 11px; }
+  .courseStatus,
+  .courseAction { grid-column: 2; text-align: left; }
+  .safetyNote { grid-template-columns: 1fr; }
+  .detailPanel { padding: 38px 20px; }
+}
+
+@media (max-width: 480px) {
+  .brandMark { width: 44px; height: 44px; }
+  .sidebar nav { gap: 5px; }
+  .navActive,
+  .navPending { padding: 8px 5px; font-size: 11px; }
+  .sectionHeading { align-items: flex-start; }
+  .courseCount { white-space: nowrap; }
+  .routeStation { min-width: 48px; padding: 8px 5px; }
+  .roleNote { width: 175px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .courseCard { transition: none; }
+}

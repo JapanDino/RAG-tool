@@ -18,7 +18,8 @@ def test_validate_annotation_bad_score():
 
 
 def test_validate_annotation_empty_label():
-    ok, err = validate_annotation({"level": "apply", "label": "", "rationale": "ok", "score": 0.5})
+    ok, err = validate_annotation(
+        {"level": "apply", "label": "", "rationale": "ok", "score": 0.5}
+    )
     assert ok is False
     assert err is not None
-

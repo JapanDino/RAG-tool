@@ -2,26 +2,26 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
-
 
 LEVEL_ORDER = ["remember", "understand", "apply", "analyze", "evaluate", "create"]
 
 
 def annotate_bloom(chunk: str, level: str, rubric: str | None = None):
     # Placeholder deterministic annotator (без LLM): простая эвристика
-    score = min(1.0, 0.5 + len(chunk.strip())/2000.0)
+    score = min(1.0, 0.5 + len(chunk.strip()) / 2000.0)
     label = {
-        "remember":"Факты",
-        "understand":"Понимание",
-        "apply":"Применение",
-        "analyze":"Анализ",
-        "evaluate":"Оценивание",
-        "create":"Создание"
+        "remember": "Факты",
+        "understand": "Понимание",
+        "apply": "Применение",
+        "analyze": "Анализ",
+        "evaluate": "Оценивание",
+        "create": "Создание",
     }.get(level, "N/A")
     rationale = f"Эвристика: длина текста={len(chunk)}; уровень={level}"
-    return dict(level=level, label=label, rationale=rationale, score=round(score,3))
+    return dict(level=level, label=label, rationale=rationale, score=round(score, 3))
 
 
 def _default_verbs_path() -> Path:
@@ -46,7 +46,20 @@ def _load_keywords() -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for lvl in LEVEL_ORDER:
         out[lvl] = [str(x).lower() for x in data.get(lvl, []) if str(x).strip()]
+    # Learning objectives commonly use infinitives while assignments use imperatives.
+    # Prefixes below intentionally rely on the classifier's trailing ``\w*`` match.
+    objective_stems = {
+        "remember": ["запомина", "воспроизвод", "называ", "перечисля", "определя"],
+        "understand": ["понима", "объясня", "описыва", "интерпретир", "сравнива"],
+        "apply": ["применя", "использова", "реша", "вычисля", "выполня"],
+        "analyze": ["анализир", "сопоставля", "структурир", "выделя"],
+        "evaluate": ["оценива", "обосновыва", "аргументир", "доказыва"],
+        "create": ["создава", "разрабатыва", "проектир", "формулирова", "составля"],
+    }
+    for level, stems in objective_stems.items():
+        out[level].extend(stem for stem in stems if stem not in out[level])
     return out
+
 
 def classify_bloom_multilabel(
     text: str,
@@ -59,10 +72,18 @@ def classify_bloom_multilabel(
     keywords = _load_keywords()
     for level in LEVEL_ORDER:
         hits = 0
+        occupied_spans: list[tuple[int, int]] = []
         for kw in keywords.get(level, []):
-            if kw in lowered:
+            match = re.search(rf"\b{re.escape(kw)}\w*\b", lowered)
+            if not match:
+                match = re.search(re.escape(kw), lowered)
+            if match and not any(
+                match.start() >= start and match.end() <= end
+                for start, end in occupied_spans
+            ):
                 hits += 1
                 triggers[level].append(kw)
+                occupied_spans.append((match.start(), match.end()))
         counts.append(hits)
 
     total = sum(counts)
@@ -76,7 +97,19 @@ def classify_bloom_multilabel(
     if drift != 0:
         probs[-1] = round(probs[-1] + drift, 3)
 
-    sorted_levels = sorted(zip(LEVEL_ORDER, probs), key=lambda x: x[1], reverse=True)
+    priority = {lvl: 0 for lvl in LEVEL_ORDER}
+    if triggers["analyze"] and triggers["evaluate"]:
+        # In task prompts such as "compare causes ... to evaluate ...", the
+        # assessment and analysis intent is more specific than generic compare.
+        priority["analyze"] = 2
+        priority["evaluate"] = 2
+        priority["understand"] = -1
+
+    sorted_levels = sorted(
+        zip(LEVEL_ORDER, probs),
+        key=lambda x: (x[1], priority.get(x[0], 0)),
+        reverse=True,
+    )
     top_levels = [lvl for lvl, p in sorted_levels if p >= min_prob][:max_levels]
     if not top_levels:
         top_levels = [sorted_levels[0][0]]

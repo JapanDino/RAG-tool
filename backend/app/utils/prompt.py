@@ -9,14 +9,14 @@ BLOOM_INSTRUCTIONS = {
     "create": "Предложите новый план/решение на основе текста.",
 }
 
+
 def build_bloom_prompt(chunk: str, level: str, rubric: str | None = None) -> str:
     guidance = BLOOM_INSTRUCTIONS.get(
         level, "Сформулируйте краткую аннотацию по таксономии Блума."
     )
     rubric_part = f"Критерии оценки: {rubric}\n" if rubric else ""
-    return (
-        dedent(
-            f"""
+    return dedent(
+        f"""
             Вы — эксперт-методист. Проаннотируйте фрагмент по таксономии Блума для уровня: {level}.
             {rubric_part}
             Инструкция: {guidance}
@@ -34,15 +34,12 @@ def build_bloom_prompt(chunk: str, level: str, rubric: str | None = None) -> str
             {chunk}
             ---
             """
-        )
-        .strip()
-    )
+    ).strip()
 
 
 def build_bloom_multilabel_prompt(text: str) -> str:
-    return (
-        dedent(
-            f"""
+    return dedent(
+        f"""
             Вы — эксперт-методист. Определите уровни таксономии Блума для фрагмента.
             Нужно вернуть вероятности по 6 уровням пересмотренной таксономии (Remember..Create).
 
@@ -63,6 +60,4 @@ def build_bloom_multilabel_prompt(text: str) -> str:
             {text}
             ---
             """
-        )
-        .strip()
-    )
+    ).strip()

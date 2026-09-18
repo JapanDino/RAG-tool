@@ -2,9 +2,23 @@ from statistics import mean, pstdev
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+
 from ..db.session import get_db
-from ..models.models import BloomAnnotation, Chunk, Dataset, Document, Job, JobType, JobStatus
-from ..schemas.schemas import AnnotationListOut, AnnotationOut, AnnotationUpdateIn, AnnotationWithChunkOut
+from ..models.models import (
+    BloomAnnotation,
+    Chunk,
+    Dataset,
+    Document,
+    Job,
+    JobStatus,
+    JobType,
+)
+from ..schemas.schemas import (
+    AnnotationListOut,
+    AnnotationOut,
+    AnnotationUpdateIn,
+    AnnotationWithChunkOut,
+)
 from ..services.validation import validate_annotation
 from ..tasks.queue import enqueue_or_mark
 from ..utils.quality import (
@@ -19,7 +33,9 @@ router = APIRouter(prefix="/annotate", tags=["annotate"])
 @router.post("/datasets/{dataset_id}")
 def start_annotate(
     dataset_id: int,
-    level: str = Query(..., pattern="^(remember|understand|apply|analyze|evaluate|create)$"),
+    level: str = Query(
+        ..., pattern="^(remember|understand|apply|analyze|evaluate|create)$"
+    ),
     db: Session = Depends(get_db),
 ):
     ds = db.get(Dataset, dataset_id)
@@ -40,7 +56,9 @@ def start_annotate(
 @router.get("/datasets/{dataset_id}/stats")
 def get_stats(
     dataset_id: int,
-    level: str | None = Query(None, pattern="^(remember|understand|apply|analyze|evaluate|create)$"),
+    level: str | None = Query(
+        None, pattern="^(remember|understand|apply|analyze|evaluate|create)$"
+    ),
     min_score: float | None = None,
     db: Session = Depends(get_db),
 ):
@@ -143,11 +161,15 @@ def update_chunk_annotation(
     )
     if annotation:
         label = payload.label if payload.label is not None else annotation.label
-        rationale = payload.rationale if payload.rationale is not None else annotation.rationale
+        rationale = (
+            payload.rationale if payload.rationale is not None else annotation.rationale
+        )
         score = payload.score if payload.score is not None else annotation.score
     else:
         if payload.label is None or payload.rationale is None or payload.score is None:
-            raise HTTPException(400, "label, rationale, score required for new annotation")
+            raise HTTPException(
+                400, "label, rationale, score required for new annotation"
+            )
         label = payload.label
         rationale = payload.rationale
         score = payload.score
@@ -195,7 +217,9 @@ def delete_chunk_annotation(chunk_id: int, level: str, db: Session = Depends(get
 @router.get("/datasets/{dataset_id}/annotations", response_model=AnnotationListOut)
 def list_dataset_annotations(
     dataset_id: int,
-    level: str | None = Query(None, pattern="^(remember|understand|apply|analyze|evaluate|create)$"),
+    level: str | None = Query(
+        None, pattern="^(remember|understand|apply|analyze|evaluate|create)$"
+    ),
     min_score: float | None = None,
     max_score: float | None = None,
     chunk_id: int | None = None,

@@ -2,13 +2,20 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.models.base import Base
-from backend.app.models.models import BloomAnnotation, BloomLevel, Chunk, Dataset, Document
+from backend.app.models.models import (
+    BloomAnnotation,
+    BloomLevel,
+    Chunk,
+    Dataset,
+    Document,
+)
 from backend.app.utils.quality import (
     calculate_consistency_metrics,
     calculate_coverage_metrics,
     calculate_level_distribution,
     calculate_score_distribution,
 )
+from scripts.evaluate_multilabel import _per_level
 
 
 def _make_session():
@@ -80,3 +87,19 @@ def test_consistency_and_coverage_metrics():
     assert coverage["chunks_total"] == 2
     assert coverage["chunks_annotated"] == 1
 
+
+def test_multilabel_per_level_metrics():
+    y_true = [
+        [1, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 1, 0],
+    ]
+    y_pred = [
+        [1, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 0],
+    ]
+
+    report = _per_level(y_true, y_pred)
+
+    assert report["remember"]["f1"] == 1.0
+    assert report["evaluate"]["recall"] == 0.0
+    assert report["evaluate"]["fn"] == 1.0
