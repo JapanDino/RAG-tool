@@ -621,7 +621,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     check();
     const it = setInterval(check, 8000);
     return () => { cancelled = true; clearInterval(it); };
-  }, [checkApiStatus]);
+  }, [checkApiStatus, apiBase]);
 
   const apiFetchJson = useCallback(async (path: string, init?: RequestInit): Promise<any | null> => {
     try {
@@ -1148,7 +1148,7 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
       setCanvasIngesting(false);
       setCanvasProgress(null);
     }
-  }, [addToast, apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxNodesAuto, canvasMaxFiles, getDirectBackendBase]);
+  }, [addToast, apiBase, canvasSelectedCourse, ds, canvasContentTypes, canvasMaxNodes, canvasMaxNodesAuto, canvasMaxFiles, canvasTopicMode, canvasTopicTree, getDirectBackendBase]);
 
   // Keep a stable ref so the chat action handler can call ingestCanvasCourse without stale closure
   useEffect(() => { ingestCanvasCourseRef.current = ingestCanvasCourse; }, [ingestCanvasCourse]);

@@ -1,0 +1,57 @@
+# Standalone pilot deployment; do not combine with the development Compose file.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rag_db
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: ${DB_PASS:?Set DB_PASS in backend/.env}
+    volumes:
+      - lti_db:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U rag -d rag_db"]
+      interval: 5s
+      retries: 20
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: [redis-server, --save, "", --appendonly, "no"]
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: backend/.env
+    environment:
+      APP_MODE: lti
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: rag_db
+      DB_USER: rag
+      DATABASE_URL: postgresql+psycopg://rag:${DB_PASS:?Set DB_PASS in backend/.env}@db:5432/rag_db
+      REDIS_URL: redis://redis:6379/0
+      LTI_PUBLIC_JWKS_PATH: /app/secrets/lti-public.json
+    volumes:
+      - ./secrets:/app/secrets:ro
+      - lti_hf_cache:/root/.cache/huggingface
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    working_dir: /app/backend
+    command: [bash, -lc, "bash ../scripts/apply_migrations.sh && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"]
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.lti
+    restart: unless-stopped
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: [backend]
+volumes:
+  lti_db:
+  lti_hf_cache:

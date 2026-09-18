@@ -1,11 +1,36 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import datasets, search, export, annotate, jobs, status, rubrics, analyze, taxonomy, nodes, graph, labeling, evaluate, canvas, chat
 from .routers.labeling import nodes_router as labeling_nodes_router
+from .routers import lti, portal
 
 app = FastAPI(title="RAG Bloom API", version="0.2.0")
+
+
+@app.middleware("http")
+async def deployment_boundary(request: Request, call_next):
+    mode = os.getenv("APP_MODE", "studio")
+    if mode not in {"studio", "lti"}:
+        return JSONResponse({"detail": "Invalid APP_MODE"}, status_code=503)
+    if mode == "lti":
+        path = request.url.path
+        if path != "/health" and not path.startswith(("/lti/", "/portal/")):
+            return JSONResponse({"detail": "Studio API disabled in LTI mode"}, status_code=404)
+        try:
+            size = int(request.headers.get("content-length", "0") or "0")
+        except ValueError:
+            return JSONResponse({"detail": "Invalid Content-Length"}, status_code=400)
+        if size > 11 * 1024 * 1024:
+            return JSONResponse({"detail": "Request too large"}, status_code=413)
+    response = await call_next(request)
+    if request.url.path.startswith(("/lti/", "/portal/")):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 # Frontend runs on a different origin (localhost:3000) than API (localhost:8000).
 # In dev/demo we allow broad CORS by default to avoid "TypeError: Failed to fetch".
@@ -39,6 +64,8 @@ app.include_router(labeling_nodes_router)
 app.include_router(evaluate.router)
 app.include_router(canvas.router)
 app.include_router(chat.router)
+app.include_router(lti.router)
+app.include_router(portal.router)
 
 @app.get("/health")
 def health():

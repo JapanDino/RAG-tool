@@ -57,7 +57,7 @@ def chat_completion_json(model: str, prompt: str, max_tokens: int = 400) -> str:
     # /no_think disables Qwen3 chain-of-thought to avoid multi-minute delays
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": "/no_think\n" + prompt}],
+        "messages": [{"role": "user", "content": ("/no_think\n" if model.lower().startswith("qwen") else "") + prompt}],
         "temperature": 0.2,
         "max_tokens": max_tokens,
     }

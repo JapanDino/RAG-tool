@@ -1,5 +1,7 @@
 # Bloom RAG Studio
 
+> **Canvas LTI pilot.** Course-scoped student chat with source excerpts, teacher-managed materials, Bloom analysis and feedback. Start with the [administrator handoff](docs/CANVAS_ADMIN_HANDOFF.md) and [verification report](docs/PILOT_VERIFICATION.md). Use the dedicated `docker-compose.lti.yml`; the development Studio is not a public student deployment. A real Canvas/Letovo acceptance run is still required.
+
 > **Portfolio summary (EN).** Bloom RAG Studio is an offline-first platform for analyzing learning materials. It turns documents into reviewable knowledge nodes, classifies them against Bloom's taxonomy, and makes the results searchable through an interactive graph.
 >
 > **Engineering highlights:** FastAPI + Next.js, PostgreSQL/pgvector, Redis/Celery, local or OpenAI-compatible models, Docker Compose, human-in-the-loop labeling, and reproducible baseline evaluation.
@@ -9,8 +11,8 @@
 > RAG-инструмент для анализа учебных материалов: выделяет смысловые узлы, классифицирует их по таксономии Блума, строит интерактивный граф знаний и помогает проверять качество разметки.
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green?logo=fastapi)
-![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green?logo=fastapi)
+![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-blue?logo=postgresql)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
@@ -158,7 +160,7 @@ flowchart TD
 | NLP | pymorphy3, natasha, sentence-transformers |
 | Vector search | PostgreSQL 16, pgvector |
 | Queue/cache | Redis, Celery |
-| Frontend | Next.js 14, React, Cytoscape.js |
+| Frontend | Next.js 15, React, Cytoscape.js |
 | OCR/PDF | Tesseract, pdf2image, pdfminer |
 | Infra | Docker Compose |
 

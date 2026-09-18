@@ -14,3 +14,9 @@ build/
 .gitignore
 
 .claude/
+**/.env
+**/.env.*
+!**/.env.example
+secrets/
+**/*.pem
+**/*.key

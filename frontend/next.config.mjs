@@ -3,17 +3,21 @@ const nextConfig = {
   async rewrites() {
     return [
       {
+        source: "/lti/:path*",
+        destination: `${process.env.BACKEND_INTERNAL_URL ?? "http://localhost:8000"}/lti/:path*`,
+      },
+      {
         source: "/api-proxy/:path*",
         destination: `${process.env.BACKEND_INTERNAL_URL ?? "http://localhost:8000"}/:path*`,
       },
     ];
   },
-  // Increase proxy timeout to 90s for slow Canvas API responses
+  // Allow bounded course imports and LLM requests to finish through the proxy.
   httpAgentOptions: {
     keepAlive: true,
   },
   experimental: {
-    proxyTimeout: 90000,
+    proxyTimeout: 300000,
   },
 };
 
