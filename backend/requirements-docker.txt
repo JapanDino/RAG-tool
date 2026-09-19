@@ -22,3 +22,5 @@ Pillow>=12.3,<13
 pgvector>=0.2.5
 natasha>=1.6.0,<2.0
 # sentence-transformers omitted вЂ” use EMBEDDING_PROVIDER=hash to avoid torch (530MB)
+pymorphy3>=1.3,<2.0
+pymorphy3-dicts-ru>=2.4,<3.0

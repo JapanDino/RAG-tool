@@ -2,6 +2,7 @@ import re
 
 try:
     from razdel import sentenize as _razdel_sentenize  # type: ignore
+
     _HAS_RAZDEL = True
 except ImportError:
     _HAS_RAZDEL = False
@@ -26,7 +27,7 @@ def _split_sentences(text: str) -> list[str]:
     buf_start = 0
     for m in re.finditer(r"[.!?]+", text):
         punct_start = m.start()
-        after = text[m.end():]
+        after = text[m.end() :]
         if not re.match(r"\s", after):
             continue  # no whitespace after punct → not a sentence boundary
         punct_char = m.group()[0]
@@ -39,7 +40,7 @@ def _split_sentences(text: str) -> list[str]:
                     continue  # initial / single-letter abbreviation
                 if _ABBREV_ROOT_RE.search(word):
                     continue  # known abbreviation root
-        parts.append(text[buf_start:m.end()].strip())
+        parts.append(text[buf_start : m.end()].strip())
         buf_start = m.end()
     tail = text[buf_start:].strip()
     if tail:
@@ -52,6 +53,7 @@ def split_into_chunks(
     min_len: int = 20,
     max_chars: int = 1500,
     overlap_chars: int = 150,
+    preserve_paragraphs: bool = False,
 ) -> list[str]:
     """Split *text* into sentence-aware chunks with optional overlap.
 
@@ -60,11 +62,23 @@ def split_into_chunks(
     next one so that concepts straddling a boundary stay visible in both.
     Uses razdel for Russian-aware sentence splitting when available.
     """
-    cleaned = " ".join(text.strip().split())
+    separator = "\n" if preserve_paragraphs else " "
+    paragraphs = [
+        " ".join(line.split()) for line in text.strip().splitlines() if line.strip()
+    ]
+    cleaned = (
+        separator.join(paragraphs)
+        if preserve_paragraphs
+        else " ".join(text.strip().split())
+    )
     if not cleaned:
         return []
 
-    sentences = [s for s in _split_sentences(cleaned) if len(s) >= min_len]
+    sentences = (
+        [s for paragraph in paragraphs for s in _split_sentences(paragraph)]
+        if preserve_paragraphs
+        else [s for s in _split_sentences(cleaned) if len(s) >= min_len]
+    )
     if not sentences:
         # Text is shorter than min_len or has no sentence boundaries —
         # return it as a single chunk (don't apply min_len to the whole text).
@@ -76,8 +90,8 @@ def split_into_chunks(
     current_len = 0
 
     def flush() -> str:
-        joined = " ".join(current_parts)
-        if len(joined) >= min_len:
+        joined = separator.join(current_parts)
+        if joined and (preserve_paragraphs or len(joined) >= min_len):
             chunks.append(joined)
         return joined
 
@@ -127,11 +141,13 @@ def split_into_chunks(
                     current_len = len(seed)
 
         current_parts.append(sent)
-        current_len = len(" ".join(current_parts))
+        current_len = len(separator.join(current_parts))
 
     if current_parts:
-        remaining = " ".join(current_parts)
-        if len(remaining) >= min_len:
+        remaining = separator.join(current_parts)
+        if remaining and (preserve_paragraphs or len(remaining) >= min_len):
             chunks.append(remaining)
 
-    return chunks if chunks else ([cleaned[:max_chars]] if len(cleaned) >= min_len else [])
+    return (
+        chunks if chunks else ([cleaned[:max_chars]] if len(cleaned) >= min_len else [])
+    )

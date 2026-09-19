@@ -971,3 +971,13 @@
         flex-wrap: wrap;
     }
 }
+.bloomEvidence {
+    border-left: 3px solid #c7d3db;
+    margin: 16px 0;
+    padding: 4px 16px;
+    overflow-wrap: anywhere;
+}
+.bloomEvidence blockquote {
+    margin: 8px 0;
+    white-space: pre-wrap;
+}

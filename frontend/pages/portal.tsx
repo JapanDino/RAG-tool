@@ -5,6 +5,7 @@ import CourseChat from "../components/CourseChat";
 import MaterialReader, { MaterialSource } from "../components/MaterialReader";
 import QualityPanel from "../components/QualityPanel";
 import CanvasImport from "../components/CanvasImport";
+import BloomAnalysis, { Analysis } from "../components/BloomAnalysis";
 
 type Material = {
     document_id: number;
@@ -14,18 +15,6 @@ type Material = {
     source_url?: string;
     module_name?: string;
     unavailable_reason?: string;
-};
-type Analysis = {
-    distribution: Record<string, number>;
-    note: string;
-    chunks_analyzed: number;
-    limit: number;
-    examples: {
-        document_id: number;
-        title: string;
-        text: string;
-        levels: string[];
-    }[];
 };
 type Summary = {
     metrics: Record<string, number>;
@@ -681,67 +670,10 @@ export default function Portal() {
                         )}
 
                         {tab === "analysis" && teacher && (
-                            <section className={s.panel}>
-                                <h2>Когнитивный профиль материалов</h2>
-                                <p className={s.muted}>
-                                    Анализ включает опубликованные материалы и
-                                    черновики. Один фрагмент может относиться к
-                                    нескольким уровням.
-                                </p>
-                                {analysis && (
-                                    <>
-                                        <p>{analysis.note}</p>
-                                        <p>
-                                            Обработано фрагментов:{" "}
-                                            {analysis.chunks_analyzed} (лимит{" "}
-                                            {analysis.limit}).
-                                        </p>
-                                        {analysis.chunks_analyzed === 0 && (
-                                            <p className={s.empty}>
-                                                Пока нечего анализировать.
-                                                Добавьте материалы в библиотеку
-                                                курса.
-                                            </p>
-                                        )}
-                                        <div className={s.stats}>
-                                            {[
-                                                "remember",
-                                                "understand",
-                                                "apply",
-                                                "analyze",
-                                                "evaluate",
-                                                "create",
-                                            ].map((level) => (
-                                                <div key={level}>
-                                                    <strong>
-                                                        {analysis.distribution[
-                                                            level
-                                                        ] || 0}
-                                                    </strong>
-                                                    <span>
-                                                        {labels[level] || level}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                        <h3>Примеры для проверки</h3>
-                                        {analysis.examples.map((e, i) => (
-                                            <details key={i}>
-                                                <summary>
-                                                    {e.title} ·{" "}
-                                                    {e.levels
-                                                        .map(
-                                                            (l) =>
-                                                                labels[l] || l,
-                                                        )
-                                                        .join(", ")}
-                                                </summary>
-                                                <p>{e.text}</p>
-                                            </details>
-                                        ))}
-                                    </>
-                                )}
-                            </section>
+                            <BloomAnalysis
+                                analysis={analysis}
+                                onSource={openSource}
+                            />
                         )}
 
                         {tab === "summary" && teacher && (

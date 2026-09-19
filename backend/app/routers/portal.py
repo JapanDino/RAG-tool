@@ -19,6 +19,11 @@ from ..db.session import get_db
 from ..models.models import Chunk, Document
 from ..services import canvas_client, course_quality
 from ..services.answer_layout import LAYOUT_PROMPT, validated_layout
+from ..services.bloom_rubric import (
+    REFERENCES,
+    RUBRIC_VERSION,
+    classify_learning_demands,
+)
 from ..services.canvas_images import (
     extract_canvas_images,
     file_available,
@@ -26,6 +31,7 @@ from ..services.canvas_images import (
     page_hash,
 )
 from ..services.chunking import split_into_chunks
+from ..services.course_text import extract_course_html as _html_to_text
 from ..services.embedding import embed_texts
 from ..services.embedding_provider import current_embedding_model
 from ..services.lti_security import current_session, rate_limit, require_teacher
@@ -33,9 +39,7 @@ from ..services.material_images import Illustration, extract_docx, extract_pdf
 from ..services.openai_client import chat_completion_json
 from ..services.query_embed import embed_query
 from ..services.text_extract import extract_text
-from ..utils.bloom import classify_bloom_multilabel
 from ..utils.vector import vector_literal
-from .canvas import _html_to_text
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/portal", tags=["Course portal"])
@@ -237,7 +241,9 @@ def save_material(
     model = current_embedding_model()
     if model.startswith(("hash:", "random:")):
         raise HTTPException(503, "Semantic embedding model is unavailable")
-    parts = split_into_chunks(content, max_chars=1500, overlap_chars=150)
+    parts = split_into_chunks(
+        content, max_chars=1500, overlap_chars=150, preserve_paragraphs=True
+    )
     page_numbers = [None] * len(parts)
     if page_texts:
         parts, page_numbers = [], []
@@ -728,7 +734,7 @@ def analysis(session: SessionUser, db: Database):
     require_teacher(session)
     rows = (
         db.execute(
-            text("""SELECT d.id,d.title,c.text FROM documents d JOIN portal_materials m ON m.document_id=d.id
+            text("""SELECT d.id,d.title,c.id AS chunk_id,c.text FROM documents d JOIN portal_materials m ON m.document_id=d.id
         JOIN chunks c ON c.document_id=d.id WHERE m.course_id=:course AND d.dataset_id=:dataset
         AND (c.meta->>'image_context') IS DISTINCT FROM 'true' ORDER BY d.id,c.idx LIMIT 500"""),
             {"course": session["course_id"], "dataset": session["dataset_id"]},
@@ -736,27 +742,41 @@ def analysis(session: SessionUser, db: Database):
         .mappings()
         .all()
     )
-    distribution, examples = {}, []
+    distribution, knowledge_distribution, examples = {}, {}, []
+    statuses = {key: 0 for key in ("proposed", "partial", "needs_review", "no_task")}
     for row in rows:
-        result = classify_bloom_multilabel(row["text"])
-        for level in result["top_levels"]:
+        result = classify_learning_demands(row["text"])
+        statuses[result["status"]] += 1
+        for level in result["levels"]:
             distribution[level] = distribution.get(level, 0) + 1
-        if len(examples) < 30:
-            examples.append(
-                {
-                    "document_id": row["id"],
-                    "title": row["title"],
-                    "text": row["text"][:300],
-                    "levels": result["top_levels"],
-                }
+        for knowledge in result["knowledge"]:
+            knowledge_distribution[knowledge] = (
+                knowledge_distribution.get(knowledge, 0) + 1
             )
+        examples.append(
+            {
+                "document_id": row["id"],
+                "chunk_id": row["chunk_id"],
+                "title": row["title"],
+                "text": row["text"][:300],
+                **result,
+            }
+        )
+    # Ambiguous tasks first; prose must not crowd them out of the sample.
+    priority = {"needs_review": 0, "partial": 1, "proposed": 2, "no_task": 3}
+    examples.sort(key=lambda item: priority[item["status"]])
     return {
-        "method": "keyword_baseline",
+        "method": "contextual_rubric_rules",
+        "rubric_version": RUBRIC_VERSION,
+        "references": REFERENCES,
         "distribution": distribution,
-        "examples": examples,
+        "knowledge_distribution": knowledge_distribution,
+        "statuses": statuses,
+        "examples": examples[:30],
+        "examples_limit": 30,
         "chunks_analyzed": len(rows),
         "limit": 500,
-        "note": "Предварительная классификация по глаголам; требует проверки преподавателем и не измеряет знания учеников.",
+        "note": "Научная основа — пересмотренная таксономия Блума. Автоматические правила дают предварительные предложения по явным учебным действиям, а не измеряют знания учеников. Точность на школьных курсах ещё не валидирована.",
     }
 
 

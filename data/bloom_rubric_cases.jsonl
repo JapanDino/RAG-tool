@@ -1,0 +1,40 @@
+{"id":"prose_atp","text":"Световая фаза образует АТФ и НАДФН. Эти вещества используются в цикле Кальвина.","levels":[],"status":"no_task"}
+{"id":"prose_model","text":"Модель описывает структуру атома. Анализ показывает причины изменения температуры.","levels":[],"status":"no_task"}
+{"id":"prose_teacher","text":"Преподаватель оценивает результаты и создаёт задания.","levels":[],"status":"no_task"}
+{"id":"prose_quote","text":"Автор пишет: «Создайте новую модель клетки».","levels":[],"status":"no_task"}
+{"id":"prose_learner","text":"Ученик создаёт модель клетки на фотографии.","levels":[],"status":"no_task"}
+{"id":"prose_en","text":"The cell creates proteins. The model evaluates relationships between variables.","levels":[],"status":"no_task"}
+{"id":"empty","text":"","levels":[],"status":"no_task"}
+{"id":"title","text":"Анализ и оценка моделей фотосинтеза","levels":[],"status":"no_task"}
+{"id":"negative","text":"Не создавайте новую модель клетки.","levels":[],"status":"no_task"}
+{"id":"remember_fact","text":"Назовите столицу Франции.","levels":["remember"],"status":"proposed","knowledge":["factual"]}
+{"id":"remember_concept","text":"Вспомните основные принципы термодинамики.","levels":["remember"],"status":"proposed","knowledge":["conceptual"]}
+{"id":"remember_procedure","text":"Воспроизведите изученный алгоритм деления.","levels":["remember"],"status":"proposed","knowledge":["procedural"]}
+{"id":"explain","text":"Объясните роль хлорофилла в фотосинтезе.","levels":["understand"],"status":"proposed","knowledge":["conceptual"]}
+{"id":"compare","text":"Сравните две фазы фотосинтеза.","levels":["understand"],"status":"proposed"}
+{"id":"objective","text":"Ученик сможет объяснить причины революции.","levels":["understand"],"status":"proposed"}
+{"id":"goal","text":"Цель урока: сравнить две модели атома.","levels":["understand"],"status":"proposed"}
+{"id":"recall_explanation","text":"Объясните из памяти дословно выученное определение энергии.","levels":["remember"],"status":"proposed"}
+{"id":"apply_formula","text":"Вычислите силу тока по формуле закона Ома.","levels":["apply"],"status":"proposed","knowledge":["procedural"]}
+{"id":"apply_template","text":"Создайте модель клетки по готовому образцу.","levels":["apply"],"status":"proposed"}
+{"id":"analyze_structure","text":"Проанализируйте части аргумента и их связи с общим выводом.","levels":["analyze"],"status":"proposed"}
+{"id":"analyze_relevance","text":"Отделите существенные данные от несущественных в условии задачи.","levels":["analyze"],"status":"proposed"}
+{"id":"evaluate_criteria","text":"Оцените надёжность источника по критериям авторства и проверяемости.","levels":["evaluate"],"status":"proposed"}
+{"id":"evaluate_metacognition","text":"Оцените собственную стратегию обучения по критерию устойчивости запоминания.","levels":["evaluate"],"status":"proposed","knowledge":["metacognitive"]}
+{"id":"create_novel","text":"Разработайте собственный эксперимент для проверки гипотезы о влиянии света.","levels":["create"],"status":"proposed"}
+{"id":"create_model","text":"Создайте оригинальную модель круговорота воды.","levels":["create"],"status":"proposed","knowledge":["conceptual"]}
+{"id":"ambiguous_evaluate","text":"Оцените этот материал.","levels":[],"status":"needs_review"}
+{"id":"ambiguous_create","text":"Создайте модель клетки.","levels":[],"status":"needs_review"}
+{"id":"ambiguous_analyze","text":"Проанализируйте эту тему.","levels":[],"status":"needs_review"}
+{"id":"ambiguous_apply","text":"Решите эту проблему.","levels":[],"status":"needs_review"}
+{"id":"question","text":"Почему растения зелёные?","levels":[],"status":"needs_review"}
+{"id":"missing_object","text":"Оцените.","levels":[],"status":"needs_review"}
+{"id":"mixed","text":"Назовите столицу Франции. Оцените этот материал.","levels":["remember"],"status":"partial"}
+{"id":"coordinated","text":"Назовите столицу Франции и объясните роль столицы в государстве.","levels":["remember","understand"],"status":"proposed"}
+{"id":"en_goal","text":"Students will be able to explain the principles of inheritance.","levels":["understand"],"status":"proposed"}
+{"id":"en_create","text":"Design an original model of the water cycle.","levels":["create"],"status":"proposed"}
+{"id":"en_template","text":"Create a model using a given template.","levels":["apply"],"status":"proposed"}
+{"id":"en_evaluate","text":"Evaluate the explanation using explicit criteria for accuracy.","levels":["evaluate"],"status":"proposed"}
+{"id":"en_analyze","text":"Analyze the parts and their relationships to the overall structure.","levels":["analyze"],"status":"proposed"}
+{"id":"negated_template","text":"Создайте собственную модель клетки, не следуя готовому образцу.","levels":[],"status":"needs_review"}
+{"id":"negated_criteria","text":"Оцените источник не по критериям авторства, а по своему впечатлению.","levels":[],"status":"needs_review"}

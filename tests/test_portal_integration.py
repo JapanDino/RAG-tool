@@ -111,6 +111,54 @@ def student(client, session):
     client.headers["Authorization"] = "Bearer " + token
 
 
+def test_analysis_reports_evidence_and_abstention_without_llm(pilot, monkeypatch):
+    client, _db, session = pilot
+    monkeypatch.setattr(
+        portal,
+        "chat_completion_json",
+        lambda *args, **kwargs: pytest.fail("Rubric must not call an LLM"),
+    )
+    materials = [
+        (
+            "prose.txt",
+            "Световая фаза образует АТФ и НАДФН. Цикл Кальвина использует эти вещества.",
+        ),
+        (
+            "tasks.txt",
+            "Задания для проверки\n\nСоздайте модель клетки по готовому образцу.\nОцените.",
+        ),
+    ]
+    for filename, body in materials:
+        assert (
+            client.post(
+                "/portal/materials",
+                files={"file": (filename, body.encode(), "text/plain")},
+            ).status_code
+            == 200
+        )
+    response = client.get("/portal/analysis")
+    assert response.status_code == 200
+    report = response.json()
+    assert report["method"] == "contextual_rubric_rules"
+    assert report["rubric_version"] == "rbt-context-1.0"
+    assert report["distribution"] == {"apply": 1}
+    assert report["statuses"] == {
+        "proposed": 0,
+        "partial": 1,
+        "needs_review": 0,
+        "no_task": 1,
+    }
+    assert len(report["references"]) == 3
+    task = report["examples"][0]
+    assert task["status"] == "partial"
+    source = client.get(f"/portal/materials/{task['document_id']}").json()
+    original = next(c["text"] for c in source["chunks"] if c["id"] == task["chunk_id"])
+    assert all(e["quote"] in original for e in task["evidence"])
+    # The same course-scoped API remains unavailable to learners.
+    student(client, session)
+    assert client.get("/portal/analysis").status_code == 403
+
+
 @pytest.mark.parametrize(
     "filename,data,count",
     [
