@@ -111,6 +111,10 @@ def get_page(course_id: int, page_url: str) -> dict:
     return get_one(f"/courses/{course_id}/pages/{page_url}")
 
 
+def get_file(course_id: int, file_id: int) -> dict:
+    return get_one(f"/courses/{course_id}/files/{file_id}")
+
+
 def list_assignments(course_id: int) -> list[dict]:
     return get_all(f"/courses/{course_id}/assignments", {"per_page": 50})
 

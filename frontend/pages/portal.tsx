@@ -9,6 +9,7 @@ import {
 } from "react";
 import s from "../styles/portal.module.css";
 import MaterialImage, { Illustration } from "../components/MaterialImage";
+import AnswerLayout, { AnswerDiagram, AnswerSection } from "../components/AnswerLayout";
 
 type Material = {
     document_id: number;
@@ -17,6 +18,7 @@ type Material = {
     kind: string;
     source_url?: string;
 };
+type ResponseStyle = "auto" | "simple" | "steps" | "diagram" | "check";
 type Citation = {
     document_id: number;
     chunk_id: number;
@@ -29,6 +31,8 @@ type Message = {
     content: string;
     citations?: Citation[];
     images?: Illustration[];
+    sections?: AnswerSection[];
+    diagram?: AnswerDiagram | null;
 };
 type Analysis = {
     distribution: Record<string, number>;
@@ -131,6 +135,7 @@ export default function Portal() {
     const [materials, setMaterials] = useState<Material[]>([]);
     const [messages, setMessages] = useState<Message[]>([]);
     const [question, setQuestion] = useState("");
+    const [responseStyle, setResponseStyle] = useState<ResponseStyle>("auto");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
@@ -139,6 +144,7 @@ export default function Portal() {
     const [source, setSource] = useState<{
         title: string;
         document_id?: number;
+        source_url?: string;
         original_available?: boolean;
         images?: Illustration[];
         chunks: { id: number; text: string }[];
@@ -154,8 +160,12 @@ export default function Portal() {
     const messagesRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         const container = messagesRef.current;
-        if (container) container.scrollTop = container.scrollHeight;
-    }, [messages, busy]);
+        if (container) {
+            const last = container.querySelector<HTMLElement>("article:last-of-type");
+            container.scrollTop = messages[messages.length - 1]?.role === "assistant" && last
+                ? last.offsetTop - 16 : container.scrollHeight;
+        }
+    }, [messages]);
 
     const api = useCallback(
         async (path: string, init: RequestInit = {}) => {
@@ -275,16 +285,18 @@ export default function Portal() {
         const content = question.trim();
         const history = messages
             .slice(-6)
-            .map(({ role, content }) => ({
+            .map(({ role, content, sections, diagram }) => ({
                 role,
-                content: content.slice(0, 4000),
+                content: [content, ...(sections || []).map((section) =>
+                    [section.heading, section.body, ...section.bullets].join("\n")),
+                    diagram ? JSON.stringify(diagram) : ""].join("\n").trim().slice(0, 4000),
             }));
         setMessages((prev) => [...prev, { role: "user", content }]);
         setQuestion("");
         const sent = await run(async () => {
             const answer = await api("/chat", {
                 method: "POST",
-                body: JSON.stringify({ message: content, history }),
+                body: JSON.stringify({ message: content, history, response_style: responseStyle }),
             });
             setMessages((prev) => [
                 ...prev,
@@ -293,8 +305,11 @@ export default function Portal() {
                     content: answer.answer,
                     citations: answer.citations,
                     images: answer.images,
+                    sections: answer.sections,
+                    diagram: answer.diagram,
                 },
             ]);
+            setResponseStyle("auto");
         });
         if (!sent) {
             setMessages((prev) =>
@@ -521,6 +536,9 @@ export default function Portal() {
                                                     : "Помощник"}
                                             </strong>
                                             <p>{m.content}</p>
+                                            {m.role === "assistant" && <AnswerLayout sections={m.sections} diagram={m.diagram}
+                                                citations={m.citations || []} busy={busy}
+                                                onSource={(id) => void run(async () => setSource(await api(`/materials/${id}`)))} />}
                                             {!!m.images?.length && <div className={s.illustrations}>
                                                 {m.images.map((image) => <MaterialImage key={image.id} image={image} token={token} disabled={busy}
                                                     onSource={() => void run(async () => setSource(await api(`/materials/${image.document_id}`)))} />)}
@@ -560,6 +578,23 @@ export default function Portal() {
                                     )}
                                 </div>
                                 <form onSubmit={ask} className={s.ask}>
+                                    {!!messages[messages.length - 1]?.citations?.length && <div className={s.followUps}>
+                                        <p className={s.muted}>Продолжить разбор: выберите вопрос, затем отправьте его.</p>
+                                        <div>
+                                            {[
+                                                ["Объясни проще", "Объясни простыми словами", "simple"],
+                                                ["По шагам", "Разбери по шагам", "steps"],
+                                                ["Покажи схему", "Покажи схему связей по материалам курса", "diagram"],
+                                                ["Проверь понимание", "Задай один вопрос для проверки моего понимания, без ответа и подсказок", "check"],
+                                            ].map(([label, prompt, style]) => <button type="button" key={label} disabled={busy}
+                                                onClick={() => {
+                                                    const topic = [...messages].reverse().find((message) => message.role === "user")?.content || "";
+                                                    setQuestion(`${prompt}: ${topic}`.slice(0, 4000));
+                                                    setResponseStyle(style as ResponseStyle);
+                                                    questionRef.current?.focus();
+                                                }}>{label}</button>)}
+                                        </div>
+                                    </div>}
                                     {error && (
                                         <p role="alert" className={s.error}>
                                             {error}
@@ -572,9 +607,10 @@ export default function Portal() {
                                         value={question}
                                         maxLength={4000}
                                         rows={3}
-                                        onChange={(e) =>
-                                            setQuestion(e.target.value)
-                                        }
+                                        onChange={(e) => {
+                                            setQuestion(e.target.value);
+                                            setResponseStyle("auto");
+                                        }}
                                         placeholder="Например: объясни эту тему на простом примере"
                                     />
                                     <div className={s.composerFooter}>
@@ -685,7 +721,7 @@ export default function Portal() {
                                                     );
                                                     await refresh();
                                                     setNotice(
-                                                        `Импортировано: ${r.imported}. Пропущено: ${r.skipped}. За пределами лимита: ${r.remaining}. Материалы Canvas сняты с публикации — проверьте и откройте нужные заново.`,
+                                                        `Импортировано: ${r.imported}. Пропущено: ${r.skipped}. За пределами лимита: ${r.remaining}. Иллюстраций: ${r.images_imported || 0}. Пропущено иллюстраций: ${r.images_skipped || 0}. Материалы Canvas сняты с публикации — проверьте и откройте нужные заново.`,
                                                     );
                                                 })
                                             }
@@ -693,7 +729,7 @@ export default function Portal() {
                                             Импортировать страницы Canvas
                                         </button>
                                         <p className={s.muted}>
-                                            До 30 страниц за запуск. Тесты и
+                                            До 30 страниц за запуск, с прикреплёнными изображениями курса. Тесты и
                                             ответы учеников не импортируются.
                                             Повторный импорт снимает публикацию
                                             предыдущих копий.
@@ -992,6 +1028,7 @@ export default function Portal() {
                             Закрыть материал
                         </button>
                         <h2>{source.title}</h2>
+                        {source.source_url?.startsWith("https://") && <a href={source.source_url} target="_blank" rel="noopener noreferrer">Открыть страницу в Canvas ↗</a>}
                         {source.original_available && source.document_id && <button disabled={busy}
                             onClick={() => void run(() => downloadOriginal(source.document_id!, source.title))}>
                             Скачать оригинал

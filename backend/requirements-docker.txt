@@ -10,6 +10,7 @@ celery>=5.3,<5.4
 numpy>=1.26,<2.1
 python-multipart>=0.0.32,<0.1
 requests>=2.34.2,<3
+beautifulsoup4>=4.12,<5.0
 PyJWT[crypto]>=2.10,<3
 defusedxml>=0.7,<0.8
 pypdf>=6.19,<7

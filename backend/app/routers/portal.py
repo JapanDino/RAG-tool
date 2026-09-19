@@ -18,6 +18,13 @@ from sqlalchemy.orm import Session
 from ..db.session import get_db
 from ..models.models import Chunk, Document
 from ..services import canvas_client
+from ..services.answer_layout import LAYOUT_PROMPT, validated_layout
+from ..services.canvas_images import (
+    extract_canvas_images,
+    file_available,
+    file_version,
+    page_hash,
+)
 from ..services.chunking import split_into_chunks
 from ..services.embedding import embed_texts
 from ..services.embedding_provider import current_embedding_model
@@ -59,6 +66,7 @@ class Turn(StrictInput):
 class Question(StrictInput):
     message: str = Field(min_length=1, max_length=4000)
     history: list[Turn] = Field(default_factory=list, max_length=6)
+    response_style: Literal["auto", "simple", "steps", "diagram", "check"] = "auto"
 
 
 def material(
@@ -93,12 +101,33 @@ def canvas_current(db: Session, session: dict, item: dict) -> bool:
         page = canvas_client.get_page(
             session["canvas_course_id"], quote(item["source_ref"], safe="")
         )
-        body = _html_to_text(page.get("body") or "")
+        html = page.get("body") or ""
+        fingerprint = (
+            page_hash(html)
+            if item["source_hash"].startswith("html-v1:")
+            else hashlib.sha256(_html_to_text(html).encode()).hexdigest()
+        )
         valid = (
             page.get("published") is True
             and not page.get("locked_for_user")
-            and hashlib.sha256(body.encode()).hexdigest() == item["source_hash"]
+            and fingerprint == item["source_hash"]
         )
+        if valid:
+            files = db.execute(
+                text("""SELECT DISTINCT canvas_file_id,canvas_file_version
+                FROM portal_images WHERE document_id=:doc AND canvas_file_id IS NOT NULL"""),
+                {"doc": item["document_id"]},
+            ).mappings()
+            for image in files:
+                info = canvas_client.get_file(
+                    session["canvas_course_id"], image["canvas_file_id"]
+                )
+                if (
+                    not file_available(info)
+                    or file_version(info) != image["canvas_file_version"]
+                ):
+                    valid = False
+                    break
     except Exception:  # noqa: BLE001 - Fail closed at an external-service boundary.
         return False
     if not valid:
@@ -132,6 +161,7 @@ def save_material(
     source_ref=None,
     images: list[Illustration] | None = None,
     original: tuple[str, bytes] | None = None,
+    source_hash: str | None = None,
 ) -> int:
     if not content.strip():
         raise HTTPException(422, "В документе не найден текст")
@@ -167,6 +197,9 @@ def save_material(
     if existing:
         doc = db.get(Document, existing)
         doc.title = title[:300]
+        db.execute(
+            text("DELETE FROM portal_images WHERE document_id=:doc"), {"doc": existing}
+        )
         db.query(Chunk).filter(Chunk.document_id == existing).delete()
     else:
         doc = Document(
@@ -188,7 +221,7 @@ def save_material(
             "kind": kind,
             "url": source_url,
             "ref": source_ref,
-            "hash": hashlib.sha256(content.encode()).hexdigest(),
+            "hash": source_hash or hashlib.sha256(content.encode()).hexdigest(),
         },
     )
     chunk_ids = []
@@ -210,8 +243,8 @@ def save_material(
         )
     for image, index in image_parts:
         db.execute(
-            text("""INSERT INTO portal_images(document_id,chunk_id,caption,location,page,width,height,data)
-            VALUES (:doc,:chunk,:caption,:location,:page,:width,:height,:data)"""),
+            text("""INSERT INTO portal_images(document_id,chunk_id,caption,location,page,width,height,data,canvas_file_id,canvas_file_version)
+            VALUES (:doc,:chunk,:caption,:location,:page,:width,:height,:data,:file_id,:file_version)"""),
             {
                 "doc": doc.id,
                 "chunk": chunk_ids[index] if index is not None else None,
@@ -221,6 +254,8 @@ def save_material(
                 "width": image.width,
                 "height": image.height,
                 "data": image.data,
+                "file_id": image.canvas_file_id,
+                "file_version": image.canvas_file_version,
             },
         )
     if original:
@@ -482,6 +517,7 @@ def import_canvas(session: SessionUser, db: Database):
             502, "Canvas API недоступен. Проверьте серверный токен."
         ) from None
     imported, skipped = [], 0
+    images_imported, images_skipped = 0, 0
     # Bounded pilot; never imports quizzes, answers or student discussions.
     for page in pages[:30]:
         try:
@@ -496,17 +532,23 @@ def import_canvas(session: SessionUser, db: Database):
                 os.environ["CANVAS_URL"].rstrip("/")
                 + f"/courses/{session['canvas_course_id']}/pages/{quote(slug, safe='')}"
             )
+            body = full.get("body") or ""
+            extracted = extract_canvas_images(body, session["canvas_course_id"])
             imported.append(
                 save_material(
                     db,
                     session,
                     full.get("title") or slug,
-                    _html_to_text(full.get("body") or ""),
+                    _html_to_text(body),
                     kind="canvas_page",
                     source_url=url,
                     source_ref=slug,
+                    source_hash=page_hash(body),
+                    images=extracted.images,
                 )
             )
+            images_imported += len(extracted.images)
+            images_skipped += extracted.skipped
         except Exception:  # noqa: BLE001 - Fail closed at an external-service boundary.
             db.rollback()
             skipped += 1
@@ -515,6 +557,8 @@ def import_canvas(session: SessionUser, db: Database):
         "imported": len(imported),
         "skipped": skipped,
         "remaining": max(0, len(pages) - 30),
+        "images_imported": images_imported,
+        "images_skipped": images_skipped,
     }
 
 
@@ -690,7 +734,17 @@ def chat(
             "Выбери до 3 image_ids, только если подпись или контекст иллюстрации прямо относятся к ответу. "
             "Не утверждай, что рассмотрел рисунок, и не придумывай его содержимое. "
             "Для выбранной иллюстрации включи её chunk_id в citations. Если подходящих нет, верни image_ids: []. "
-            'Верни только JSON: {"answer":"объяснение","citations":[id фрагментов, подтверждающих ответ],"image_ids":[id иллюстраций]}.\n'
+            "Верни только JSON с полями answer, citations, image_ids, sections, diagram.\n"
+            + LAYOUT_PROMPT
+            + "\nВыбранный учеником формат: "
+            + {
+                "auto": "выбери подходящий формат ответа",
+                "simple": "объясни простыми словами",
+                "steps": "разбери объяснение по шагам",
+                "diagram": "построй схему подтверждённых связей",
+                "check": "задай только один проверочный вопрос, без ответа и подсказок; sections=[], diagram=null, image_ids=[]",
+            }[payload.response_style]
+            + ".\n"
             + json.dumps(
                 {
                     "sources": context,
@@ -703,7 +757,7 @@ def chat(
         )
         answer = json.loads(
             chat_completion_json(
-                os.getenv("LLM_MODEL", "deepseek-v4-flash"), prompt, max_tokens=1200
+                os.getenv("LLM_MODEL", "deepseek-v4-flash"), prompt, max_tokens=2600
             )
         )
         ids = answer.get("citations")
@@ -732,10 +786,17 @@ def chat(
         )
         return {
             "answer": answer["answer"][:12000],
+            **(
+                validated_layout(answer, ids)
+                if payload.response_style != "check"
+                else {"sections": [], "diagram": None}
+            ),
             "images": [
                 image
                 for image in candidates
-                if image["id"] in selected and image["chunk_id"] in ids
+                if image["id"] in selected
+                and image["chunk_id"] in ids
+                and payload.response_style != "check"
             ][:3],
             "citations": [
                 {

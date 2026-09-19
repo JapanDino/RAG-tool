@@ -16,12 +16,14 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from material_image_fixtures import docx as illustrated_docx
 from material_image_fixtures import pdf as illustrated_pdf
+from material_image_fixtures import png
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.db.session import get_db
 from backend.app.main import app
 from backend.app.routers import portal
+from backend.app.services import canvas_images
 from backend.app.services import lti_security as sec
 
 pytestmark = pytest.mark.skipif(
@@ -285,7 +287,7 @@ def test_chat_uses_only_published_chunks_and_valid_citations(pilot, monkeypatch)
     ).scalar_one()
 
     def answer(model, prompt, max_tokens):
-        body = json.loads(prompt.split("\n", 1)[1])
+        body = json.loads(prompt.rsplit("\n", 1)[1])
         assert [p["id"] for p in body["sources"]] == [chunk]
         return json.dumps({"answer": "Объяснение по источнику", "citations": [chunk]})
 
@@ -535,6 +537,8 @@ def test_canvas_import_update_and_unavailable_upstream(pilot, monkeypatch):
         "imported": 1,
         "skipped": 1,
         "remaining": 0,
+        "images_imported": 0,
+        "images_skipped": 0,
     }
     doc = client.get("/portal/materials").json()[0]["document_id"]
     client.patch(f"/portal/materials/{doc}", json={"published": True})
@@ -552,6 +556,108 @@ def test_canvas_import_update_and_unavailable_upstream(pilot, monkeypatch):
     assert client.get("/portal/materials").json()[0]["published"] is False
     student(client, session)
     assert client.get("/portal/materials").json() == []
+
+
+@pytest.mark.parametrize("change", ["hidden", "updated", "html"])
+def test_canvas_images_reimport_and_revoke_on_upstream_change(
+    pilot, monkeypatch, change
+):
+    client, _db, session = pilot
+    teacher_headers = dict(client.headers)
+    state = {
+        "body": '<p>Световая фаза передаёт АТФ циклу Кальвина.</p><img src="/courses/123/files/7/preview" alt="Связь фаз"/>'
+    }
+    info = {
+        "id": 7,
+        "content-type": "image/png",
+        "size": 1000,
+        "url": "https://canvas.test/files/7/download",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "locked": False,
+        "hidden": False,
+    }
+    monkeypatch.setattr(
+        portal.canvas_client, "list_pages", lambda _: [{"url": "lesson"}]
+    )
+    monkeypatch.setattr(
+        portal.canvas_client,
+        "get_page",
+        lambda *args: {"title": "Урок", "published": True, **state},
+    )
+    monkeypatch.setattr(portal.canvas_client, "get_file", lambda course, file_id: info)
+    monkeypatch.setattr(canvas_images, "download_image", lambda _: png())
+    assert client.post("/portal/import-canvas").json()["images_imported"] == 1
+    doc = client.get("/portal/materials").json()[0]["document_id"]
+    assert client.post("/portal/import-canvas").json()["images_imported"] == 1
+    source = client.get(f"/portal/materials/{doc}").json()
+    assert (
+        len(source["images"]) == 1
+    )  # Reimport replaces old images, including gallery-only rows.
+    picture = source["images"][0]
+    assert (
+        client.patch(f"/portal/materials/{doc}", json={"published": True}).status_code
+        == 200
+    )
+    student(client, session)
+    path = f"/portal/materials/{doc}/images/{picture['id']}"
+    assert client.get(path).status_code == 200
+    if change == "hidden":
+        info["hidden"] = True
+    elif change == "updated":
+        info["updated_at"] = "2026-02-01T00:00:00Z"
+    else:
+        state["body"] = state["body"].replace('alt="Связь фаз"', 'alt="Другая схема"')
+    assert client.get(path).status_code == 404
+    assert client.get(f"/portal/materials/{doc}").status_code == 404
+    client.headers.update(teacher_headers)
+    assert client.get("/portal/materials").json()[0]["published"] is False
+
+
+def test_chat_structured_explanation_is_grounded_and_falls_back(pilot, monkeypatch):
+    client, db, _ = pilot
+    doc = upload(client)
+    chunk = db.execute(
+        text("SELECT id FROM chunks WHERE document_id=:doc"), {"doc": doc}
+    ).scalar_one()
+    result = {
+        "answer": "Краткое объяснение",
+        "citations": [chunk],
+        "sections": [
+            {
+                "heading": "Связь",
+                "body": "Объяснение по материалу",
+                "citations": [chunk],
+            }
+        ],
+        "diagram": {
+            "title": "Схема",
+            "nodes": [{"id": "a", "label": "Свет"}, {"id": "b", "label": "АТФ"}],
+            "edges": [{"source": "a", "target": "b", "label": "образование"}],
+            "citations": [chunk],
+        },
+    }
+    monkeypatch.setattr(
+        portal, "chat_completion_json", lambda *a, **k: json.dumps(result)
+    )
+    response = client.post("/portal/chat", json={"message": "Покажи схему"}).json()
+    assert (
+        response["sections"][0]["heading"] == "Связь"
+        and response["diagram"] == result["diagram"]
+    )
+    result["sections"][0]["citations"] = [-1]
+    check = client.post(
+        "/portal/chat", json={"message": "Проверь понимание", "response_style": "check"}
+    ).json()
+    assert (
+        check["sections"] == [] and check["diagram"] is None and check["images"] == []
+    )
+    result["diagram"]["edges"][0]["source"] = "unknown"
+    response = client.post("/portal/chat", json={"message": "Покажи схему"}).json()
+    assert (
+        response["answer"] == result["answer"]
+        and response["sections"] == []
+        and response["diagram"] is None
+    )
 
 
 def test_empty_llm_answer_is_refused(pilot, monkeypatch):

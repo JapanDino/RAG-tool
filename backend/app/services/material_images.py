@@ -28,6 +28,8 @@ class Illustration:
     context: str
     location: str
     page: int | None = None
+    canvas_file_id: int | None = None
+    canvas_file_version: str | None = None
 
 
 @dataclass

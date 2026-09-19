@@ -181,6 +181,7 @@
     flex-shrink: 0;
 }
 .messages {
+    position: relative;
     min-height: 310px;
     max-height: 550px;
     overflow: auto;
@@ -439,6 +440,32 @@
 }
 .messages .illustration img {
     max-height: 260px;
+}
+
+.answerLayout { white-space: normal; }
+.answerSection { margin: 20px 0; }
+.answerSection h3, .answerDiagram h3 { font-size: 16px; margin: 0 0 8px; }
+.answerSection p { white-space: pre-wrap; }
+.messages .answerSection ul { list-style: disc; padding-left: 22px; margin: 8px 0; }
+.messages .answerSection li { margin: 6px 0; padding: 0; border: 0; }
+.blockSources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.blockSources button { min-width: 0; font-size: 12px; padding: 5px 8px; text-align: left; overflow-wrap: anywhere; }
+.answerDiagram { margin: 20px 0; padding: 16px; border: 1px solid #dce0e3; background: #fafbfc; }
+.answerDiagram figcaption p { font-size: 12px; margin-top: 4px; }
+.diagramRelations { list-style: none; padding: 0; display: grid; gap: 14px; }
+.diagramRelation { display: grid; grid-template-columns: minmax(0, 1fr) minmax(60px, .7fr) minmax(0, 1fr); align-items: center; gap: 12px; }
+.messages .diagramRelation { padding: 0; border: 0; }
+.diagramNode { border: 1px solid #a9c7d6; border-radius: 3px; background: white; padding: 12px; text-align: center; overflow-wrap: anywhere; }
+.diagramArrow { display: grid; text-align: center; font-size: 12px; color: #52636f; overflow-wrap: anywhere; }
+.diagramArrow > span:last-child { font-size: 26px; color: #0073a7; line-height: 1.1; }
+.followUps { margin-bottom: 8px; }
+.followUps p { margin: 0 0 8px; font-size: 12px; }
+.followUps > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.followUps button { font-size: 13px; }
+@media (max-width: 600px) {
+    .diagramRelation { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    .diagramArrow > span:last-child { transform: rotate(90deg); }
+    .answerDiagram { padding: 12px; }
 }
 .illustration figcaption {
     display: flex;
