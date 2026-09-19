@@ -8,6 +8,7 @@ import {
     useState,
 } from "react";
 import s from "../styles/portal.module.css";
+import MaterialImage, { Illustration } from "../components/MaterialImage";
 
 type Material = {
     document_id: number;
@@ -27,6 +28,7 @@ type Message = {
     role: "user" | "assistant";
     content: string;
     citations?: Citation[];
+    images?: Illustration[];
 };
 type Analysis = {
     distribution: Record<string, number>;
@@ -136,6 +138,9 @@ export default function Portal() {
     const [summary, setSummary] = useState<Summary | null>(null);
     const [source, setSource] = useState<{
         title: string;
+        document_id?: number;
+        original_available?: boolean;
+        images?: Illustration[];
         chunks: { id: number; text: string }[];
     } | null>(null);
     const [feedbackDoc, setFeedbackDoc] = useState<number | null>(null);
@@ -252,6 +257,18 @@ export default function Portal() {
     async function refresh() {
         setMaterials(await api("/materials"));
     }
+    async function downloadOriginal(documentId: number, filename: string) {
+        const response = await fetch(`/api-proxy/portal/materials/${documentId}/original`, {
+            headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+        });
+        if (!response.ok) throw new Error("Оригинал недоступен. Обновите страницу или войдите заново из Canvas.");
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
     async function ask(e: FormEvent) {
         e.preventDefault();
         if (!question.trim() || busy) return;
@@ -275,6 +292,7 @@ export default function Portal() {
                     role: "assistant",
                     content: answer.answer,
                     citations: answer.citations,
+                    images: answer.images,
                 },
             ]);
         });
@@ -503,13 +521,19 @@ export default function Portal() {
                                                     : "Помощник"}
                                             </strong>
                                             <p>{m.content}</p>
-                                            {m.citations?.map((c) => (
+                                            {!!m.images?.length && <div className={s.illustrations}>
+                                                {m.images.map((image) => <MaterialImage key={image.id} image={image} token={token} disabled={busy}
+                                                    onSource={() => void run(async () => setSource(await api(`/materials/${image.document_id}`)))} />)}
+                                            </div>}
+                                            {m.citations?.filter((citation, index, all) =>
+                                                all.findIndex((item) => item.document_id === citation.document_id) === index
+                                            ).map((c) => (
                                                 <details key={c.chunk_id}>
                                                     <summary>
                                                         Источник: {c.title}
                                                     </summary>
                                                     <blockquote>
-                                                        {c.quote}
+                                                        {Array.from(new Set(m.citations?.filter((item) => item.document_id === c.document_id).map((item) => item.quote))).join("\n\n")}
                                                     </blockquote>
                                                     <button
                                                         disabled={busy}
@@ -597,6 +621,11 @@ export default function Portal() {
                                             опубликуете.
                                         </p>
                                         <p>
+                                            Из PDF и DOCX извлекаются встроенные растровые изображения:
+                                            до 20 на материал. Векторные схемы и внешние картинки
+                                            не импортируются. Подбор в чате — по подписям и соседнему тексту.
+                                        </p>
+                                        <p>
                                             Публикуйте только материалы,
                                             разрешённые всем ученикам пилотного
                                             курса. Индивидуальные условия
@@ -631,7 +660,7 @@ export default function Portal() {
                                                                 "file",
                                                                 file,
                                                             );
-                                                            await api(
+                                                            const result = await api(
                                                                 "/materials",
                                                                 {
                                                                     method: "POST",
@@ -640,7 +669,7 @@ export default function Portal() {
                                                             );
                                                             await refresh();
                                                             setNotice(
-                                                                "Материал добавлен в черновики. Проверьте текст перед публикацией.",
+                                                                `Материал добавлен в черновики. Иллюстраций: ${result.images_imported || 0}.${result.images_skipped ? ` Пропущено: ${result.images_skipped} (формат или лимит).` : ""} Проверьте материал перед публикацией.`,
                                                             );
                                                         });
                                                 }}
@@ -963,6 +992,17 @@ export default function Portal() {
                             Закрыть материал
                         </button>
                         <h2>{source.title}</h2>
+                        {source.original_available && source.document_id && <button disabled={busy}
+                            onClick={() => void run(() => downloadOriginal(source.document_id!, source.title))}>
+                            Скачать оригинал
+                        </button>}
+                        {error && <p role="alert" className={s.error}>{error}</p>}
+                        {!!source.images?.length && <>
+                            <h3>Иллюстрации из материала</h3>
+                            <div className={s.illustrations}>
+                                {source.images.map((image) => <MaterialImage key={image.id} image={image} token={token} />)}
+                            </div>
+                        </>}
                         {source.chunks.map((c) => (
                             <p key={c.id} className={s.sourceText}>
                                 {c.text}

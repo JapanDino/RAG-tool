@@ -14,6 +14,8 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
+from material_image_fixtures import docx as illustrated_docx
+from material_image_fixtures import pdf as illustrated_pdf
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -105,6 +107,104 @@ def pilot(database, monkeypatch):
 def student(client, session):
     token = sec.put_token("session", {**session, "role": "student"}, 120)
     client.headers["Authorization"] = "Bearer " + token
+
+
+@pytest.mark.parametrize(
+    "filename,data,count",
+    [
+        ("illustrated.docx", illustrated_docx(), 1),
+        ("illustrated.pdf", illustrated_pdf(), 2),
+    ],
+    ids=["docx", "pdf"],
+)
+def test_illustration_lifecycle_and_original_permissions(pilot, filename, data, count):
+    client, db, session = pilot
+    teacher_headers = dict(client.headers)
+    response = client.post("/portal/materials", files={"file": (filename, data)})
+    assert response.status_code == 200, response.text
+    assert response.json()["images_imported"] == count
+    doc = response.json()["document_id"]
+    source = client.get(f"/portal/materials/{doc}").json()
+    assert len(source["images"]) == count and source["original_available"]
+    picture = source["images"][0]
+    path = f"/portal/materials/{doc}/images/{picture['id']}"
+    original = f"/portal/materials/{doc}/original"
+    response = client.get(path)
+    assert response.status_code == 200 and response.content.startswith(b"\x89PNG")
+    assert response.headers["cache-control"] == "no-store"
+    assert client.get(original).content == data
+    assert client.get(path, headers={"Authorization": ""}).status_code == 401
+    student(client, session)
+    assert client.get(path).status_code == client.get(original).status_code == 404
+    client.headers.update(teacher_headers)
+    client.patch(f"/portal/materials/{doc}", json={"published": True})
+    # Image-context chunks must not inflate the Bloom distribution or material reader.
+    analysis = client.get("/portal/analysis").json()
+    assert analysis["chunks_analyzed"] == len(source["chunks"])
+    student(client, session)
+    assert client.get(path).status_code == client.get(original).status_code == 200
+    student(client, {**session, "course_id": -1})
+    assert client.get(path).status_code == client.get(original).status_code == 404
+    client.headers.update(teacher_headers)
+    client.patch(f"/portal/materials/{doc}", json={"published": False})
+    student(client, session)
+    assert client.get(path).status_code == client.get(original).status_code == 404
+    client.headers.update(teacher_headers)
+    client.delete(f"/portal/materials/{doc}")
+    assert (
+        db.execute(
+            text("SELECT count(*) FROM portal_images WHERE document_id=:doc"),
+            {"doc": doc},
+        ).scalar()
+        == 0
+    )
+    assert (
+        db.execute(
+            text("SELECT count(*) FROM portal_files WHERE document_id=:doc"),
+            {"doc": doc},
+        ).scalar()
+        == 0
+    )
+
+
+def test_chat_images_must_be_retrieved_selected_and_cited(pilot, monkeypatch):
+    client, _db, session = pilot
+    doc = client.post(
+        "/portal/materials", files={"file": ("lesson.docx", illustrated_docx())}
+    ).json()["document_id"]
+    source = client.get(f"/portal/materials/{doc}").json()
+    picture = source["images"][0]
+    client.patch(f"/portal/materials/{doc}", json={"published": True})
+    student(client, session)
+
+    def answer(_model, prompt, **kwargs):
+        assert '"images": [' in prompt and picture["caption"] in prompt
+        return json.dumps(
+            {
+                "answer": "АТФ связывает две фазы.",
+                "citations": [picture["chunk_id"]],
+                "image_ids": [picture["id"], 999999, True],
+            }
+        )
+
+    monkeypatch.setattr(portal, "chat_completion_json", answer)
+    response = client.post("/portal/chat", json={"message": "Покажи схему фотосинтеза"})
+    assert response.status_code == 200, response.text
+    assert [i["id"] for i in response.json()["images"]] == [picture["id"]]
+    monkeypatch.setattr(
+        portal,
+        "chat_completion_json",
+        lambda *a, **k: json.dumps(
+            {
+                "answer": "Текст без подтверждения иллюстрации",
+                "citations": [source["chunks"][0]["id"]],
+                "image_ids": [picture["id"]],
+            }
+        ),
+    )
+    assert (
+        client.post("/portal/chat", json={"message": "Вопрос"}).json()["images"] == []
+    )
 
 
 def upload(client, publish=True):

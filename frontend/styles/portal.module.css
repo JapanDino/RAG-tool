@@ -415,6 +415,40 @@
 .material .actions {
     justify-content: flex-end;
 }
+
+.illustrations {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: 16px;
+    margin: 16px 0;
+    white-space: normal;
+}
+.illustration {
+    min-width: 0;
+    margin: 0;
+    padding: 12px;
+    border: 1px solid #dce0e3;
+    background: #fff;
+}
+.illustration img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 420px;
+    object-fit: contain;
+}
+.messages .illustration img {
+    max-height: 260px;
+}
+.illustration figcaption {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding-top: 12px;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
 .material button {
     font-size: 13px;
     white-space: nowrap;
