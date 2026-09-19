@@ -70,7 +70,7 @@ def _origin(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc.lower()}"
 
 
-def download_image(url: str) -> bytes:
+def download_image(url: str, *, max_bytes: int = MAX_IMAGE_BYTES) -> bytes:
     base = canvas_client._base_url()
     canvas_origin = _origin(base)
     allowed = {canvas_origin}
@@ -91,12 +91,12 @@ def download_image(url: str) -> bytes:
                 url = urljoin(url, response.headers["Location"])
                 continue
             response.raise_for_status()
-            if int(response.headers.get("Content-Length", "0")) > MAX_IMAGE_BYTES:
+            if int(response.headers.get("Content-Length", "0")) > max_bytes:
                 raise ValueError("Image too large")
             data = bytearray()
             for block in response.iter_content(64 * 1024):
                 data.extend(block)
-                if len(data) > MAX_IMAGE_BYTES:
+                if len(data) > max_bytes:
                     raise ValueError("Image too large")
             return bytes(data)
     raise ValueError("Too many redirects")

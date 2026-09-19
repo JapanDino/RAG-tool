@@ -4,6 +4,7 @@ import s from "../styles/portal.module.css";
 export type Illustration = {
     id: number;
     document_id: number;
+    chunk_id?: number;
     caption: string;
     location: string;
     page?: number;

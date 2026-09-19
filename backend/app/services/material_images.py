@@ -37,6 +37,7 @@ class ExtractedMaterial:
     text: str = ""
     images: list[Illustration] = field(default_factory=list)
     skipped: int = 0
+    page_texts: list[str] = field(default_factory=list)
 
     def add(self, data: bytes, *, caption: str, context: str, location: str, page=None):
         if len(self.images) >= MAX_IMAGES or len(data) > MAX_IMAGE_BYTES:
@@ -199,4 +200,5 @@ def extract_pdf(data: bytes) -> ExtractedMaterial:
             except Exception:  # noqa: BLE001 - Unsupported PDF image must not discard readable text.
                 result.skipped += 1
     result.text = "\n\n".join(pages)
+    result.page_texts = pages
     return result

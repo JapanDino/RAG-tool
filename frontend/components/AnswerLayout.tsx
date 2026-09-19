@@ -13,7 +13,7 @@ export default function AnswerLayout({ sections, diagram, citations, onSource, b
     sections?: AnswerSection[];
     diagram?: AnswerDiagram | null;
     citations: Citation[];
-    onSource: (documentId: number) => void;
+    onSource: (documentId: number, chunkId?: number) => void;
     busy: boolean;
 }) {
     function sources(ids: number[]) {
@@ -21,7 +21,7 @@ export default function AnswerLayout({ sections, diagram, citations, onSource, b
             .filter((c, index, all) => all.findIndex((other) => other.document_id === c.document_id) === index);
         return <div className={s.blockSources}>
             {docs.map((c) => <button key={c.document_id} disabled={busy} type="button"
-                onClick={() => onSource(c.document_id)}>Источник: {c.title}</button>)}
+                onClick={() => onSource(c.document_id, c.chunk_id)}>Источник: {c.title}</button>)}
         </div>;
     }
     const labels = new Map(diagram?.nodes.map((node) => [node.id, node.label]));

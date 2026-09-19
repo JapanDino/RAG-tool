@@ -1,3 +1,4 @@
+import { fulfillPortal } from "./portal-fixture";
 import { expect, test } from "@playwright/test";
 
 test("student can ask with citations and leave a separate review", async ({
@@ -9,10 +10,12 @@ test("student can ask with citations and leave a separate review", async ({
     let feedback: unknown;
     await page.route("**/api-proxy/portal/**", async (route) => {
         const path = new URL(route.request().url()).pathname;
+        if (path.endsWith("/preferences")) return route.fulfill({ json: { quality_enabled: false, allow_solutions: false, solution_after_attempts: 2 } });
+        if (path.endsWith("/imports/latest")) return route.fulfill({ json: null });
         let body: unknown;
         if (path.endsWith("/session"))
             body = { title: "Биология · Фотосинтез", role: "student" };
-        else if (path.endsWith("/chat"))
+        else if (path.endsWith("/chat/stream"))
             body = {
                 answer: "Растения используют энергию света.",
                 citations: [
@@ -43,7 +46,7 @@ test("student can ask with citations and leave a separate review", async ({
                     kind: "literature",
                 },
             ];
-        await route.fulfill({ json: body });
+        await fulfillPortal(route, { json: body });
     });
     await page.goto("/portal");
     await expect(
@@ -123,6 +126,8 @@ test("teacher sees publication controls and analysis", async ({
     let published = false;
     await page.route("**/api-proxy/portal/**", async (route) => {
         const path = new URL(route.request().url()).pathname;
+        if (path.endsWith("/preferences")) return route.fulfill({ json: { quality_enabled: false, allow_solutions: false, solution_after_attempts: 2 } });
+        if (path.endsWith("/imports/latest")) return route.fulfill({ json: null });
         let body: unknown;
         if (path.endsWith("/session"))
             body = { title: "Курс преподавателя", role: "teacher" };
@@ -146,7 +151,7 @@ test("teacher sees publication controls and analysis", async ({
                     kind: "literature",
                 },
             ];
-        await route.fulfill({ json: body });
+        await fulfillPortal(route, { json: body });
     });
     await page.goto("/portal");
     await page.getByRole("button", { name: "Материалы", exact: true }).click();
@@ -187,7 +192,7 @@ test("expired session clears access and prompts Canvas launch", async ({
         sessionStorage.setItem("canvas_portal_token", "expired-test-session"),
     );
     await page.route("**/api-proxy/portal/**", (route) =>
-        route.fulfill({ status: 401, json: { detail: "expired" } }),
+        fulfillPortal(route, { status: 401, json: { detail: "expired" } }),
     );
     await page.goto("/portal");
     await expect(page.getByRole("main").getByRole("alert")).toContainText(

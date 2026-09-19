@@ -1,3 +1,4 @@
+import { fulfillPortal } from "./portal-fixture";
 import { expect, test } from "@playwright/test";
 
 test("structured explanations, source-linked diagrams and follow-up controls", async ({ page }, testInfo) => {
@@ -6,10 +7,12 @@ test("structured explanations, source-linked diagrams and follow-up controls", a
     const title = "Учебная страница Canvas";
     await page.route("**/api-proxy/portal/**", async route => {
         const path = new URL(route.request().url()).pathname;
-        if (path.endsWith("/session")) return route.fulfill({ json: { title: "Биология", role: "student" } });
-        if (path.endsWith("/chat")) {
+        if (path.endsWith("/preferences")) return route.fulfill({ json: { quality_enabled: false, allow_solutions: false, solution_after_attempts: 2 } });
+        if (path.endsWith("/imports/latest")) return route.fulfill({ json: null });
+        if (path.endsWith("/session")) return fulfillPortal(route, { json: { title: "Биология", role: "student" } });
+        if (path.endsWith("/chat/stream")) {
             requests.push(route.request().postDataJSON());
-            return route.fulfill({ json: {
+            return fulfillPortal(route, { json: {
                 answer: "Фазы связаны переносом энергии.",
                 citations: [{ chunk_id: 3, document_id: 1, title, quote: "АТФ образуется в световой фазе." }],
                 sections: [{ heading: "Как это работает", body: "Световая фаза обеспечивает цикл Кальвина энергией.",
@@ -19,9 +22,9 @@ test("structured explanations, source-linked diagrams and follow-up controls", a
                     edges: [{ source: "a", target: "b", label: "передаёт АТФ и НАДФН" }], citations: [3] },
             } });
         }
-        if (path.endsWith("/materials/1")) return route.fulfill({ json: { title, document_id: 1,
+        if (path.endsWith("/materials/1")) return fulfillPortal(route, { json: { title, document_id: 1,
             source_url: "https://canvas.test/courses/123/pages/lesson", chunks: [{ id: 3, text: "АТФ образуется в световой фазе." }] } });
-        return route.fulfill({ json: [{ title, document_id: 1, published: true, kind: "canvas_page" }] });
+        return fulfillPortal(route, { json: [{ title, document_id: 1, published: true, kind: "canvas_page" }] });
     });
     await page.goto("/portal");
     await page.getByLabel("Ваш вопрос").fill("Как связаны фазы фотосинтеза?");
@@ -41,7 +44,7 @@ test("structured explanations, source-linked diagrams and follow-up controls", a
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("link", { name: "Открыть страницу в Canvas" })).toHaveAttribute("href", "https://canvas.test/courses/123/pages/lesson");
     await page.keyboard.press("Escape");
-    for (const label of ["Объясни проще", "По шагам", "Проверь понимание", "Покажи схему"]) {
+    for (const label of ["Объясни проще", "По шагам", "Покажи схему"]) {
         await page.getByRole("button", { name: label, exact: true }).click();
         await expect(page.getByLabel("Ваш вопрос")).toBeFocused();
         await expect(page.getByLabel("Ваш вопрос")).toHaveValue(/Как связаны фазы фотосинтеза/);
