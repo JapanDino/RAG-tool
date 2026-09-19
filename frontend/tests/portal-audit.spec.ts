@@ -1,3 +1,4 @@
+import { fulfillPortal } from "./portal-fixture";
 import { expect, test, Page } from "@playwright/test";
 
 async function course(page: Page, role = "teacher") {
@@ -22,6 +23,26 @@ async function course(page: Page, role = "teacher") {
     await page.route("**/api-proxy/portal/**", async (route) => {
         const request = route.request();
         const path = new URL(request.url()).pathname;
+        if (path.endsWith("/preferences"))
+            return route.fulfill({
+                json: {
+                    quality_enabled: false,
+                    allow_solutions: false,
+                    solution_after_attempts: 2,
+                },
+            });
+        if (path.endsWith("/imports/latest"))
+            return route.fulfill({
+                json: materials.some((m) => m.document_id === 4)
+                    ? {
+                          id: "job",
+                          status: "complete",
+                          progress: 1,
+                          total: 1,
+                          details: [],
+                      }
+                    : null,
+            });
         calls.push(`${request.method()} ${path}`);
         let body: unknown;
         if (path.endsWith("/session"))
@@ -61,14 +82,14 @@ async function course(page: Page, role = "teacher") {
                     },
                 ],
             };
-        else if (path.endsWith("/import-canvas")) {
+        else if (path.endsWith("/imports")) {
             materials.push({
                 document_id: 4,
                 title: "Страница из Canvas",
                 published: false,
                 kind: "canvas_page",
             });
-            body = { imported: 1, skipped: 0, remaining: 0 };
+            body = { id: "job" };
         } else if (path.endsWith("/feedback")) body = { saved: true };
         else if (path.endsWith("/materials") && request.method() === "POST") {
             expect(request.headers()["content-type"]).toContain(
@@ -110,7 +131,7 @@ async function course(page: Page, role = "teacher") {
                 role === "teacher"
                     ? materials
                     : materials.filter((m) => m.published);
-        await route.fulfill({ json: body });
+        await fulfillPortal(route, { json: body });
     });
     await page.goto("/portal");
     await expect(page.getByRole("heading", { level: 1 })).toContainText(
@@ -151,30 +172,26 @@ test("teacher can upload import hide and delete materials", async ({
     const calls = await course(page);
     await page.getByRole("button", { name: "Материалы", exact: true }).click();
     await page.getByText("Добавить материалы в курс", { exact: true }).click();
-    await page
-        .getByLabel("Добавить литературу")
-        .setInputFiles({
-            name: "chapter.md",
-            mimeType: "text/markdown",
-            buffer: Buffer.from("Объясните фотосинтез."),
-        });
+    await page.getByLabel("Добавить литературу").setInputFiles({
+        name: "chapter.md",
+        mimeType: "text/markdown",
+        buffer: Buffer.from("Объясните фотосинтез."),
+    });
     await expect(
         page.getByRole("heading", { name: "chapter.md" }),
     ).toBeVisible();
     await page
-        .getByRole("button", { name: "Импортировать страницы Canvas" })
+        .getByRole("button", { name: "Импортировать курс Canvas" })
         .click();
     await expect(
         page.getByRole("heading", { name: "Страница из Canvas" }),
     ).toBeVisible();
-    const first = page
-        .locator("article")
-        .filter({
-            has: page.getByRole("heading", {
-                name: "Фотосинтез: световая и темновая фазы",
-                exact: true,
-            }),
-        });
+    const first = page.locator("article").filter({
+        has: page.getByRole("heading", {
+            name: "Фотосинтез: световая и темновая фазы",
+            exact: true,
+        }),
+    });
     await first.getByRole("button", { name: "Скрыть", exact: true }).click();
     await expect(first).toContainText("Черновик");
     page.once("dialog", (d) => d.accept());
@@ -224,7 +241,7 @@ test("long answers allow follow-up and failed questions can be retried", async (
 }) => {
     await course(page, "student");
     let requests = 0;
-    await page.route("**/api-proxy/portal/chat", async (route) => {
+    await page.route("**/api-proxy/portal/chat/stream", async (route) => {
         requests++;
         const payload = route.request().postDataJSON();
         expect(
@@ -233,12 +250,12 @@ test("long answers allow follow-up and failed questions can be retried", async (
             ),
         ).toBe(true);
         if (requests === 2)
-            return route.fulfill({
+            return fulfillPortal(route, {
                 status: 502,
                 json: { detail: "Модель временно недоступна" },
             });
         if (requests === 3) expect(payload.history).toHaveLength(2);
-        await route.fulfill({
+        await fulfillPortal(route, {
             json: {
                 answer:
                     requests === 1
@@ -258,7 +275,9 @@ test("long answers allow follow-up and failed questions can be retried", async (
     );
     await expect(page.getByLabel("Ваш вопрос")).toHaveValue("Приведи пример");
     await expect(page.getByRole("main").getByRole("alert")).toBeInViewport();
-    await page.getByRole("button", { name: "Отправить", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Повторить вопрос", exact: true })
+        .click();
     await expect(page.getByRole("log")).toContainText(
         "Повторный запрос выполнен",
     );
@@ -272,21 +291,25 @@ test("feedback failure stays in dialog and can be retried", async ({
     let attempts = 0;
     await page.route("**/feedback", (route) =>
         ++attempts === 1
-            ? route.fulfill({ status: 429, json: { detail: "Hourly limit" } })
-            : route.fulfill({ json: { saved: true } }),
+            ? fulfillPortal(route, {
+                  status: 429,
+                  json: { detail: "Hourly limit" },
+              })
+            : fulfillPortal(route, { json: { saved: true } }),
     );
     await page.getByRole("button", { name: "Материалы", exact: true }).click();
     await page.getByRole("button", { name: "Оставить отзыв" }).click();
     await page
-        .getByLabel("Комментарий (необязательно)")
-        .fill("Не хватает примера.");
+        .getByRole("combobox", { name: "Оценка", exact: true })
+        .selectOption("error");
+    await expect(page.getByRole("dialog").getByRole("textbox")).toHaveCount(0);
     await page.getByRole("button", { name: "Отправить отзыв" }).click();
     await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
         "часовой лимит",
     );
-    await expect(page.getByLabel("Комментарий (необязательно)")).toHaveValue(
-        "Не хватает примера.",
-    );
+    await expect(
+        page.getByRole("combobox", { name: "Оценка", exact: true }),
+    ).toHaveValue("error");
     await fits(page);
     await page.screenshot({
         path: testInfo.outputPath("feedback-dialog.png"),

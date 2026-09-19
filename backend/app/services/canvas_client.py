@@ -7,7 +7,7 @@ import os
 import re
 import time
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
@@ -54,7 +54,13 @@ def get_all(path: str, params: dict | None = None) -> list[dict[str, Any]]:
     if params:
         url += "?" + urlencode(params)
     results: list[dict] = []
+    requests_made = 0
     while url:
+        requests_made += 1
+        if requests_made > 100:
+            raise requests.HTTPError("Canvas pagination/retry limit exceeded")
+        if urlsplit(url).netloc != urlsplit(_base_url()).netloc or urlsplit(url).scheme != urlsplit(_base_url()).scheme:
+            raise requests.HTTPError("Canvas pagination origin changed")
         resp = requests.get(url, headers=_headers(), timeout=60)
         if resp.status_code == 429:
             time.sleep(5)
@@ -109,6 +115,10 @@ def list_pages(course_id: int) -> list[dict]:
 
 def get_page(course_id: int, page_url: str) -> dict:
     return get_one(f"/courses/{course_id}/pages/{page_url}")
+
+
+def get_file(course_id: int, file_id: int) -> dict:
+    return get_one(f"/courses/{course_id}/files/{file_id}")
 
 
 def list_assignments(course_id: int) -> list[dict]:

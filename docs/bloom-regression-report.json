@@ -1,0 +1,373 @@
+{
+  "environment": {
+    "python": "3.12.14",
+    "pymorphy3": "1.3.1",
+    "pymorphy3_dicts_ru": "2.4.417150.4580142",
+    "legacy_morphology_available": false
+  },
+  "rubric_version": "rbt-context-1.0",
+  "cases": 40,
+  "validation": "Engineering regression cases; not independent expert validation",
+  "legacy": {
+    "label_set_matches": 7,
+    "labels_on_no_task": 9
+  },
+  "rubric": {
+    "label_set_matches": 40,
+    "labels_on_no_task": 0,
+    "status_matches": 40,
+    "abstained_on_ambiguous": 8
+  },
+  "no_task_cases": 9,
+  "ambiguous_cases": 8,
+  "differences": [
+    {
+      "id": "prose_atp",
+      "legacy": [
+        "understand",
+        "apply"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "prose_model",
+      "legacy": [
+        "analyze",
+        "create"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "prose_teacher",
+      "legacy": [
+        "evaluate",
+        "create"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "prose_quote",
+      "legacy": [
+        "create"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "prose_learner",
+      "legacy": [
+        "create"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "prose_en",
+      "legacy": [
+        "understand",
+        "apply"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "empty",
+      "legacy": [
+        "understand",
+        "apply"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "title",
+      "legacy": [
+        "analyze",
+        "evaluate"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "negative",
+      "legacy": [
+        "create"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "remember_concept",
+      "legacy": [
+        "remember",
+        "understand"
+      ],
+      "rubric": [
+        "remember"
+      ],
+      "expected": [
+        "remember"
+      ]
+    },
+    {
+      "id": "remember_procedure",
+      "legacy": [
+        "remember",
+        "create"
+      ],
+      "rubric": [
+        "remember"
+      ],
+      "expected": [
+        "remember"
+      ]
+    },
+    {
+      "id": "explain",
+      "legacy": [
+        "understand",
+        "create"
+      ],
+      "rubric": [
+        "understand"
+      ],
+      "expected": [
+        "understand"
+      ]
+    },
+    {
+      "id": "compare",
+      "legacy": [
+        "understand",
+        "create"
+      ],
+      "rubric": [
+        "understand"
+      ],
+      "expected": [
+        "understand"
+      ]
+    },
+    {
+      "id": "objective",
+      "legacy": [
+        "understand",
+        "analyze"
+      ],
+      "rubric": [
+        "understand"
+      ],
+      "expected": [
+        "understand"
+      ]
+    },
+    {
+      "id": "goal",
+      "legacy": [
+        "understand",
+        "create"
+      ],
+      "rubric": [
+        "understand"
+      ],
+      "expected": [
+        "understand"
+      ]
+    },
+    {
+      "id": "recall_explanation",
+      "legacy": [
+        "understand",
+        "remember"
+      ],
+      "rubric": [
+        "remember"
+      ],
+      "expected": [
+        "remember"
+      ]
+    },
+    {
+      "id": "apply_template",
+      "legacy": [
+        "create"
+      ],
+      "rubric": [
+        "apply"
+      ],
+      "expected": [
+        "apply"
+      ]
+    },
+    {
+      "id": "analyze_structure",
+      "legacy": [
+        "evaluate",
+        "analyze"
+      ],
+      "rubric": [
+        "analyze"
+      ],
+      "expected": [
+        "analyze"
+      ]
+    },
+    {
+      "id": "analyze_relevance",
+      "legacy": [
+        "apply"
+      ],
+      "rubric": [
+        "analyze"
+      ],
+      "expected": [
+        "analyze"
+      ]
+    },
+    {
+      "id": "ambiguous_evaluate",
+      "legacy": [
+        "evaluate"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "ambiguous_create",
+      "legacy": [
+        "create"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "ambiguous_analyze",
+      "legacy": [
+        "analyze"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "ambiguous_apply",
+      "legacy": [
+        "apply"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "question",
+      "legacy": [
+        "understand"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "missing_object",
+      "legacy": [
+        "evaluate"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "mixed",
+      "legacy": [
+        "evaluate",
+        "remember"
+      ],
+      "rubric": [
+        "remember"
+      ],
+      "expected": [
+        "remember"
+      ]
+    },
+    {
+      "id": "en_goal",
+      "legacy": [
+        "understand",
+        "apply"
+      ],
+      "rubric": [
+        "understand"
+      ],
+      "expected": [
+        "understand"
+      ]
+    },
+    {
+      "id": "en_create",
+      "legacy": [
+        "understand",
+        "apply"
+      ],
+      "rubric": [
+        "create"
+      ],
+      "expected": [
+        "create"
+      ]
+    },
+    {
+      "id": "en_template",
+      "legacy": [
+        "understand",
+        "apply"
+      ],
+      "rubric": [
+        "apply"
+      ],
+      "expected": [
+        "apply"
+      ]
+    },
+    {
+      "id": "en_evaluate",
+      "legacy": [
+        "understand",
+        "apply"
+      ],
+      "rubric": [
+        "evaluate"
+      ],
+      "expected": [
+        "evaluate"
+      ]
+    },
+    {
+      "id": "en_analyze",
+      "legacy": [
+        "understand",
+        "apply"
+      ],
+      "rubric": [
+        "analyze"
+      ],
+      "expected": [
+        "analyze"
+      ]
+    },
+    {
+      "id": "negated_template",
+      "legacy": [
+        "create"
+      ],
+      "rubric": [],
+      "expected": []
+    },
+    {
+      "id": "negated_criteria",
+      "legacy": [
+        "evaluate"
+      ],
+      "rubric": [],
+      "expected": []
+    }
+  ]
+}

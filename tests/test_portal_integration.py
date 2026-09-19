@@ -14,12 +14,16 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
+from material_image_fixtures import docx as illustrated_docx
+from material_image_fixtures import pdf as illustrated_pdf
+from material_image_fixtures import png
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.db.session import get_db
 from backend.app.main import app
 from backend.app.routers import portal
+from backend.app.services import canvas_images
 from backend.app.services import lti_security as sec
 
 pytestmark = pytest.mark.skipif(
@@ -107,6 +111,450 @@ def student(client, session):
     client.headers["Authorization"] = "Bearer " + token
 
 
+def test_teacher_preview_is_private_and_never_publishes(pilot, monkeypatch):
+    from backend.app.routers import portal_workspace
+
+    client, db, session = pilot
+    doc = client.post(
+        "/portal/materials",
+        files={
+            "file": (
+                "draft.txt",
+                "Хлорофилл поглощает энергию света для фотосинтеза.".encode(),
+            )
+        },
+    ).json()["document_id"]
+    chunk = client.get(f"/portal/materials/{doc}").json()["chunks"][0]["id"]
+    result = {"answer": "Хлорофилл поглощает свет.", "citations": [chunk]}
+    monkeypatch.setattr(
+        portal, "chat_completion_json", lambda *a, **k: json.dumps(result)
+    )
+
+    async def stream(_):
+        yield json.dumps(result)
+
+    monkeypatch.setattr(portal_workspace, "stream_completion", stream)
+    payload = {
+        "message": "Что делает хлорофилл?",
+        "preview": True,
+        "context": {"document_id": doc},
+    }
+    response = client.post("/portal/chat", json=payload)
+    assert (
+        response.status_code == 200
+        and response.json()["citations"][0]["chunk_id"] == chunk
+    )
+    events = [
+        json.loads(line)
+        for line in client.post("/portal/chat/stream", json=payload).text.splitlines()
+    ]
+    assert events[-1]["event"] == "result"
+    assert not client.get(f"/portal/materials/{doc}").json()["published"]
+    assert client.get("/portal/summary").json()["metrics"].get("questions", 0) == 0
+    assert (
+        db.execute(
+            text("SELECT COUNT(*) FROM portal_quality WHERE course_id=:id"),
+            {"id": session["course_id"]},
+        ).scalar()
+        == 0
+    )
+    assert (
+        client.post(
+            "/portal/chat", json={**payload, "share_for_review": True}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/portal/chat", json={"message": "Тест", "preview": True}
+        ).status_code
+        == 422
+    )
+    student(client, session)
+    assert client.post("/portal/chat", json=payload).status_code == 403
+    assert client.post("/portal/chat/stream", json=payload).status_code == 403
+    assert client.get(f"/portal/materials/{doc}").status_code == 404
+    assert (
+        client.post("/portal/chat", json={**payload, "preview": False}).status_code
+        == 404
+    )
+
+
+def test_bloom_review_persistence_conflict_scope_and_changed_text(pilot):
+    client, db, session = pilot
+    doc = client.post(
+        "/portal/materials",
+        files={
+            "file": (
+                "bloom.txt",
+                "Создайте модель клетки по готовому образцу.".encode(),
+            )
+        },
+    ).json()["document_id"]
+    example = client.get("/portal/analysis").json()["examples"][0]
+    path = f"/portal/analysis/{example['chunk_id']}/review"
+    payload = {
+        "text_hash": example["text_hash"],
+        "revision": 0,
+        "decision": "corrected",
+        "levels": ["understand"],
+        "knowledge": ["conceptual"],
+        "comment": "В этом уроке требуется объяснить готовую модель.",
+    }
+    saved = client.put(path, json=payload)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["revision"] == 1
+    assert saved.json()["automatic"]["levels"] == ["apply"]
+    assert client.put(path, json=payload).status_code == 409
+    example2 = client.get("/portal/analysis").json()["examples"][0]
+    assert example2["levels"] == ["apply"] and example2["review"]["levels"] == [
+        "understand"
+    ]
+    assert (
+        client.put(
+            path, json={**payload, "revision": 1, "decision": "confirmed"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            path, json={**payload, "revision": 1, "decision": "needs_context"}
+        ).json()["levels"]
+        == []
+    )
+    teacher_headers = dict(client.headers)
+    student(client, session)
+    assert client.put(path, json=payload).status_code == 403
+    client.headers.update(teacher_headers)
+    other = {**session, "course_id": session["course_id"] + 100000}
+    client.headers["Authorization"] = "Bearer " + sec.put_token("session", other, 120)
+    assert client.put(path, json=payload).status_code == 404
+    client.headers.update(teacher_headers)
+    db.execute(
+        text("UPDATE chunks SET text=:body WHERE id=:id"),
+        {"body": "Объясните роль хлорофилла в фотосинтезе.", "id": example["chunk_id"]},
+    )
+    db.commit()
+    assert client.put(path, json={**payload, "revision": 2}).status_code == 409
+    assert client.get("/portal/analysis").json()["examples"][0]["review"] is None
+    assert (
+        db.execute(
+            text("SELECT COUNT(*) FROM portal_bloom_reviews WHERE document_id=:doc"),
+            {"doc": doc},
+        ).scalar()
+        == 1
+    )
+
+
+def test_readiness_tracks_index_and_versioned_preview(pilot, monkeypatch):
+    client, db, session = pilot
+    assert client.get("/portal/readiness").json()["counts"]["total"] == 0
+    doc = upload(client)
+    chunk = client.get(f"/portal/materials/{doc}").json()["chunks"][0]["id"]
+    first = client.get("/portal/readiness").json()
+    assert first["counts"]["published"] == 1 and first["counts"]["preview_checked"] == 0
+    monkeypatch.setattr(
+        portal,
+        "chat_completion_json",
+        lambda *a, **k: json.dumps(
+            {"answer": "Проверенный тестовый ответ", "citations": [chunk]}
+        ),
+    )
+    assert (
+        client.post(
+            "/portal/chat",
+            json={
+                "message": "Фотосинтез",
+                "preview": True,
+                "context": {"document_id": doc},
+            },
+        ).status_code
+        == 200
+    )
+    assert client.get("/portal/readiness").json()["counts"]["preview_checked"] == 1
+    db.execute(
+        text("UPDATE chunks SET text=text || ' Изменение.' WHERE id=:id"), {"id": chunk}
+    )
+    db.execute(text("DELETE FROM embeddings WHERE chunk_id=:id"), {"id": chunk})
+    db.commit()
+    report = client.get("/portal/readiness").json()
+    assert (
+        report["counts"]["preview_checked"] == 0 and report["counts"]["problems"] == 1
+    )
+    student(client, session)
+    assert client.get("/portal/readiness").status_code == 403
+
+
+def test_study_resume_three_questions_draft_and_private_ownership(pilot, monkeypatch):
+    client, db, session = pilot
+    doc = upload(client)
+    chunk = client.get(f"/portal/materials/{doc}").json()["chunks"][0]["id"]
+    generated = 0
+
+    def provider(*args, **kwargs):
+        nonlocal generated
+        if "Оцени ответ ученика" in args[1]:
+            return '{"correct":true}'
+        generated += 1
+        return json.dumps(
+            {
+                "question": f"Учебный вопрос номер {generated}?",
+                "expected_answer": "СЕКРЕТНЫЙ ЭТАЛОН",
+                "hints": ["Подумайте об энергии."],
+                "explanation": "Разбор из источника",
+                "citations": [chunk],
+            }
+        )
+
+    monkeypatch.setattr(portal, "chat_completion_json", provider)
+    student(client, session)
+    auth = client.headers["Authorization"]
+    state = client.post("/portal/study", json={"message": "Фотосинтез"}).json()
+    path = f"/portal/study/{state['id']}"
+    assert (
+        client.put(
+            path + "/draft",
+            json={"answer": "Мой незаконченный ответ", "question_number": 1},
+        ).status_code
+        == 200
+    )
+    resumed = client.get("/portal/study/current").json()
+    assert resumed[
+        "draft_answer"
+    ] == "Мой незаконченный ответ" and "СЕКРЕТНЫЙ" not in json.dumps(
+        resumed, ensure_ascii=False
+    )
+    assert client.get(f"/portal/study/current?document_id={doc}").json() is None
+    client.headers["Authorization"] = "Bearer " + sec.put_token(
+        "session", {**session, "subject": "someone-else", "role": "student"}, 120
+    )
+    assert client.get("/portal/study/current").json() is None
+    assert (
+        client.put(
+            path + "/draft", json={"answer": "Чужой ответ", "question_number": 1}
+        ).status_code
+        == 404
+    )
+    client.headers["Authorization"] = "Bearer " + sec.put_token("session", session, 120)
+    assert (
+        client.get("/portal/study/current").json() is None
+    )  # teacher with same subject cannot see learner state
+    client.headers["Authorization"] = auth
+    for number in range(1, 4):
+        assert (
+            client.post(path + "/next", json={"question_number": number}).status_code
+            == 422
+        )
+        result = client.post(
+            path + "/attempt",
+            json={"answer": "Энергия света", "question_number": number},
+        )
+        assert result.status_code == 200, result.text
+        assert client.post(path + "/solution").status_code == 403
+        advanced = client.post(path + "/next", json={"question_number": number})
+        assert advanced.status_code == 200, advanced.text
+        assert len(advanced.json()["history"]) == number
+        assert (
+            client.put(
+                path + "/draft",
+                json={"answer": "Старый черновик", "question_number": number},
+            ).status_code
+            == 409
+        )
+    final = client.get("/portal/study/current").json()
+    assert final["completed"] and len(final["history"]) == 3
+    assert (
+        client.post(
+            path + "/attempt", json={"answer": "Повтор", "question_number": 3}
+        ).status_code
+        == 409
+    )
+    assert client.delete(path).status_code == 200
+    assert client.get("/portal/study/current").json() is None
+
+
+def test_study_resume_expires_and_rejects_changed_source(pilot, monkeypatch):
+    client, db, session = pilot
+    doc = upload(client)
+    chunk = client.get(f"/portal/materials/{doc}").json()["chunks"][0]["id"]
+    monkeypatch.setattr(
+        portal,
+        "chat_completion_json",
+        lambda *a, **k: json.dumps(
+            {
+                "question": "Что поглощает хлорофилл?",
+                "expected_answer": "Свет",
+                "hints": ["Источник энергии"],
+                "explanation": "Поглощает свет.",
+                "citations": [chunk],
+            }
+        ),
+    )
+    student(client, session)
+    state = client.post("/portal/study", json={"message": "Фотосинтез"}).json()
+    db.execute(
+        text(
+            "UPDATE portal_study_sessions SET expires_at=NOW()-INTERVAL '1 minute' WHERE id=:id"
+        ),
+        {"id": state["id"]},
+    )
+    db.commit()
+    assert client.get("/portal/study/current").json() is None
+    assert client.post(f"/portal/study/{state['id']}/solution").status_code == 404
+    client.post("/portal/study", json={"message": "Фотосинтез"})
+    db.execute(
+        text("UPDATE chunks SET text=text || ' Изменение.' WHERE id=:id"), {"id": chunk}
+    )
+    db.commit()
+    assert client.get("/portal/study/current").status_code == 404
+
+
+def test_analysis_reports_evidence_and_abstention_without_llm(pilot, monkeypatch):
+    client, _db, session = pilot
+    monkeypatch.setattr(
+        portal,
+        "chat_completion_json",
+        lambda *args, **kwargs: pytest.fail("Rubric must not call an LLM"),
+    )
+    materials = [
+        (
+            "prose.txt",
+            "Световая фаза образует АТФ и НАДФН. Цикл Кальвина использует эти вещества.",
+        ),
+        (
+            "tasks.txt",
+            "Задания для проверки\n\nСоздайте модель клетки по готовому образцу.\nОцените.",
+        ),
+    ]
+    for filename, body in materials:
+        assert (
+            client.post(
+                "/portal/materials",
+                files={"file": (filename, body.encode(), "text/plain")},
+            ).status_code
+            == 200
+        )
+    response = client.get("/portal/analysis")
+    assert response.status_code == 200
+    report = response.json()
+    assert report["method"] == "contextual_rubric_rules"
+    assert report["rubric_version"] == "rbt-context-1.0"
+    assert report["distribution"] == {"apply": 1}
+    assert report["statuses"] == {
+        "proposed": 0,
+        "partial": 1,
+        "needs_review": 0,
+        "no_task": 1,
+    }
+    assert len(report["references"]) == 3
+    task = report["examples"][0]
+    assert task["status"] == "partial"
+    source = client.get(f"/portal/materials/{task['document_id']}").json()
+    original = next(c["text"] for c in source["chunks"] if c["id"] == task["chunk_id"])
+    assert all(e["quote"] in original for e in task["evidence"])
+    # The same course-scoped API remains unavailable to learners.
+    student(client, session)
+    assert client.get("/portal/analysis").status_code == 403
+
+
+@pytest.mark.parametrize(
+    "filename,data,count",
+    [
+        ("illustrated.docx", illustrated_docx(), 1),
+        ("illustrated.pdf", illustrated_pdf(), 2),
+    ],
+    ids=["docx", "pdf"],
+)
+def test_illustration_lifecycle_and_original_permissions(pilot, filename, data, count):
+    client, db, session = pilot
+    teacher_headers = dict(client.headers)
+    response = client.post("/portal/materials", files={"file": (filename, data)})
+    assert response.status_code == 200, response.text
+    assert response.json()["images_imported"] == count
+    doc = response.json()["document_id"]
+    source = client.get(f"/portal/materials/{doc}").json()
+    assert len(source["images"]) == count and source["original_available"]
+    picture = source["images"][0]
+    path = f"/portal/materials/{doc}/images/{picture['id']}"
+    original = f"/portal/materials/{doc}/original"
+    response = client.get(path)
+    assert response.status_code == 200 and response.content.startswith(b"\x89PNG")
+    assert response.headers["cache-control"] == "no-store"
+    assert client.get(original).content == data
+    assert client.get(path, headers={"Authorization": ""}).status_code == 401
+    student(client, session)
+    assert client.get(path).status_code == client.get(original).status_code == 404
+    client.headers.update(teacher_headers)
+    client.patch(f"/portal/materials/{doc}", json={"published": True})
+    # Image-context chunks must not inflate the Bloom distribution or material reader.
+    analysis = client.get("/portal/analysis").json()
+    assert analysis["chunks_analyzed"] == len(source["chunks"])
+    student(client, session)
+    assert client.get(path).status_code == client.get(original).status_code == 200
+    student(client, {**session, "course_id": -1})
+    assert client.get(path).status_code == client.get(original).status_code == 404
+    client.headers.update(teacher_headers)
+    client.patch(f"/portal/materials/{doc}", json={"published": False})
+    student(client, session)
+    assert client.get(path).status_code == client.get(original).status_code == 404
+    client.headers.update(teacher_headers)
+    client.delete(f"/portal/materials/{doc}")
+    assert (
+        db.execute(
+            text("SELECT count(*) FROM portal_images WHERE document_id=:doc"),
+            {"doc": doc},
+        ).scalar()
+        == 0
+    )
+    assert (
+        db.execute(
+            text("SELECT count(*) FROM portal_files WHERE document_id=:doc"),
+            {"doc": doc},
+        ).scalar()
+        == 0
+    )
+
+
+def test_chat_images_must_be_retrieved_selected_and_cited(pilot, monkeypatch):
+    client, _db, session = pilot
+    doc = client.post(
+        "/portal/materials", files={"file": ("lesson.docx", illustrated_docx())}
+    ).json()["document_id"]
+    source = client.get(f"/portal/materials/{doc}").json()
+    picture = source["images"][0]
+    client.patch(f"/portal/materials/{doc}", json={"published": True})
+    student(client, session)
+
+    def answer(_model, prompt, **kwargs):
+        assert '"images": [' in prompt and picture["caption"] in prompt
+        return json.dumps(
+            {
+                "answer": "АТФ связывает две фазы.",
+                "citations": [picture["chunk_id"]],
+                "image_ids": [picture["id"], 999999, True],
+            }
+        )
+
+    monkeypatch.setattr(portal, "chat_completion_json", answer)
+    response = client.post("/portal/chat", json={"message": "Покажи схему фотосинтеза"})
+    assert response.status_code == 200, response.text
+    assert [i["id"] for i in response.json()["images"]] == [picture["id"]]
+    monkeypatch.setattr(
+        portal,
+        "chat_completion_json",
+        lambda *a, **k: json.dumps(
+            {
+                "answer": "Текст без подтверждения иллюстрации",
+                "citations": [source["chunks"][0]["id"]],
+                "image_ids": [picture["id"]],
+            }
+        ),
+    )
+    assert (
+        client.post("/portal/chat", json={"message": "Вопрос"}).json()["images"] == []
+    )
+
+
 def upload(client, publish=True):
     response = client.post(
         "/portal/materials",
@@ -185,7 +633,7 @@ def test_chat_uses_only_published_chunks_and_valid_citations(pilot, monkeypatch)
     ).scalar_one()
 
     def answer(model, prompt, max_tokens):
-        body = json.loads(prompt.split("\n", 1)[1])
+        body = json.loads(prompt.rsplit("\n", 1)[1])
         assert [p["id"] for p in body["sources"]] == [chunk]
         return json.dumps({"answer": "Объяснение по источнику", "citations": [chunk]})
 
@@ -435,6 +883,8 @@ def test_canvas_import_update_and_unavailable_upstream(pilot, monkeypatch):
         "imported": 1,
         "skipped": 1,
         "remaining": 0,
+        "images_imported": 0,
+        "images_skipped": 0,
     }
     doc = client.get("/portal/materials").json()[0]["document_id"]
     client.patch(f"/portal/materials/{doc}", json={"published": True})
@@ -452,6 +902,108 @@ def test_canvas_import_update_and_unavailable_upstream(pilot, monkeypatch):
     assert client.get("/portal/materials").json()[0]["published"] is False
     student(client, session)
     assert client.get("/portal/materials").json() == []
+
+
+@pytest.mark.parametrize("change", ["hidden", "updated", "html"])
+def test_canvas_images_reimport_and_revoke_on_upstream_change(
+    pilot, monkeypatch, change
+):
+    client, _db, session = pilot
+    teacher_headers = dict(client.headers)
+    state = {
+        "body": '<p>Световая фаза передаёт АТФ циклу Кальвина.</p><img src="/courses/123/files/7/preview" alt="Связь фаз"/>'
+    }
+    info = {
+        "id": 7,
+        "content-type": "image/png",
+        "size": 1000,
+        "url": "https://canvas.test/files/7/download",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "locked": False,
+        "hidden": False,
+    }
+    monkeypatch.setattr(
+        portal.canvas_client, "list_pages", lambda _: [{"url": "lesson"}]
+    )
+    monkeypatch.setattr(
+        portal.canvas_client,
+        "get_page",
+        lambda *args: {"title": "Урок", "published": True, **state},
+    )
+    monkeypatch.setattr(portal.canvas_client, "get_file", lambda course, file_id: info)
+    monkeypatch.setattr(canvas_images, "download_image", lambda _: png())
+    assert client.post("/portal/import-canvas").json()["images_imported"] == 1
+    doc = client.get("/portal/materials").json()[0]["document_id"]
+    assert client.post("/portal/import-canvas").json()["images_imported"] == 1
+    source = client.get(f"/portal/materials/{doc}").json()
+    assert (
+        len(source["images"]) == 1
+    )  # Reimport replaces old images, including gallery-only rows.
+    picture = source["images"][0]
+    assert (
+        client.patch(f"/portal/materials/{doc}", json={"published": True}).status_code
+        == 200
+    )
+    student(client, session)
+    path = f"/portal/materials/{doc}/images/{picture['id']}"
+    assert client.get(path).status_code == 200
+    if change == "hidden":
+        info["hidden"] = True
+    elif change == "updated":
+        info["updated_at"] = "2026-02-01T00:00:00Z"
+    else:
+        state["body"] = state["body"].replace('alt="Связь фаз"', 'alt="Другая схема"')
+    assert client.get(path).status_code == 404
+    assert client.get(f"/portal/materials/{doc}").status_code == 404
+    client.headers.update(teacher_headers)
+    assert client.get("/portal/materials").json()[0]["published"] is False
+
+
+def test_chat_structured_explanation_is_grounded_and_falls_back(pilot, monkeypatch):
+    client, db, _ = pilot
+    doc = upload(client)
+    chunk = db.execute(
+        text("SELECT id FROM chunks WHERE document_id=:doc"), {"doc": doc}
+    ).scalar_one()
+    result = {
+        "answer": "Краткое объяснение",
+        "citations": [chunk],
+        "sections": [
+            {
+                "heading": "Связь",
+                "body": "Объяснение по материалу",
+                "citations": [chunk],
+            }
+        ],
+        "diagram": {
+            "title": "Схема",
+            "nodes": [{"id": "a", "label": "Свет"}, {"id": "b", "label": "АТФ"}],
+            "edges": [{"source": "a", "target": "b", "label": "образование"}],
+            "citations": [chunk],
+        },
+    }
+    monkeypatch.setattr(
+        portal, "chat_completion_json", lambda *a, **k: json.dumps(result)
+    )
+    response = client.post("/portal/chat", json={"message": "Покажи схему"}).json()
+    assert (
+        response["sections"][0]["heading"] == "Связь"
+        and response["diagram"] == result["diagram"]
+    )
+    result["sections"][0]["citations"] = [-1]
+    check = client.post(
+        "/portal/chat", json={"message": "Проверь понимание", "response_style": "check"}
+    ).json()
+    assert (
+        check["sections"] == [] and check["diagram"] is None and check["images"] == []
+    )
+    result["diagram"]["edges"][0]["source"] = "unknown"
+    response = client.post("/portal/chat", json={"message": "Покажи схему"}).json()
+    assert (
+        response["answer"] == result["answer"]
+        and response["sections"] == []
+        and response["diagram"] is None
+    )
 
 
 def test_empty_llm_answer_is_refused(pilot, monkeypatch):
@@ -511,3 +1063,339 @@ def test_llm_outage_and_source_withdrawal_fail_closed(pilot, monkeypatch):
     result = client.post("/portal/chat", json={"message": "Объясни тему"})
     assert result.status_code == 404
     assert "Must not be returned" not in result.text
+
+
+def test_selected_context_is_owned_and_quote_is_real(pilot, monkeypatch):
+    client, db, session = pilot
+    doc = upload(client)
+    chunk = client.get(f"/portal/materials/{doc}").json()["chunks"][0]
+    monkeypatch.setattr(
+        portal,
+        "chat_completion_json",
+        lambda *a, **k: json.dumps(
+            {"answer": "Объяснение", "citations": [chunk["id"]]}
+        ),
+    )
+    good = {
+        "message": "Объясни",
+        "context": {
+            "document_id": doc,
+            "chunk_id": chunk["id"],
+            "quote": chunk["text"][:30],
+        },
+    }
+    assert client.post("/portal/chat", json=good).status_code == 200
+    assert (
+        client.post(
+            "/portal/chat",
+            json={
+                **good,
+                "context": {**good["context"], "quote": "Несуществующий текст"},
+            },
+        ).status_code
+        == 422
+    )
+    second = upload(client)
+    assert (
+        client.post(
+            "/portal/chat",
+            json={**good, "context": {**good["context"], "document_id": second}},
+        ).status_code
+        == 404
+    )
+    client.patch(f"/portal/materials/{doc}", json={"published": False})
+    assert client.post("/portal/chat", json=good).status_code == 404
+
+
+def test_quality_optin_redaction_feedback_and_isolation(pilot, monkeypatch):
+    from backend.app.services import course_quality
+
+    client, db, session = pilot
+    doc = upload(client)
+    chunk = client.get(f"/portal/materials/{doc}").json()["chunks"][0]["id"]
+    teacher_auth = client.headers["Authorization"]
+    assert (
+        client.put(
+            "/portal/preferences",
+            json={
+                "quality_enabled": True,
+                "allow_solutions": False,
+                "solution_after_attempts": 2,
+            },
+        ).status_code
+        == 200
+    )
+    monkeypatch.setattr(
+        portal,
+        "chat_completion_json",
+        lambda *a, **k: json.dumps(
+            {"answer": "Свяжитесь по teacher@example.org", "citations": [chunk]}
+        ),
+    )
+    student(client, session)
+    assert client.get("/portal/quality").status_code == 403
+    assert (
+        client.put(
+            "/portal/preferences",
+            json={
+                "quality_enabled": True,
+                "allow_solutions": True,
+                "solution_after_attempts": 1,
+            },
+        ).status_code
+        == 403
+    )
+    question = {
+        "message": "Меня зовут Иван Петров, ivan@example.org. Что такое фотосинтез?"
+    }
+    assert "review_id" not in client.post("/portal/chat", json=question).json()
+    result = client.post(
+        "/portal/chat", json={**question, "share_for_review": True}
+    ).json()
+    assert result["review_id"]
+    feedback = f"/portal/quality/{result['review_id']}/feedback"
+    assert (
+        client.post(
+            feedback, json={"feedback": "unclear", "feedback_key": "x" * 32}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            feedback,
+            json={"feedback": "unclear", "feedback_key": result["feedback_key"]},
+        ).status_code
+        == 200
+    )
+    client.headers["Authorization"] = teacher_auth
+    review = client.get("/portal/quality").json()["entries"][0]
+    assert review["feedback"] == "unclear"
+    assert all(
+        secret not in json.dumps(review, ensure_ascii=False)
+        for secret in [
+            "Иван",
+            "Петров",
+            "example.org",
+            session["subject"],
+            "feedback_key",
+        ]
+    )
+    assert (
+        client.patch(
+            f"/portal/quality/{review['id']}", json={"status": "resolved"}
+        ).status_code
+        == 200
+    )
+    assert client.get("/portal/quality").json()["entries"] == []
+    client.headers["Authorization"] = "Bearer " + sec.put_token(
+        "session", {**session, "course_id": session["course_id"] + 100000}, 120
+    )
+    assert client.get("/portal/quality?status=all").json()["entries"] == []
+    client.headers["Authorization"] = teacher_auth
+    db.execute(
+        text("UPDATE portal_quality SET day=CURRENT_DATE-31 WHERE id=:id"),
+        {"id": result["review_id"]},
+    )
+    db.commit()
+    assert client.get("/portal/quality?status=all").json()["entries"] == []
+    monkeypatch.setattr(
+        course_quality,
+        "redact",
+        lambda _: (_ for _ in ()).throw(RuntimeError("unavailable")),
+    )
+    student(client, session)
+    assert (
+        "review_id"
+        not in client.post(
+            "/portal/chat", json={**question, "share_for_review": True}
+        ).json()
+    )
+    assert (
+        db.execute(
+            text("SELECT COUNT(*) FROM portal_quality WHERE course_id=:id"),
+            {"id": session["course_id"]},
+        ).scalar()
+        == 0
+    )
+
+
+def test_study_answer_hidden_policy_and_owner(pilot, monkeypatch):
+    client, db, session = pilot
+    doc = upload(client)
+    chunk = client.get(f"/portal/materials/{doc}").json()["chunks"][0]["id"]
+    teacher_auth = client.headers["Authorization"]
+    exercise = {
+        "question": "Как растения получают энергию?",
+        "expected_answer": "Энергия света",
+        "hints": ["Подумайте о хлорофилле", "Какую энергию он поглощает?"],
+        "explanation": "Хлорофилл поглощает свет.",
+        "citations": [chunk],
+    }
+    monkeypatch.setattr(
+        portal, "chat_completion_json", lambda *a, **k: json.dumps(exercise)
+    )
+    student(client, session)
+    response = client.post("/portal/study", json={"message": "Фотосинтез"})
+    assert response.status_code == 200, response.text
+    state = response.json()
+    path = f"/portal/study/{state['id']}"
+    assert (
+        "expected_answer" not in response.text and "Энергия света" not in response.text
+    )
+    assert client.post(path + "/solution").status_code == 403
+    monkeypatch.setattr(
+        portal, "chat_completion_json", lambda *a, **k: '{"correct":false}'
+    )
+    result = client.post(path + "/attempt", json={"answer": "От воды"}).json()
+    assert (
+        result["attempts"] == 1
+        and result["hint"] == exercise["hints"][0]
+        and not result["can_reveal"]
+    )
+    client.headers["Authorization"] = "Bearer " + sec.put_token(
+        "session", {**session, "subject": "other-student", "role": "student"}, 120
+    )
+    assert client.post(path + "/attempt", json={"answer": "Свет"}).status_code == 404
+    client.headers["Authorization"] = teacher_auth
+    client.put(
+        "/portal/preferences",
+        json={
+            "quality_enabled": False,
+            "allow_solutions": True,
+            "solution_after_attempts": 2,
+        },
+    )
+    student(client, session)
+    assert client.post(path + "/solution").status_code == 403
+    assert client.post(path + "/attempt", json={"answer": "Свет"}).json()["can_reveal"]
+    assert (
+        client.post(path + "/solution").json()["answer"] == exercise["expected_answer"]
+    )
+    client.headers["Authorization"] = teacher_auth
+    client.patch(f"/portal/materials/{doc}", json={"published": False})
+    student(client, session)
+    assert client.post(path + "/solution").status_code == 404
+
+
+def test_stream_final_validation_and_failure(pilot, monkeypatch):
+    from backend.app.routers import portal_workspace
+
+    client, db, session = pilot
+    doc = upload(client)
+    chunk = client.get(f"/portal/materials/{doc}").json()["chunks"][0]["id"]
+
+    async def provider(_):
+        yield '{"citations":[' + str(chunk) + '],"answer":"Ответ '
+        yield 'по источнику"}'
+
+    monkeypatch.setattr(portal_workspace, "stream_completion", provider)
+    response = client.post("/portal/chat/stream", json={"message": "Фотосинтез"})
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert any(e["event"] == "draft" for e in events)
+    assert events[-1]["event"] == "result"
+    assert events[-1]["result"]["citations"][0]["chunk_id"] == chunk
+
+    async def broken(_):
+        yield '{"citations":[' + str(chunk) + '],"answer":"Черновик'
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(portal_workspace, "stream_completion", broken)
+    events = [
+        json.loads(line)
+        for line in client.post(
+            "/portal/chat/stream", json={"message": "Фотосинтез"}
+        ).text.splitlines()
+    ]
+    assert events[-1]["event"] == "error"
+    assert not any(e["event"] == "result" for e in events)
+
+
+def test_import_modules_files_and_revocation(pilot, monkeypatch, database):
+    from backend.app.routers import portal_imports
+
+    client, db, session = pilot
+    monkeypatch.setattr(portal_imports, "SessionLocal", database)
+    module = {"id": 1, "published": True, "name": "Глава 1", "position": 1}
+
+    def listing(path, params=None):
+        if path.endswith("/modules"):
+            return [module]
+        if path.endswith("/items"):
+            return [
+                {"id": 11, "type": "Page", "page_url": "intro", "position": 1},
+                {"id": 12, "type": "File", "content_id": 8, "position": 2},
+            ]
+        if path.endswith("/files"):
+            return [
+                {"id": 8, "filename": "reading.txt"},
+                {"id": 9, "filename": "hidden.pdf"},
+            ]
+        raise AssertionError(path)
+
+    monkeypatch.setattr(portal.canvas_client, "get_all", listing)
+    monkeypatch.setattr(
+        portal.canvas_client,
+        "list_pages",
+        lambda _: [{"url": "intro", "title": "Введение"}],
+    )
+    monkeypatch.setattr(
+        portal.canvas_client,
+        "get_page",
+        lambda *a: {
+            "published": True,
+            "body": "<p>Фотосинтез преобразует энергию света в химическую энергию органических веществ.</p>",
+        },
+    )
+    monkeypatch.setattr(
+        portal.canvas_client,
+        "get_file",
+        lambda course, fid: {
+            "id": fid,
+            "filename": "reading.txt",
+            "updated_at": "2026-09-19",
+            "size": 40,
+            "hidden": fid == 9,
+            "url": "https://canvas.test/file",
+        },
+    )
+    monkeypatch.setattr(
+        portal_imports,
+        "download_image",
+        lambda *a, **k: (
+            "Фотосинтез использует энергию света для образования органических веществ.".encode()
+        ),
+    )
+    monkeypatch.setattr(
+        portal.canvas_client,
+        "get_one",
+        lambda path: (
+            module if path.endswith("/1") else {"page_url": "intro", "content_id": 8}
+        ),
+    )
+    assert client.post("/portal/imports").status_code == 200
+    report = client.get("/portal/imports/latest").json()
+    assert report["status"] == "complete" and report["progress"] == 3
+    assert [r["status"] for r in report["details"]] == [
+        "imported",
+        "imported",
+        "skipped",
+    ]
+    docs = client.get("/portal/materials").json()
+    assert len(docs) == 2 and all(
+        d["module_name"] == "Глава 1" and not d["published"] for d in docs
+    )
+    for d in docs:
+        assert (
+            client.patch(
+                f"/portal/materials/{d['document_id']}", json={"published": True}
+            ).status_code
+            == 200
+        )
+    assert client.post("/portal/imports").status_code == 200
+    assert len(client.get("/portal/materials").json()) == 2
+    for d in docs:
+        client.patch(f"/portal/materials/{d['document_id']}", json={"published": True})
+    module["require_sequential_progress"] = True
+    student(client, session)
+    assert client.get("/portal/materials").json() == []
+    assert client.get("/portal/imports/latest").status_code == 403

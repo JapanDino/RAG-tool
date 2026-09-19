@@ -1,13 +1,12 @@
 import Head from "next/head";
-import {
-    FormEvent,
-    ReactNode,
-    useCallback,
-    useEffect,
-    useRef,
-    useState,
-} from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import s from "../styles/portal.module.css";
+import CourseChat from "../components/CourseChat";
+import MaterialReader, { MaterialSource } from "../components/MaterialReader";
+import QualityPanel from "../components/QualityPanel";
+import CanvasImport from "../components/CanvasImport";
+import BloomAnalysis, { Analysis } from "../components/BloomAnalysis";
+import CourseReadiness from "../components/CourseReadiness";
 
 type Material = {
     document_id: number;
@@ -15,30 +14,8 @@ type Material = {
     published: boolean;
     kind: string;
     source_url?: string;
-};
-type Citation = {
-    document_id: number;
-    chunk_id: number;
-    title: string;
-    quote: string;
-    url?: string;
-};
-type Message = {
-    role: "user" | "assistant";
-    content: string;
-    citations?: Citation[];
-};
-type Analysis = {
-    distribution: Record<string, number>;
-    note: string;
-    chunks_analyzed: number;
-    limit: number;
-    examples: {
-        document_id: number;
-        title: string;
-        text: string;
-        levels: string[];
-    }[];
+    module_name?: string;
+    unavailable_reason?: string;
 };
 type Summary = {
     metrics: Record<string, number>;
@@ -90,7 +67,7 @@ function Modal({
     return (
         <dialog
             ref={ref}
-            className={s.dialog}
+            className={`${s.dialog} ${title !== "Отзыв о материале" ? s.readerDialog : ""}`}
             aria-label={title}
             onKeyDown={(e) => {
                 if (e.key !== "Tab") return;
@@ -124,51 +101,45 @@ export default function Portal() {
     const [session, setSession] = useState<{
         title: string;
         role: string;
+        storage_scope?: string;
     } | null>(null);
     const [tab, setTab] = useState("chat");
     const [materials, setMaterials] = useState<Material[]>([]);
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [question, setQuestion] = useState("");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
     const [analysis, setAnalysis] = useState<Analysis | null>(null);
     const [summary, setSummary] = useState<Summary | null>(null);
-    const [source, setSource] = useState<{
-        title: string;
-        chunks: { id: number; text: string }[];
-    } | null>(null);
+    const [source, setSource] = useState<MaterialSource | null>(null);
     const [feedbackDoc, setFeedbackDoc] = useState<number | null>(null);
     const [rating, setRating] = useState("clear");
-    const [comment, setComment] = useState("");
     const [search, setSearch] = useState("");
     const [publication, setPublication] = useState("all");
     const [loaded, setLoaded] = useState(false);
-    const questionRef = useRef<HTMLTextAreaElement>(null);
     const dialogTrigger = useRef<HTMLElement | null>(null);
-    const messagesRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-        const container = messagesRef.current;
-        if (container) container.scrollTop = container.scrollHeight;
-    }, [messages, busy]);
-
     const api = useCallback(
         async (path: string, init: RequestInit = {}) => {
             const headers = new Headers(init.headers);
             headers.set("Authorization", `Bearer ${token}`);
             if (init.body && !(init.body instanceof FormData))
                 headers.set("Content-Type", "application/json");
-            const response = await fetch(`/api-proxy/portal${path}`, {
-                ...init,
-                headers,
-                cache: "no-store",
-            });
+            let response: Response;
+            try {
+                response = await fetch(`/api-proxy/portal${path}`, {
+                    ...init,
+                    headers,
+                    cache: "no-store",
+                });
+            } catch {
+                throw new Error(
+                    "Нет связи с сервисом. Проверьте подключение и повторите действие.",
+                );
+            }
             if (!response.ok) {
                 if (response.status === 401) {
                     sessionStorage.removeItem("canvas_portal_token");
                     setSession(null);
                     setToken("");
-                    setMessages([]);
                     setMaterials([]);
                     setSource(null);
                     setFeedbackDoc(null);
@@ -185,7 +156,7 @@ export default function Portal() {
                     throw new Error(
                         "Сервис временно недоступен. Попробуйте позже или сообщите преподавателю.",
                     );
-                if (response.status === 404)
+                if (response.status === 404 && !path.startsWith("/study"))
                     throw new Error(
                         "Материал больше недоступен. Обновите страницу, чтобы увидеть актуальную библиотеку.",
                     );
@@ -252,38 +223,33 @@ export default function Portal() {
     async function refresh() {
         setMaterials(await api("/materials"));
     }
-    async function ask(e: FormEvent) {
-        e.preventDefault();
-        if (!question.trim() || busy) return;
-        const content = question.trim();
-        const history = messages
-            .slice(-6)
-            .map(({ role, content }) => ({
-                role,
-                content: content.slice(0, 4000),
-            }));
-        setMessages((prev) => [...prev, { role: "user", content }]);
-        setQuestion("");
-        const sent = await run(async () => {
-            const answer = await api("/chat", {
-                method: "POST",
-                body: JSON.stringify({ message: content, history }),
-            });
-            setMessages((prev) => [
-                ...prev,
-                {
-                    role: "assistant",
-                    content: answer.answer,
-                    citations: answer.citations,
-                },
-            ]);
-        });
-        if (!sent) {
-            setMessages((prev) =>
-                prev.length === messages.length + 1 ? prev.slice(0, -1) : prev,
+    async function downloadOriginal(documentId: number, filename: string) {
+        const response = await fetch(
+            `/api-proxy/portal/materials/${documentId}/original`,
+            {
+                headers: { Authorization: `Bearer ${token}` },
+                cache: "no-store",
+            },
+        );
+        if (!response.ok)
+            throw new Error(
+                "Оригинал недоступен. Обновите страницу или войдите заново из Canvas.",
             );
-            setQuestion((current) => current || content);
-        }
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    function openSource(id: number, chunk?: number, page?: number) {
+        void run(async () =>
+            setSource({
+                ...(await api(`/materials/${id}`)),
+                focusChunk: chunk,
+                focusPage: page,
+            }),
+        );
     }
     const teacher = session?.role === "teacher";
     const visibleMaterials = materials.filter(
@@ -296,7 +262,9 @@ export default function Portal() {
         chat: "Чат",
         materials: "Материалы",
         analysis: "Анализ курса",
+        readiness: "Готовность курса",
         summary: "Обратная связь",
+        quality: "Качество ответов",
     }[tab];
 
     return (
@@ -348,7 +316,7 @@ export default function Portal() {
                     </span>
                 )}
             </header>
-            {error && (!session || tab !== "chat") && (
+            {error && (
                 <p role="alert" className={s.error}>
                     {error}
                 </p>
@@ -379,7 +347,9 @@ export default function Portal() {
                                 ...(teacher
                                     ? [
                                           ["analysis", "Анализ курса"],
+                                          ["readiness", "Готовность курса"],
                                           ["summary", "Обратная связь"],
+                                          ["quality", "Качество ответов"],
                                       ]
                                     : []),
                             ].map(([id, title]) => (
@@ -391,6 +361,8 @@ export default function Portal() {
                                     }
                                     onClick={() => {
                                         setTab(id);
+                                        if (id === "materials")
+                                            void run(refresh);
                                         if (id === "analysis")
                                             void run(async () =>
                                                 setAnalysis(
@@ -430,158 +402,31 @@ export default function Portal() {
                                 Обрабатываем запрос…
                             </p>
                         )}
-                        {tab === "chat" && (
-                            <section className={s.panel}>
-                                <div className={s.sectionHead}>
-                                    <h2>Спросите о теме курса</h2>
-                                    <button
-                                        onClick={() => setMessages([])}
-                                        disabled={busy || messages.length === 0}
-                                    >
-                                        Очистить диалог
-                                    </button>
-                                </div>
-                                <p className={s.muted}>
-                                    Задавайте вопросы по материалам и
-                                    рекомендованной литературе. Источники
-                                    появятся под ответом.
-                                </p>
-                                <div
-                                    className={s.messages}
-                                    ref={messagesRef}
-                                    role="log"
-                                    aria-label="Диалог с помощником"
-                                    aria-live="polite"
-                                >
-                                    {messages.length === 0 && (
-                                        <div className={s.empty}>
-                                            <span
-                                                className={s.emptyIcon}
-                                                aria-hidden="true"
-                                            >
-                                                ?
-                                            </span>
-                                            <h3>С чего начнём?</h3>
-                                            <p>
-                                                Выберите вопрос или напишите
-                                                свой.
-                                            </p>
-                                            <div className={s.suggestions}>
-                                                {[
-                                                    "Объясни основную идею темы",
-                                                    "Сравни ключевые понятия",
-                                                    "Помоги разобраться в примере",
-                                                ].map((text) => (
-                                                    <button
-                                                        key={text}
-                                                        onClick={() => {
-                                                            setQuestion(text);
-                                                            questionRef.current?.focus();
-                                                        }}
-                                                    >
-                                                        {text}{" "}
-                                                        <span aria-hidden="true">
-                                                            →
-                                                        </span>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                    {messages.map((m, i) => (
-                                        <article
-                                            key={i}
-                                            className={
-                                                m.role === "user"
-                                                    ? s.user
-                                                    : s.assistant
-                                            }
-                                        >
-                                            <strong>
-                                                {m.role === "user"
-                                                    ? "Вы"
-                                                    : "Помощник"}
-                                            </strong>
-                                            <p>{m.content}</p>
-                                            {m.citations?.map((c) => (
-                                                <details key={c.chunk_id}>
-                                                    <summary>
-                                                        Источник: {c.title}
-                                                    </summary>
-                                                    <blockquote>
-                                                        {c.quote}
-                                                    </blockquote>
-                                                    <button
-                                                        disabled={busy}
-                                                        onClick={() =>
-                                                            void run(async () =>
-                                                                setSource(
-                                                                    await api(
-                                                                        `/materials/${c.document_id}`,
-                                                                    ),
-                                                                ),
-                                                            )
-                                                        }
-                                                    >
-                                                        Открыть материал
-                                                    </button>
-                                                </details>
-                                            ))}
-                                        </article>
-                                    ))}
-                                    {busy && (
-                                        <p role="status">
-                                            Обрабатываем запрос…
-                                        </p>
-                                    )}
-                                </div>
-                                <form onSubmit={ask} className={s.ask}>
-                                    {error && (
-                                        <p role="alert" className={s.error}>
-                                            {error}
-                                        </p>
-                                    )}
-                                    <label htmlFor="question">Ваш вопрос</label>
-                                    <textarea
-                                        id="question"
-                                        ref={questionRef}
-                                        value={question}
-                                        maxLength={4000}
-                                        rows={3}
-                                        onChange={(e) =>
-                                            setQuestion(e.target.value)
-                                        }
-                                        placeholder="Например: объясни эту тему на простом примере"
-                                    />
-                                    <div className={s.composerFooter}>
-                                        <span className={s.muted}>
-                                            Проверяйте ответы по источникам.
-                                        </span>
-                                        <button
-                                            className={s.primary}
-                                            disabled={busy || !question.trim()}
-                                        >
-                                            {busy
-                                                ? "Готовим ответ…"
-                                                : "Отправить"}
-                                        </button>
-                                    </div>
-                                </form>
-                                <details className={s.privacy}>
-                                    <summary>Кто видит мой диалог?</summary>
-                                    <p>
-                                        Диалог не сохраняется в истории сервера
-                                        и не показывается преподавателю. Вопрос
-                                        и найденные фрагменты передаются
-                                        настроенному сервису модели.
-                                    </p>
-                                </details>
-                            </section>
+                        <div hidden={tab !== "chat"}>
+                            <CourseChat
+                                allowReview={!teacher}
+                                active={tab === "chat" && !source}
+                                token={token}
+                                api={api}
+                                scope={session.storage_scope}
+                                onSource={openSource}
+                            />
+                        </div>
+                        {tab === "quality" && teacher && (
+                            <QualityPanel api={api} onSource={openSource} />
                         )}
 
                         {tab === "materials" && (
                             <section className={s.panel}>
-                                <h2>Библиотека курса</h2>
+                                <div className={s.sectionHead}>
+                                    <h2>Библиотека курса</h2>
+                                    <button
+                                        disabled={busy}
+                                        onClick={() => void run(refresh)}
+                                    >
+                                        Обновить материалы
+                                    </button>
+                                </div>
                                 {teacher && (
                                     <details className={s.upload}>
                                         <summary>
@@ -595,6 +440,14 @@ export default function Portal() {
                                             поддерживаются. Новые материалы
                                             видны только вам, пока вы их не
                                             опубликуете.
+                                        </p>
+                                        <p>
+                                            Из PDF и DOCX извлекаются встроенные
+                                            растровые изображения: до 20 на
+                                            материал. Векторные схемы и внешние
+                                            картинки не импортируются. Подбор в
+                                            чате — по подписям и соседнему
+                                            тексту.
                                         </p>
                                         <p>
                                             Публикуйте только материалы,
@@ -631,44 +484,26 @@ export default function Portal() {
                                                                 "file",
                                                                 file,
                                                             );
-                                                            await api(
-                                                                "/materials",
-                                                                {
-                                                                    method: "POST",
-                                                                    body,
-                                                                },
-                                                            );
+                                                            const result =
+                                                                await api(
+                                                                    "/materials",
+                                                                    {
+                                                                        method: "POST",
+                                                                        body,
+                                                                    },
+                                                                );
                                                             await refresh();
                                                             setNotice(
-                                                                "Материал добавлен в черновики. Проверьте текст перед публикацией.",
+                                                                `Материал добавлен в черновики. Иллюстраций: ${result.images_imported || 0}.${result.images_skipped ? ` Пропущено: ${result.images_skipped} (формат или лимит).` : ""} Проверьте материал перед публикацией.`,
                                                             );
                                                         });
                                                 }}
                                             />
                                         </label>
-                                        <button
-                                            disabled={busy}
-                                            onClick={() =>
-                                                void run(async () => {
-                                                    const r = await api(
-                                                        "/import-canvas",
-                                                        { method: "POST" },
-                                                    );
-                                                    await refresh();
-                                                    setNotice(
-                                                        `Импортировано: ${r.imported}. Пропущено: ${r.skipped}. За пределами лимита: ${r.remaining}. Материалы Canvas сняты с публикации — проверьте и откройте нужные заново.`,
-                                                    );
-                                                })
-                                            }
-                                        >
-                                            Импортировать страницы Canvas
-                                        </button>
-                                        <p className={s.muted}>
-                                            До 30 страниц за запуск. Тесты и
-                                            ответы учеников не импортируются.
-                                            Повторный импорт снимает публикацию
-                                            предыдущих копий.
-                                        </p>
+                                        <CanvasImport
+                                            api={api}
+                                            onComplete={refresh}
+                                        />
                                     </details>
                                 )}
                                 <div className={s.toolbar}>
@@ -733,9 +568,19 @@ export default function Portal() {
                                     >
                                         <div>
                                             <h3>{m.title}</h3>
+                                            {m.module_name && (
+                                                <p className={s.muted}>
+                                                    Модуль: {m.module_name}
+                                                </p>
+                                            )}
+                                            {m.unavailable_reason && (
+                                                <p className={s.muted}>
+                                                    {m.unavailable_reason}
+                                                </p>
+                                            )}
                                             <span className={s.muted}>
-                                                {m.kind === "canvas_page"
-                                                    ? "Страница Canvas"
+                                                {m.kind.startsWith("canvas_")
+                                                    ? "Материал Canvas"
                                                     : "Литература"}
                                                 {teacher &&
                                                     ` · ${m.published ? "Опубликовано" : "Черновик"}`}
@@ -815,7 +660,6 @@ export default function Portal() {
                                                         setFeedbackDoc(
                                                             m.document_id,
                                                         );
-                                                        setComment("");
                                                         setRating("clear");
                                                     }}
                                                 >
@@ -828,68 +672,25 @@ export default function Portal() {
                             </section>
                         )}
 
+                        {tab === "readiness" && teacher && (
+                            <CourseReadiness
+                                api={api}
+                                onSource={openSource}
+                                onMaterials={() => {
+                                    setTab("materials");
+                                    void run(refresh);
+                                }}
+                            />
+                        )}
                         {tab === "analysis" && teacher && (
-                            <section className={s.panel}>
-                                <h2>Когнитивный профиль материалов</h2>
-                                <p className={s.muted}>
-                                    Анализ включает опубликованные материалы и
-                                    черновики. Один фрагмент может относиться к
-                                    нескольким уровням.
-                                </p>
-                                {analysis && (
-                                    <>
-                                        <p>{analysis.note}</p>
-                                        <p>
-                                            Обработано фрагментов:{" "}
-                                            {analysis.chunks_analyzed} (лимит{" "}
-                                            {analysis.limit}).
-                                        </p>
-                                        {analysis.chunks_analyzed === 0 && (
-                                            <p className={s.empty}>
-                                                Пока нечего анализировать.
-                                                Добавьте материалы в библиотеку
-                                                курса.
-                                            </p>
-                                        )}
-                                        <div className={s.stats}>
-                                            {[
-                                                "remember",
-                                                "understand",
-                                                "apply",
-                                                "analyze",
-                                                "evaluate",
-                                                "create",
-                                            ].map((level) => (
-                                                <div key={level}>
-                                                    <strong>
-                                                        {analysis.distribution[
-                                                            level
-                                                        ] || 0}
-                                                    </strong>
-                                                    <span>
-                                                        {labels[level] || level}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                        <h3>Примеры для проверки</h3>
-                                        {analysis.examples.map((e, i) => (
-                                            <details key={i}>
-                                                <summary>
-                                                    {e.title} ·{" "}
-                                                    {e.levels
-                                                        .map(
-                                                            (l) =>
-                                                                labels[l] || l,
-                                                        )
-                                                        .join(", ")}
-                                                </summary>
-                                                <p>{e.text}</p>
-                                            </details>
-                                        ))}
-                                    </>
-                                )}
-                            </section>
+                            <BloomAnalysis
+                                api={api}
+                                onSaved={async () =>
+                                    setAnalysis(await api("/analysis"))
+                                }
+                                analysis={analysis}
+                                onSource={openSource}
+                            />
                         )}
 
                         {tab === "summary" && teacher && (
@@ -898,8 +699,9 @@ export default function Portal() {
                                 <p>
                                     Показатели использования помогают замечать
                                     затруднения, но не измеряют освоение курса.
-                                    Личные диалоги и имена учеников здесь не
-                                    отображаются.
+                                    Вопросы, которыми ученики согласились
+                                    поделиться, доступны в разделе «Качество
+                                    ответов».
                                 </p>
                                 {summary && (
                                     <>
@@ -958,17 +760,25 @@ export default function Portal() {
                     title={source.title}
                     onClose={() => setSource(null)}
                 >
-                    <section>
-                        <button autoFocus onClick={() => setSource(null)}>
-                            Закрыть материал
-                        </button>
-                        <h2>{source.title}</h2>
-                        {source.chunks.map((c) => (
-                            <p key={c.id} className={s.sourceText}>
-                                {c.text}
-                            </p>
-                        ))}
-                    </section>
+                    <MaterialReader
+                        teacher={teacher}
+                        allowReview={!teacher}
+                        key={source.document_id}
+                        source={source}
+                        token={token}
+                        api={api}
+                        scope={session?.storage_scope}
+                        onSource={openSource}
+                        onClose={() => setSource(null)}
+                        onDownload={() =>
+                            void run(() =>
+                                downloadOriginal(
+                                    source.document_id,
+                                    source.title,
+                                ),
+                            )
+                        }
+                    />
                 </Modal>
             )}
             {feedbackDoc !== null && (
@@ -990,13 +800,12 @@ export default function Portal() {
                                         method: "POST",
                                         body: JSON.stringify({
                                             rating,
-                                            comment,
                                         }),
                                     },
                                 );
                                 setFeedbackDoc(null);
                                 setNotice(
-                                    "Спасибо! Отзыв сохранён без имени в записи отзыва.",
+                                    "Спасибо! Оценка добавлена в сводку преподавателя без вашего имени.",
                                 );
                             });
                         }}
@@ -1015,9 +824,11 @@ export default function Portal() {
                             </p>
                         )}
                         <p>
-                            Преподаватель увидит сводку без имени. Это не полная
-                            техническая анонимность. Не указывайте личные данные
-                            в комментарии.
+                            Преподаватель увидит только сводку оценок без имён;
+                            точное число меньше пяти скрыто. Комментарии в
+                            пилоте не передаются. Чтобы объяснить ошибку или
+                            задать вопрос, напишите преподавателю в Canvas. Это
+                            не полная техническая анонимность.
                         </p>
                         <label>
                             Оценка
@@ -1032,15 +843,6 @@ export default function Portal() {
                                     </option>
                                 ))}
                             </select>
-                        </label>
-                        <label>
-                            Комментарий (необязательно)
-                            <textarea
-                                value={comment}
-                                maxLength={2000}
-                                rows={4}
-                                onChange={(e) => setComment(e.target.value)}
-                            />
                         </label>
                         <div className={s.actions}>
                             <button className={s.primary} disabled={busy}>

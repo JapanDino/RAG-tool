@@ -5,9 +5,11 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import datasets, search, export, annotate, jobs, status, rubrics, analyze, taxonomy, nodes, graph, labeling, evaluate, canvas, chat
 from .routers.labeling import nodes_router as labeling_nodes_router
-from .routers import lti, portal
+from .routers import lti, portal, portal_workspace, portal_study, portal_imports, portal_review
 
-app = FastAPI(title="RAG Bloom API", version="0.2.0")
+from .services.portal_maintenance import lifespan
+
+app = FastAPI(title="RAG Bloom API", version="0.2.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -66,6 +68,10 @@ app.include_router(canvas.router)
 app.include_router(chat.router)
 app.include_router(lti.router)
 app.include_router(portal.router)
+app.include_router(portal_workspace.router)
+app.include_router(portal_study.router)
+app.include_router(portal_imports.router)
+app.include_router(portal_review.router)
 
 @app.get("/health")
 def health():
