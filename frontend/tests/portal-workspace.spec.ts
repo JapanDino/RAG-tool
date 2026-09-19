@@ -1,5 +1,89 @@
 import { expect, test } from "@playwright/test";
 
+test("returning to chat refreshes policy without restoring withdrawn consent or losing drafts", async ({
+    page,
+}) => {
+    await page.addInitScript(() =>
+        sessionStorage.setItem("canvas_portal_token", "workspace-test"),
+    );
+    let enabled = true;
+    let unavailable = false;
+    let title = "Первая версия";
+    await page.route("**/api-proxy/portal/**", async (route) => {
+        const path = new URL(route.request().url()).pathname;
+        if (path.endsWith("/preferences") && unavailable)
+            return route.fulfill({ status: 503, json: {} });
+        return route.fulfill({
+            json: path.endsWith("/session")
+                ? {
+                      title: "Биология",
+                      role: "student",
+                      storage_scope: "policy-audit",
+                  }
+                : path.endsWith("/preferences")
+                  ? { quality_enabled: enabled }
+                  : path.endsWith("/materials")
+                    ? [
+                          {
+                              document_id: 1,
+                              title,
+                              published: true,
+                              kind: "literature",
+                          },
+                      ]
+                    : {},
+        });
+    });
+    await page.goto("/portal");
+    const consent = page.getByRole("checkbox", {
+        name: "Добавлять мои вопросы и ответы в журнал качества",
+    });
+    await consent.check();
+    await page
+        .getByRole("textbox", { name: "Ваш вопрос", exact: true })
+        .fill("Как связаны фазы фотосинтеза?");
+    await page.getByRole("button", { name: "Материалы", exact: true }).click();
+    await expect(
+        page.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+    title = "Обновлённая версия";
+    await page
+        .getByRole("button", { name: "Обновить материалы", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+    enabled = false;
+    await page.getByRole("button", { name: "Чат", exact: true }).click();
+    await expect(consent).toHaveCount(0);
+    await expect(
+        page.getByRole("textbox", { name: "Ваш вопрос", exact: true }),
+    ).toHaveValue("Как связаны фазы фотосинтеза?");
+    await page.getByRole("button", { name: "Материалы", exact: true }).click();
+    enabled = true;
+    await page.getByRole("button", { name: "Чат", exact: true }).click();
+    await expect(consent).not.toBeChecked();
+    await page.getByRole("button", { name: "Материалы", exact: true }).click();
+    unavailable = true;
+    await page.getByRole("button", { name: "Чат", exact: true }).click();
+    await expect(
+        page.getByRole("button", { name: "Отправить", exact: true }),
+    ).toBeDisabled();
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "Не удалось обновить настройки курса" }),
+    ).toBeVisible();
+    unavailable = false;
+    await page
+        .getByRole("button", { name: "Загрузить настройки повторно" })
+        .click();
+    await expect(consent).not.toBeChecked();
+    await expect(
+        page.getByRole("button", { name: "Отправить", exact: true }),
+    ).toBeEnabled();
+});
+
 test("reading context, learning attempts, consent and private notes", async ({
     page,
 }, info) => {
@@ -18,6 +102,7 @@ test("reading context, learning attempts, consent and private notes", async ({
     };
     let requests: any[] = [];
     let attempts = 0;
+    let interruptAttempt = true;
     const exercise = () => ({
         id: "exercise",
         question: "Что поглощает хлорофилл?",
@@ -30,6 +115,10 @@ test("reading context, learning attempts, consent and private notes", async ({
     });
     await page.route("**/api-proxy/portal/**", async (route) => {
         const path = new URL(route.request().url()).pathname;
+        if (path.endsWith("/attempt") && interruptAttempt) {
+            interruptAttempt = false;
+            return route.abort("failed");
+        }
         const data = path.endsWith("/session")
             ? {
                   title: "Биология",
@@ -116,6 +205,23 @@ test("reading context, learning attempts, consent and private notes", async ({
     await dialog
         .getByRole("button", { name: "Проверить ответ", exact: true })
         .click();
+    await expect(
+        dialog
+            .getByRole("region", { name: "Учебное упражнение" })
+            .getByRole("alert"),
+    ).toContainText("Нет связи с сервисом");
+    await expect(dialog.getByLabel("Ваш ответ", { exact: true })).toHaveValue(
+        "Воду",
+    );
+    expect(attempts).toBe(0);
+    await dialog
+        .getByRole("button", { name: "Проверить ответ", exact: true })
+        .click();
+    await expect(
+        dialog
+            .getByRole("region", { name: "Учебное упражнение" })
+            .getByRole("alert"),
+    ).toHaveCount(0);
     await expect(dialog.getByText("Вспомните источник энергии")).toBeVisible();
     await expect(
         dialog.getByRole("button", { name: "Показать решение" }),

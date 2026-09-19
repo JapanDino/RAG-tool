@@ -23,8 +23,26 @@ async function course(page: Page, role = "teacher") {
     await page.route("**/api-proxy/portal/**", async (route) => {
         const request = route.request();
         const path = new URL(request.url()).pathname;
-        if (path.endsWith("/preferences")) return route.fulfill({ json: { quality_enabled: false, allow_solutions: false, solution_after_attempts: 2 } });
-        if (path.endsWith("/imports/latest")) return route.fulfill({ json: materials.some(m => m.document_id === 4) ? { id: "job", status: "complete", progress: 1, total: 1, details: [] } : null });
+        if (path.endsWith("/preferences"))
+            return route.fulfill({
+                json: {
+                    quality_enabled: false,
+                    allow_solutions: false,
+                    solution_after_attempts: 2,
+                },
+            });
+        if (path.endsWith("/imports/latest"))
+            return route.fulfill({
+                json: materials.some((m) => m.document_id === 4)
+                    ? {
+                          id: "job",
+                          status: "complete",
+                          progress: 1,
+                          total: 1,
+                          details: [],
+                      }
+                    : null,
+            });
         calls.push(`${request.method()} ${path}`);
         let body: unknown;
         if (path.endsWith("/session"))
@@ -154,13 +172,11 @@ test("teacher can upload import hide and delete materials", async ({
     const calls = await course(page);
     await page.getByRole("button", { name: "Материалы", exact: true }).click();
     await page.getByText("Добавить материалы в курс", { exact: true }).click();
-    await page
-        .getByLabel("Добавить литературу")
-        .setInputFiles({
-            name: "chapter.md",
-            mimeType: "text/markdown",
-            buffer: Buffer.from("Объясните фотосинтез."),
-        });
+    await page.getByLabel("Добавить литературу").setInputFiles({
+        name: "chapter.md",
+        mimeType: "text/markdown",
+        buffer: Buffer.from("Объясните фотосинтез."),
+    });
     await expect(
         page.getByRole("heading", { name: "chapter.md" }),
     ).toBeVisible();
@@ -170,14 +186,12 @@ test("teacher can upload import hide and delete materials", async ({
     await expect(
         page.getByRole("heading", { name: "Страница из Canvas" }),
     ).toBeVisible();
-    const first = page
-        .locator("article")
-        .filter({
-            has: page.getByRole("heading", {
-                name: "Фотосинтез: световая и темновая фазы",
-                exact: true,
-            }),
-        });
+    const first = page.locator("article").filter({
+        has: page.getByRole("heading", {
+            name: "Фотосинтез: световая и темновая фазы",
+            exact: true,
+        }),
+    });
     await first.getByRole("button", { name: "Скрыть", exact: true }).click();
     await expect(first).toContainText("Черновик");
     page.once("dialog", (d) => d.accept());
@@ -261,7 +275,9 @@ test("long answers allow follow-up and failed questions can be retried", async (
     );
     await expect(page.getByLabel("Ваш вопрос")).toHaveValue("Приведи пример");
     await expect(page.getByRole("main").getByRole("alert")).toBeInViewport();
-    await page.getByRole("button", { name: "Повторить вопрос", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Повторить вопрос", exact: true })
+        .click();
     await expect(page.getByRole("log")).toContainText(
         "Повторный запрос выполнен",
     );
@@ -275,21 +291,25 @@ test("feedback failure stays in dialog and can be retried", async ({
     let attempts = 0;
     await page.route("**/feedback", (route) =>
         ++attempts === 1
-            ? fulfillPortal(route, { status: 429, json: { detail: "Hourly limit" } })
+            ? fulfillPortal(route, {
+                  status: 429,
+                  json: { detail: "Hourly limit" },
+              })
             : fulfillPortal(route, { json: { saved: true } }),
     );
     await page.getByRole("button", { name: "Материалы", exact: true }).click();
     await page.getByRole("button", { name: "Оставить отзыв" }).click();
     await page
-        .getByLabel("Комментарий (необязательно)")
-        .fill("Не хватает примера.");
+        .getByRole("combobox", { name: "Оценка", exact: true })
+        .selectOption("error");
+    await expect(page.getByRole("dialog").getByRole("textbox")).toHaveCount(0);
     await page.getByRole("button", { name: "Отправить отзыв" }).click();
     await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
         "часовой лимит",
     );
-    await expect(page.getByLabel("Комментарий (необязательно)")).toHaveValue(
-        "Не хватает примера.",
-    );
+    await expect(
+        page.getByRole("combobox", { name: "Оценка", exact: true }),
+    ).toHaveValue("error");
     await fits(page);
     await page.screenshot({
         path: testInfo.outputPath("feedback-dialog.png"),

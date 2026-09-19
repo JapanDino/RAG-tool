@@ -47,6 +47,7 @@ export default function CourseChat({
     seed,
     compact = false,
     allowReview = true,
+    active = true,
 }: {
     token: string;
     api: PortalAPI;
@@ -56,6 +57,7 @@ export default function CourseChat({
     seed?: { text: string; nonce: number };
     compact?: boolean;
     allowReview?: boolean;
+    active?: boolean;
 }) {
     const id = useId();
     const [messages, setMessages] = useState<Message[]>([]);
@@ -63,9 +65,12 @@ export default function CourseChat({
     const [style, setStyle] = useState("auto");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
+    const [practiceError, setPracticeError] = useState("");
     const [status, setStatus] = useState("");
     const [draft, setDraft] = useState("");
     const [quality, setQuality] = useState<boolean | null>(null);
+    const [preferencesError, setPreferencesError] = useState("");
+    const [preferencesRetry, setPreferencesRetry] = useState(0);
     const [share, setShare] = useState(false);
     const [remember, setRemember] = useState(false);
     const [ready, setReady] = useState(false);
@@ -83,23 +88,45 @@ export default function CourseChat({
         ? `course-workspace:${scope}:${context?.document_id || "course"}`
         : null;
     useEffect(() => {
-        let active = true;
-        api("/preferences")
-            .then((p) => {
-                if (active)
-                    setQuality(Boolean(p.quality_enabled && allowReview));
-            })
-            .catch(() => {
-                if (active)
-                    setError(
-                        "Не удалось загрузить настройки. Обновите страницу перед отправкой вопроса.",
+        if (!active) return;
+        let live = true;
+        let pending = false;
+        const refreshPreferences = async () => {
+            if (pending || document.visibilityState === "hidden") return;
+            pending = true;
+            try {
+                const p = await api("/preferences");
+                if (live) {
+                    const enabled = Boolean(p.quality_enabled && allowReview);
+                    setQuality(enabled);
+                    if (!enabled) setShare(false);
+                    setPreferencesError("");
+                }
+            } catch {
+                if (live) {
+                    setQuality(null);
+                    setShare(false);
+                    setPreferencesError(
+                        "Не удалось обновить настройки курса. Повторите загрузку перед отправкой вопроса.",
                     );
-            });
-        return () => {
-            active = false;
-            abort.current?.abort();
+                }
+            } finally {
+                pending = false;
+            }
         };
-    }, [api, allowReview]);
+        void refreshPreferences();
+        window.addEventListener("focus", refreshPreferences);
+        document.addEventListener("visibilitychange", refreshPreferences);
+        return () => {
+            live = false;
+            window.removeEventListener("focus", refreshPreferences);
+            document.removeEventListener(
+                "visibilitychange",
+                refreshPreferences,
+            );
+        };
+    }, [api, allowReview, active, preferencesRetry]);
+    useEffect(() => () => abort.current?.abort(), []);
     useEffect(() => {
         try {
             if (storageKey) {
@@ -177,21 +204,17 @@ export default function CourseChat({
                 },
                 body: JSON.stringify({
                     message: content,
-                    history: previous
-                        .slice(-6)
-                        .map((m) => ({
-                            role: m.role,
-                            content: [
-                                m.content,
-                                ...(m.sections || []).map((b) =>
-                                    [b.heading, b.body, ...b.bullets].join(
-                                        "\n",
-                                    ),
-                                ),
-                            ]
-                                .join("\n")
-                                .slice(0, 4000),
-                        })),
+                    history: previous.slice(-6).map((m) => ({
+                        role: m.role,
+                        content: [
+                            m.content,
+                            ...(m.sections || []).map((b) =>
+                                [b.heading, b.body, ...b.bullets].join("\n"),
+                            ),
+                        ]
+                            .join("\n")
+                            .slice(0, 4000),
+                    })),
                     response_style: style,
                     context,
                     share_for_review: quality && share,
@@ -245,9 +268,11 @@ export default function CourseChat({
             setError(
                 controller.signal.aborted
                     ? "Ответ остановлен. Вопрос можно отправить повторно."
-                    : e instanceof Error
-                      ? e.message
-                      : "Ошибка ответа",
+                    : e instanceof TypeError
+                      ? "Нет связи с сервисом. Проверьте подключение и повторите вопрос."
+                      : e instanceof Error
+                        ? e.message
+                        : "Ошибка ответа",
             );
         } finally {
             controller.abort();
@@ -259,11 +284,11 @@ export default function CourseChat({
     }
     async function practice(action: () => Promise<void>) {
         setBusy(true);
-        setError("");
+        setPracticeError("");
         try {
             await action();
         } catch (e) {
-            setError(
+            setPracticeError(
                 e instanceof Error
                     ? e.message
                     : "Не удалось выполнить действие",
@@ -316,6 +341,14 @@ export default function CourseChat({
                 Объяснения по материалам курса и рекомендованной литературе.
                 Проверяйте ответы по источникам.
             </p>
+            {preferencesError && (
+                <div role="alert" className={s.error}>
+                    <p>{preferencesError}</p>
+                    <button onClick={() => setPreferencesRetry((n) => n + 1)}>
+                        Загрузить настройки повторно
+                    </button>
+                </div>
+            )}
             {quality && (
                 <div className={s.disclosure}>
                     <p>
@@ -578,6 +611,11 @@ export default function CourseChat({
                     )}
                 </div>
             </form>
+            {practiceError && !exercise && (
+                <p role="alert" className={s.error}>
+                    {practiceError}
+                </p>
+            )}
             {exercise && (
                 <section className={s.exercise} aria-label="Учебное упражнение">
                     <div className={s.sectionHead}>
@@ -594,6 +632,11 @@ export default function CourseChat({
                         Тренировка с ИИ; оценка в Canvas не выставляется.
                         Упражнение доступно в течение часа.
                     </p>
+                    {practiceError && (
+                        <p role="alert" className={s.error}>
+                            {practiceError}
+                        </p>
+                    )}
                     <form
                         onSubmit={(e) => {
                             e.preventDefault();

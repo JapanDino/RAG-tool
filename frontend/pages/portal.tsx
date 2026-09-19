@@ -123,7 +123,6 @@ export default function Portal() {
     const [source, setSource] = useState<MaterialSource | null>(null);
     const [feedbackDoc, setFeedbackDoc] = useState<number | null>(null);
     const [rating, setRating] = useState("clear");
-    const [comment, setComment] = useState("");
     const [search, setSearch] = useState("");
     const [publication, setPublication] = useState("all");
     const [loaded, setLoaded] = useState(false);
@@ -134,11 +133,18 @@ export default function Portal() {
             headers.set("Authorization", `Bearer ${token}`);
             if (init.body && !(init.body instanceof FormData))
                 headers.set("Content-Type", "application/json");
-            const response = await fetch(`/api-proxy/portal${path}`, {
-                ...init,
-                headers,
-                cache: "no-store",
-            });
+            let response: Response;
+            try {
+                response = await fetch(`/api-proxy/portal${path}`, {
+                    ...init,
+                    headers,
+                    cache: "no-store",
+                });
+            } catch {
+                throw new Error(
+                    "Нет связи с сервисом. Проверьте подключение и повторите действие.",
+                );
+            }
             if (!response.ok) {
                 if (response.status === 401) {
                     sessionStorage.removeItem("canvas_portal_token");
@@ -363,6 +369,8 @@ export default function Portal() {
                                     }
                                     onClick={() => {
                                         setTab(id);
+                                        if (id === "materials")
+                                            void run(refresh);
                                         if (id === "analysis")
                                             void run(async () =>
                                                 setAnalysis(
@@ -405,6 +413,7 @@ export default function Portal() {
                         <div hidden={tab !== "chat"}>
                             <CourseChat
                                 allowReview={!teacher}
+                                active={tab === "chat" && !source}
                                 token={token}
                                 api={api}
                                 scope={session.storage_scope}
@@ -417,7 +426,15 @@ export default function Portal() {
 
                         {tab === "materials" && (
                             <section className={s.panel}>
-                                <h2>Библиотека курса</h2>
+                                <div className={s.sectionHead}>
+                                    <h2>Библиотека курса</h2>
+                                    <button
+                                        disabled={busy}
+                                        onClick={() => void run(refresh)}
+                                    >
+                                        Обновить материалы
+                                    </button>
+                                </div>
                                 {teacher && (
                                     <details className={s.upload}>
                                         <summary>
@@ -651,7 +668,6 @@ export default function Portal() {
                                                         setFeedbackDoc(
                                                             m.document_id,
                                                         );
-                                                        setComment("");
                                                         setRating("clear");
                                                     }}
                                                 >
@@ -834,13 +850,12 @@ export default function Portal() {
                                         method: "POST",
                                         body: JSON.stringify({
                                             rating,
-                                            comment,
                                         }),
                                     },
                                 );
                                 setFeedbackDoc(null);
                                 setNotice(
-                                    "Спасибо! Отзыв сохранён без имени в записи отзыва.",
+                                    "Спасибо! Оценка добавлена в сводку преподавателя без вашего имени.",
                                 );
                             });
                         }}
@@ -859,9 +874,11 @@ export default function Portal() {
                             </p>
                         )}
                         <p>
-                            Преподаватель увидит сводку без имени. Это не полная
-                            техническая анонимность. Не указывайте личные данные
-                            в комментарии.
+                            Преподаватель увидит только сводку оценок без имён;
+                            точное число меньше пяти скрыто. Комментарии в
+                            пилоте не передаются. Чтобы объяснить ошибку или
+                            задать вопрос, напишите преподавателю в Canvas. Это
+                            не полная техническая анонимность.
                         </p>
                         <label>
                             Оценка
@@ -876,15 +893,6 @@ export default function Portal() {
                                     </option>
                                 ))}
                             </select>
-                        </label>
-                        <label>
-                            Комментарий (необязательно)
-                            <textarea
-                                value={comment}
-                                maxLength={2000}
-                                rows={4}
-                                onChange={(e) => setComment(e.target.value)}
-                            />
                         </label>
                         <div className={s.actions}>
                             <button className={s.primary} disabled={busy}>
