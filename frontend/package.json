@@ -6,19 +6,25 @@
     "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "cytoscape": "^3.28.1",
-    "next": "^14.2.35",
+    "next": "15.5.24",
     "react": "18.2.0",
     "react-dom": "18.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "20.19.41",
     "@types/react": "18.3.28",
     "eslint": "^8.57.0",
-    "eslint-config-next": "14.2.5",
+    "eslint-config-next": "15.5.24",
     "typescript": "5.3.3"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "nanoid": "3.3.18"
   }
 }

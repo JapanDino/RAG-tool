@@ -25,14 +25,14 @@ export default class ErrorBoundary extends React.Component<Props, State> {
       return this.props.fallback ?? (
         <div style={{
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          height: "100%", gap: 12, color: "#f87171", fontSize: 14,
+          height: "100%", gap: 12, color: "var(--error)", fontSize: 14,
         }}>
           <span>Граф не удалось загрузить: {this.state.error?.message}</span>
           <button
             onClick={this.reset}
             style={{
               padding: "6px 16px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.4)",
-              background: "rgba(248,113,113,0.1)", color: "#f87171", cursor: "pointer",
+              background: "var(--error-light)", color: "var(--error)", cursor: "pointer",
             }}
           >
             Перезагрузить граф

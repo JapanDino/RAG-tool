@@ -1,173 +1,182 @@
-/* ============================================================
-   Bloom RAG Studio — Mission Control design tokens
-   ============================================================ */
-
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&family=Geist:wght@400;500;600;700&display=swap');
-
+/* Shared, Canvas-inspired interface tokens. */
 :root {
-  /* --- Dark-first palette (Mission Control) --- */
-  --bg-base:    #0b0c11;
-  --bg-surface: #13151c;
-  --bg-card:    #13151c;
-  --bg-card-2:  #181b24;
-  --bg-hover:   #1f2330;
-  --bg-overlay: rgba(19,21,28,0.94);
-  --bg-input:   #0b0c11;
-
-  --border:   rgba(255,255,255,0.07);
-  --border-2: rgba(255,255,255,0.12);
-  --border-3: rgba(255,255,255,0.20);
-  --border-focus: rgba(129,140,248,0.55);
-
-  --text-primary:   #e8eaf0;
-  --text-secondary: #a8acb6;
-  --text-muted:     #7e828e;
-  --text-accent:    #818cf8;
-
-  --accent:        #818cf8;
-  --accent-2:      #a78bfa;
-  --accent-hover:  #a78bfa;
-  --accent-light:  rgba(129,140,248,0.13);
-  --accent-border: rgba(129,140,248,0.28);
-  --accent-glow:   0 4px 20px rgba(129,140,248,0.35);
-
-  --success:       #34d399;
-  --success-light: rgba(52,211,153,0.12);
-  --warning:       #fbbf24;
-  --warning-light: rgba(251,191,36,0.12);
-  --error:         #f87171;
-  --error-light:   rgba(248,113,113,0.12);
-  --info:          #60a5fa;
-  --info-light:    rgba(96,165,250,0.12);
-
-  /* Bloom taxonomy colours — matched to design */
-  --bloom-remember:   #60a5fa;
-  --bloom-understand: #34d399;
-  --bloom-apply:      #fb923c;
-  --bloom-analyze:    #c084fc;
-  --bloom-evaluate:   #f87171;
-  --bloom-create:     #2dd4bf;
-
-  --bloom-remember-bg:   rgba(96,165,250,0.12);
-  --bloom-understand-bg: rgba(52,211,153,0.12);
-  --bloom-apply-bg:      rgba(251,146,60,0.12);
-  --bloom-analyze-bg:    rgba(192,132,252,0.12);
-  --bloom-evaluate-bg:   rgba(248,113,113,0.12);
-  --bloom-create-bg:     rgba(45,212,191,0.12);
-
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.35);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,0.45);
-  --shadow-xl: 0 16px 48px rgba(0,0,0,0.55);
-
-  --r-xs:   6px;
-  --r-sm:   8px;
-  --r-md:  10px;
-  --r-lg:  12px;
-  --r-xl:  16px;
-  --r-2xl: 20px;
-  --r-pill: 999px;
-
-  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
-  --font-serif: "Instrument Serif", "Times New Roman", serif;
-
-  --transition-fast:   all 0.10s ease;
-  --transition-base:   all 0.16s ease;
-  --transition-smooth: all 0.24s cubic-bezier(0.4,0,0.2,1);
+    color-scheme: light;
+    --bg-base: #ffffff;
+    --bg-surface: #ffffff;
+    --bg-card: #ffffff;
+    --bg-card-2: #f5f5f5;
+    --bg-hover: #eef3f6;
+    --bg-overlay: #ffffff;
+    --bg-input: #ffffff;
+    --border: #dce0e3;
+    --border-2: #b8bfc5;
+    --border-3: #8b969f;
+    --border-focus: #0073a7;
+    --text-primary: #2d3b45;
+    --text-secondary: #4f5d67;
+    --text-muted: #667580;
+    --text-accent: #006b9e;
+    --accent: #0073a7;
+    --accent-2: #006b9e;
+    --accent-hover: #005b85;
+    --accent-light: #edf5fa;
+    --accent-border: #b4d2e3;
+    --accent-glow: none;
+    --success: #28743c;
+    --success-light: #edf7ee;
+    --warning: #8a5900;
+    --warning-light: #fff7e5;
+    --error: #b3282d;
+    --error-light: #fdf0f0;
+    --info: #006b9e;
+    --info-light: #edf5fa;
+    --bloom-remember: #0073a7;
+    --bloom-understand: #28743c;
+    --bloom-apply: #945600;
+    --bloom-analyze: #735596;
+    --bloom-evaluate: #b3282d;
+    --bloom-create: #17776f;
+    --bloom-remember-bg: #edf5fa;
+    --bloom-understand-bg: #edf7ee;
+    --bloom-apply-bg: #fff7e5;
+    --bloom-analyze-bg: #f4eff8;
+    --bloom-evaluate-bg: #fdf0f0;
+    --bloom-create-bg: #edf7f5;
+    --shadow-sm: 0 1px 2px #2d3b450a;
+    --shadow-md: 0 2px 8px #2d3b4510;
+    --shadow-lg: 0 8px 24px #2d3b451a;
+    --shadow-xl: 0 12px 40px #2d3b4526;
+    --r-xs: 3px;
+    --r-sm: 3px;
+    --r-md: 4px;
+    --r-lg: 4px;
+    --r-xl: 4px;
+    --r-2xl: 4px;
+    --r-pill: 4px;
+    --font-sans: "Lato", "Segoe UI", Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", monospace;
+    --font-serif: var(--font-sans);
+    --transition-fast: all 0.1s ease;
+    --transition-base: all 0.16s ease;
+    --transition-smooth: all 0.2s ease;
 }
 
-/* Light mode kept for backward compat but not used by default */
-:root[data-theme="light"] {
-  --bg-base:    #f0eee9;
-  --bg-surface: #faf8f4;
-  --bg-card:    #ffffff;
-  --bg-card-2:  #f3ede2;
-  --bg-hover:   #e8e1d8;
-  --bg-overlay: rgba(255,253,249,0.94);
-  --bg-input:   #ffffff;
-  --border:   rgba(70,58,44,0.10);
-  --border-2: rgba(70,58,44,0.18);
-  --border-focus: rgba(129,140,248,0.42);
-  --text-primary:   #0d0e12;
-  --text-secondary: #5a5a6a;
-  --text-muted:     #9090a0;
-  --text-accent:    #6366f1;
-  --accent:        #6366f1;
-  --accent-hover:  #4f46e5;
-  --accent-light:  rgba(99,102,241,0.08);
-  --accent-border: rgba(99,102,241,0.24);
-  --accent-glow:   none;
-  --success:       #059669;
-  --warning:       #d97706;
-  --error:         #dc2626;
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
 
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-html, body {
-  height: 100%;
-  overflow: hidden;
+html,
+body {
+    height: 100%;
+    overflow: hidden;
 }
 
 body {
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 1.5;
-  color: var(--text-primary);
-  background-color: var(--bg-base);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--text-primary);
+    background-color: var(--bg-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 a {
-  color: var(--text-accent);
-  text-decoration: none;
+    color: var(--text-accent);
+    text-decoration: none;
 }
 
-button, input, textarea, select {
-  font: inherit;
-  color: inherit;
+button,
+input,
+textarea,
+select {
+    font: inherit;
+    color: inherit;
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: #c5cbd0;
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #9ba5ad;
+}
 
 ::selection {
-  background: rgba(129,140,248,0.28);
-  color: #fff;
+    background: #cde5f3;
+    color: #2d3b45;
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 /* ── Animations ── */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0);   }
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 @keyframes pulse-dot {
-  0%,100% { opacity: 1; }
-  50%      { opacity: .35; }
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.35;
+    }
 }
 @keyframes slideInRight {
-  from { opacity: 0; transform: translateX(24px); }
-  to   { opacity: 1; transform: translateX(0);    }
+    from {
+        opacity: 0;
+        transform: translateX(24px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 @keyframes shimmer {
-  0%   { background-position: -400px 0; }
-  100% { background-position:  400px 0; }
+    0% {
+        background-position: -400px 0;
+    }
+    100% {
+        background-position: 400px 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }
