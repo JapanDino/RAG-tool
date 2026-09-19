@@ -593,6 +593,7 @@ def chat(
         allowed = {p["id"] for p in passages}
         if (
             not isinstance(answer.get("answer"), str)
+            or not answer["answer"].strip()
             or not isinstance(ids, list)
             or not ids
             or any(type(i) is not int or i not in allowed for i in ids)
@@ -621,11 +622,13 @@ def chat(
             ],
         }
     except HTTPException:
-        raise
-    except Exception:  # noqa: BLE001 - Fail closed at an external-service boundary.
         db.rollback()
         metric(db, session, "errors")
-        logger.warning("Portal chat provider failed")
+        raise
+    except Exception as exc:  # noqa: BLE001 - Fail closed at an external-service boundary.
+        db.rollback()
+        metric(db, session, "errors")
+        logger.warning("Portal chat provider failed (%s)", type(exc).__name__)
         raise HTTPException(
             502, "Модель или поиск сейчас недоступны. Попробуйте позже."
         ) from None

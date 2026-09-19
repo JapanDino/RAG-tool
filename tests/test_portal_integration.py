@@ -344,3 +344,170 @@ def test_full_signed_launch_and_replay_rejected(pilot, monkeypatch):
     assert "sessionStorage.setItem" in response.text
     assert response.headers["cache-control"] == "no-store"
     assert client.post("/lti/launch", data=data).status_code == 401
+
+
+@pytest.mark.parametrize("extension", ["txt", "md"])
+def test_text_material_lifecycle_and_analysis(pilot, extension):
+    client, db, session = pilot
+    response = client.post(
+        "/portal/materials",
+        files={
+            "file": (
+                f"lesson.{extension}",
+                "Объясните фотосинтез. Сравните этапы.".encode(),
+                "text/plain",
+            )
+        },
+    )
+    assert response.status_code == 200
+    doc = response.json()["document_id"]
+    assert client.get("/portal/analysis").json()["chunks_analyzed"] == 1
+    assert (
+        client.patch(f"/portal/materials/{doc}", json={"published": True}).status_code
+        == 200
+    )
+    teacher_auth = client.headers["Authorization"]
+    student(client, session)
+    assert len(client.get("/portal/materials").json()) == 1
+    assert (
+        client.post(
+            f"/portal/materials/{doc}/feedback", json={"rating": "clear"}
+        ).status_code
+        == 200
+    )
+    client.headers["Authorization"] = teacher_auth
+    assert (
+        client.patch(f"/portal/materials/{doc}", json={"published": False}).status_code
+        == 200
+    )
+    assert client.delete(f"/portal/materials/{doc}").status_code == 200
+    assert client.get(f"/portal/materials/{doc}").status_code == 404
+    assert (
+        db.execute(
+            text("SELECT count(*) FROM portal_feedback WHERE document_id=:doc"),
+            {"doc": doc},
+        ).scalar()
+        == 0
+    )
+    assert (
+        db.execute(
+            text("SELECT count(*) FROM chunks WHERE document_id=:doc"), {"doc": doc}
+        ).scalar()
+        == 0
+    )
+
+
+@pytest.mark.parametrize(
+    "filename,content,status",
+    [
+        ("empty.txt", b"   ", 422),
+        ("bad.exe", b"text", 415),
+        ("long.txt", b"a" * 60001, 413),
+        ("large.txt", b"a" * (10 * 1024 * 1024 + 1), 413),
+    ],
+    ids=["empty", "unsupported", "text-too-long", "file-too-large"],
+)
+def test_upload_limits_leave_no_material(pilot, filename, content, status):
+    client, _, _ = pilot
+    response = client.post("/portal/materials", files={"file": (filename, content)})
+    assert response.status_code == status
+    assert client.get("/portal/materials").json() == []
+
+
+def test_canvas_import_update_and_unavailable_upstream(pilot, monkeypatch):
+    client, _, session = pilot
+    state = {"body": "<p>Объясните фотосинтез.</p>"}
+    monkeypatch.setattr(
+        portal.canvas_client,
+        "list_pages",
+        lambda *a: [{"url": "lesson"}, {"url": "draft"}],
+    )
+    monkeypatch.setattr(
+        portal.canvas_client,
+        "get_page",
+        lambda course, slug: {
+            "published": slug != "draft",
+            "body": state["body"],
+            "title": "Урок",
+        },
+    )
+    assert client.post("/portal/import-canvas").json() == {
+        "imported": 1,
+        "skipped": 1,
+        "remaining": 0,
+    }
+    doc = client.get("/portal/materials").json()[0]["document_id"]
+    client.patch(f"/portal/materials/{doc}", json={"published": True})
+    state["body"] = "<p>Сравните этапы фотосинтеза.</p>"
+    assert client.post("/portal/import-canvas").json()["imported"] == 1
+    rows = client.get("/portal/materials").json()
+    assert len(rows) == 1 and rows[0]["document_id"] == doc and not rows[0]["published"]
+    client.patch(f"/portal/materials/{doc}", json={"published": True})
+
+    def unavailable(*a):
+        raise RuntimeError("synthetic outage")
+
+    monkeypatch.setattr(portal.canvas_client, "list_pages", unavailable)
+    assert client.post("/portal/import-canvas").status_code == 502
+    assert client.get("/portal/materials").json()[0]["published"] is False
+    student(client, session)
+    assert client.get("/portal/materials").json() == []
+
+
+def test_empty_llm_answer_is_refused(pilot, monkeypatch):
+    client, db, _ = pilot
+    doc = upload(client)
+    chunk = db.execute(
+        text("SELECT id FROM chunks WHERE document_id=:doc"), {"doc": doc}
+    ).scalar_one()
+    monkeypatch.setattr(
+        portal,
+        "chat_completion_json",
+        lambda *a, **k: json.dumps({"answer": " ", "citations": [chunk]}),
+    )
+    assert client.post("/portal/chat", json={"message": "Объясни тему"}).json() == {
+        "answer": portal.NO_ANSWER,
+        "citations": [],
+    }
+
+
+def test_search_outage_counted_and_chat_rate_limited(pilot, monkeypatch):
+    client, _, session = pilot
+    monkeypatch.setattr(portal, "current_embedding_model", lambda: "hash:v1:1536")
+    assert (
+        client.post("/portal/chat", json={"message": "Объясни тему"}).status_code == 503
+    )
+    assert client.get("/portal/summary").json()["metrics"] == {
+        "questions": 1,
+        "errors": 1,
+    }
+    identity = f"{session['course_id']}:{session['subject']}:chat"
+    sec.redis_client().setex(sec.key("limit", identity), 120, "60")
+    assert (
+        client.post("/portal/chat", json={"message": "Объясни тему"}).status_code == 429
+    )
+
+
+def test_llm_outage_and_source_withdrawal_fail_closed(pilot, monkeypatch):
+    client, db, _ = pilot
+    doc = upload(client)
+    chunk = db.execute(
+        text("SELECT id FROM chunks WHERE document_id=:doc"), {"doc": doc}
+    ).scalar_one()
+    monkeypatch.setattr(portal, "chat_completion_json", lambda *a, **k: "not JSON")
+    assert (
+        client.post("/portal/chat", json={"message": "Объясни тему"}).status_code == 502
+    )
+
+    def withdraw(*a, **k):
+        db.execute(
+            text("UPDATE portal_materials SET published=FALSE WHERE document_id=:doc"),
+            {"doc": doc},
+        )
+        db.commit()
+        return json.dumps({"answer": "Must not be returned", "citations": [chunk]})
+
+    monkeypatch.setattr(portal, "chat_completion_json", withdraw)
+    result = client.post("/portal/chat", json={"message": "Объясни тему"})
+    assert result.status_code == 404
+    assert "Must not be returned" not in result.text

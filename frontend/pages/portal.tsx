@@ -177,6 +177,18 @@ export default function Portal() {
                     );
                 }
                 const body = await response.json().catch(() => ({}));
+                if (response.status === 429)
+                    throw new Error(
+                        "Достигнут часовой лимит запросов. Попробуйте позже.",
+                    );
+                if (response.status === 503)
+                    throw new Error(
+                        "Сервис временно недоступен. Попробуйте позже или сообщите преподавателю.",
+                    );
+                if (response.status === 404)
+                    throw new Error(
+                        "Материал больше недоступен. Обновите страницу, чтобы увидеть актуальную библиотеку.",
+                    );
                 throw new Error(
                     typeof body.detail === "string"
                         ? body.detail
@@ -227,10 +239,12 @@ export default function Portal() {
         setNotice("");
         try {
             await action();
+            return true;
         } catch (e) {
             setError(
                 e instanceof Error ? e.message : "Не удалось выполнить запрос",
             );
+            return false;
         } finally {
             setBusy(false);
         }
@@ -244,10 +258,13 @@ export default function Portal() {
         const content = question.trim();
         const history = messages
             .slice(-6)
-            .map(({ role, content }) => ({ role, content }));
+            .map(({ role, content }) => ({
+                role,
+                content: content.slice(0, 4000),
+            }));
         setMessages((prev) => [...prev, { role: "user", content }]);
         setQuestion("");
-        await run(async () => {
+        const sent = await run(async () => {
             const answer = await api("/chat", {
                 method: "POST",
                 body: JSON.stringify({ message: content, history }),
@@ -261,6 +278,12 @@ export default function Portal() {
                 },
             ]);
         });
+        if (!sent) {
+            setMessages((prev) =>
+                prev.length === messages.length + 1 ? prev.slice(0, -1) : prev,
+            );
+            setQuestion((current) => current || content);
+        }
     }
     const teacher = session?.role === "teacher";
     const visibleMaterials = materials.filter(
@@ -325,7 +348,7 @@ export default function Portal() {
                     </span>
                 )}
             </header>
-            {error && (
+            {error && (!session || tab !== "chat") && (
                 <p role="alert" className={s.error}>
                     {error}
                 </p>
@@ -513,6 +536,11 @@ export default function Portal() {
                                     )}
                                 </div>
                                 <form onSubmit={ask} className={s.ask}>
+                                    {error && (
+                                        <p role="alert" className={s.error}>
+                                            {error}
+                                        </p>
+                                    )}
                                     <label htmlFor="question">Ваш вопрос</label>
                                     <textarea
                                         id="question"
@@ -561,9 +589,12 @@ export default function Portal() {
                                         </summary>
                                         <p>
                                             Добавляйте PDF, TXT, MD или DOCX до
-                                            10 МБ и 60 000 символов. Новые
-                                            материалы видны только вам, пока вы
-                                            их не опубликуете.
+                                            10 МБ и 60 000 символов. PDF — до 40
+                                            страниц с текстовым слоем; сканы без
+                                            распознанного текста не
+                                            поддерживаются. Новые материалы
+                                            видны только вам, пока вы их не
+                                            опубликуете.
                                         </p>
                                         <p>
                                             Публикуйте только материалы,
@@ -582,6 +613,16 @@ export default function Portal() {
                                                     const file =
                                                         e.target.files?.[0];
                                                     e.target.value = "";
+                                                    if (
+                                                        file &&
+                                                        file.size >
+                                                            10 * 1024 * 1024
+                                                    ) {
+                                                        setError(
+                                                            "Лимит файла: 10 МБ. Разделите документ на главы.",
+                                                        );
+                                                        return;
+                                                    }
                                                     if (file)
                                                         void run(async () => {
                                                             const body =
@@ -790,6 +831,11 @@ export default function Portal() {
                         {tab === "analysis" && teacher && (
                             <section className={s.panel}>
                                 <h2>Когнитивный профиль материалов</h2>
+                                <p className={s.muted}>
+                                    Анализ включает опубликованные материалы и
+                                    черновики. Один фрагмент может относиться к
+                                    нескольким уровням.
+                                </p>
                                 {analysis && (
                                     <>
                                         <p>{analysis.note}</p>
@@ -798,12 +844,28 @@ export default function Portal() {
                                             {analysis.chunks_analyzed} (лимит{" "}
                                             {analysis.limit}).
                                         </p>
+                                        {analysis.chunks_analyzed === 0 && (
+                                            <p className={s.empty}>
+                                                Пока нечего анализировать.
+                                                Добавьте материалы в библиотеку
+                                                курса.
+                                            </p>
+                                        )}
                                         <div className={s.stats}>
-                                            {Object.entries(
-                                                analysis.distribution,
-                                            ).map(([level, count]) => (
+                                            {[
+                                                "remember",
+                                                "understand",
+                                                "apply",
+                                                "analyze",
+                                                "evaluate",
+                                                "create",
+                                            ].map((level) => (
                                                 <div key={level}>
-                                                    <strong>{count}</strong>
+                                                    <strong>
+                                                        {analysis.distribution[
+                                                            level
+                                                        ] || 0}
+                                                    </strong>
                                                     <span>
                                                         {labels[level] || level}
                                                     </span>
@@ -842,11 +904,18 @@ export default function Portal() {
                                 {summary && (
                                     <>
                                         <div className={s.stats}>
-                                            {Object.entries(
-                                                summary.metrics,
-                                            ).map(([kind, count]) => (
+                                            {[
+                                                "questions",
+                                                "answers_with_sources",
+                                                "no_context",
+                                                "errors",
+                                            ].map((kind) => (
                                                 <div key={kind}>
-                                                    <strong>{count}</strong>
+                                                    <strong>
+                                                        {summary.metrics[
+                                                            kind
+                                                        ] || 0}
+                                                    </strong>
                                                     <span>
                                                         {labels[kind] || kind}
                                                     </span>

@@ -1,4 +1,5 @@
 .page {
+    overflow-wrap: anywhere;
     min-height: 100vh;
     background: #fff;
     color: #2d3b45;
@@ -624,5 +625,14 @@
     }
     .stats > div {
         border-bottom: 1px solid #dce0e3;
+    }
+}
+
+.material .actions {
+    flex-shrink: 0;
+}
+@media (max-width: 1200px) {
+    .material {
+        flex-wrap: wrap;
     }
 }

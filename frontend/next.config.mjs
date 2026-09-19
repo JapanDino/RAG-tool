@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  async redirects() {
+    return process.env.APP_MODE === "lti"
+      ? [{ source: "/", destination: "/portal", permanent: false }]
+      : [];
+  },
   async rewrites() {
     return [
       {

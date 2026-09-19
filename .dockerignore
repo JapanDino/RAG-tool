@@ -20,3 +20,13 @@ build/
 secrets/
 **/*.pem
 **/*.key
+
+.venv*/
+frontend/.next/
+frontend/test-results/
+frontend/playwright-report/
+
+**/node_modules/
+**/__pycache__/
+**/.venv*/
+.ruff_cache/

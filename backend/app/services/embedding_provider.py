@@ -5,8 +5,8 @@ import os
 import re
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from functools import lru_cache
-from typing import Sequence
 
 import numpy as np
 
@@ -27,6 +27,9 @@ class EmbeddingProvider(ABC):
     @abstractmethod
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         raise NotImplementedError
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed([text])[0]
 
 
 def _pad_to_storage(vecs: np.ndarray) -> np.ndarray:
@@ -93,6 +96,12 @@ class LocalProvider(EmbeddingProvider):
 
     def __init__(self, model_name: str):
         self._model_name = model_name
+        self._uses_e5 = bool(
+            re.search(
+                r"(?:^|[/\\])(?:multilingual-)?e5-(?:small|base|large)(?:-v2)?$",
+                model_name,
+            )
+        )
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore
         except Exception as e:  # pragma: no cover
@@ -104,13 +113,20 @@ class LocalProvider(EmbeddingProvider):
 
     @property
     def embedding_model(self) -> str:
-        return f"local:{self._model_name}:padded{STORAGE_DIM}"
+        version = ":e5-prefix-v1" if self._uses_e5 else ""
+        return f"local:{self._model_name}{version}:padded{STORAGE_DIM}"
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return self._encode(texts, "passage: ")
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._encode([text], "query: ")[0]
+
+    def _encode(self, texts: Sequence[str], prefix: str) -> list[list[float]]:
         if not texts:
             return []
         vecs = self._model.encode(
-            list(texts),
+            [prefix + text for text in texts] if self._uses_e5 else list(texts),
             normalize_embeddings=True,
             show_progress_bar=False,
         )
@@ -177,6 +193,7 @@ def get_embedding_provider() -> EmbeddingProvider:
     name = os.getenv("EMBEDDING_PROVIDER", "local").strip().lower()
     if name == "hash":
         import logging
+
         logging.getLogger(__name__).warning(
             "EMBEDDING_PROVIDER=hash produces semantically meaningless embeddings. "
             "Set EMBEDDING_PROVIDER=local or EMBEDDING_PROVIDER=openai for real semantic search."
@@ -186,7 +203,7 @@ def get_embedding_provider() -> EmbeddingProvider:
         model = os.getenv("EMBEDDING_MODEL_LOCAL", "intfloat/multilingual-e5-large")
         try:
             return LocalProvider(model)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - Optional model loading may fail in third-party code.
             warnings.warn(
                 f"Falling back to hash embeddings because local model '{model}' is unavailable: {exc}",
                 RuntimeWarning,
