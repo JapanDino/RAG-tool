@@ -104,7 +104,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, o
             selector: "node",
             style: {
               label: "data(label)",
-              color: "#c9d1e8",
+              color: "#2d3b45",
               "font-size": 9,
               "font-family": "IBM Plex Sans, Segoe UI, sans-serif",
               "text-wrap": "wrap",
@@ -112,9 +112,9 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, o
               "text-valign": "bottom",
               "text-margin-y": 7,
               "text-outline-width": 2,
-              "text-outline-color": "#161b27",
+              "text-outline-color": "#ffffff",
               // Pie-chart fill: primary slice + secondary slice when multi-label
-              "background-color": "#161b27",
+              "background-color": "#ffffff",
               "pie-size": "100%",
               "pie-1-background-color": (ele: cytoscape.NodeSingular) =>
                 LEVEL_COLORS[ele.data("primary") as BloomLevel],
@@ -123,7 +123,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, o
               "pie-2-background-color": (ele: cytoscape.NodeSingular) =>
                 ele.data("secondary")
                   ? LEVEL_COLORS[ele.data("secondary") as BloomLevel]
-                  : "#161b27",
+                  : "#ffffff",
               "pie-2-background-size": "data(pie2Size)" as any,
               "pie-2-background-opacity": 0.85,
               shape: (ele: cytoscape.NodeSingular) => LEVEL_SHAPES[ele.data("primary") as BloomLevel],
@@ -136,7 +136,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, o
             selector: "edge",
             style: {
               width: 1.5,
-              "line-color": "rgba(139, 146, 168, 0.25)",
+              "line-color": "rgba(79, 93, 103, 0.4)",
               "curve-style": "bezier",
               opacity: (ele: cytoscape.EdgeSingular) =>
                 Math.max(0.12, Math.min(0.75, Number(ele.data("weight") ?? 0.2))),
@@ -148,12 +148,12 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, o
           },
           {
             selector: ".hl",
-            style: { "border-width": 4, "border-color": "#6366f1", "border-opacity": 1, opacity: 1 },
+            style: { "border-width": 4, "border-color": "#0073a7", "border-opacity": 1, opacity: 1 },
           },
           {
             selector: ":selected",
             style: {
-              "border-color": "#818cf8",
+              "border-color": "#0073a7",
               "border-width": 4,
               "border-opacity": 1,
             },
@@ -161,7 +161,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, o
           {
             selector: "node:active",
             style: {
-              "overlay-color": "#6366f1",
+              "overlay-color": "#0073a7",
               "overlay-padding": 8,
               "overlay-opacity": 0.2,
             },
@@ -206,7 +206,7 @@ export default function GraphView({ nodes, edges, filters, threshold, onHover, o
   const exportPng = () => {
     const cy = cyRef.current;
     if (!cy) return;
-    const png = cy.png({ bg: "#161b27", full: true, scale: 2 });
+    const png = cy.png({ bg: "#ffffff", full: true, scale: 2 });
     const a = document.createElement("a");
     a.href = png;
     a.download = "knowledge_graph.png";

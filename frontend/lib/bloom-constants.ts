@@ -21,12 +21,12 @@ export const LEVEL_LABELS: Record<BloomLevel, string> = {
 };
 
 export const LEVEL_COLORS: Record<BloomLevel, string> = {
-  remember:   "#60a5fa",
-  understand: "#34d399",
-  apply:      "#fb923c",
-  analyze:    "#c084fc",
-  evaluate:   "#f87171",
-  create:     "#2dd4bf",
+  remember:   "#0073a7",
+  understand: "#28743c",
+  apply:      "#945600",
+  analyze:    "#735596",
+  evaluate:   "#b3282d",
+  create:     "#17776f",
 };
 
 export const LEVEL_BG: Record<BloomLevel, string> = {

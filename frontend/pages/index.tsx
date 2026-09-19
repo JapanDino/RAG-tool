@@ -420,7 +420,6 @@ export default function Home() {
 
   // ── Settings ─────────────────────────────────────────────────
   const [showSettings, setShowSettings] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [lang, setLang] = useState<"ru" | "en">("ru");
   const [minProb, setMinProb] = useState(0.2);
   const [maxLevels, setMaxLevels] = useState(6);
@@ -535,13 +534,6 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
     const savedAnnotator = localStorage.getItem("bloom_annotator");
     if (savedAnnotator) setAnnotator(savedAnnotator);
 
-    const savedTheme = localStorage.getItem("bloom_theme");
-    if (savedTheme === "dark" || savedTheme === "light") {
-      setTheme(savedTheme);
-      if (savedTheme === "light") document.documentElement.setAttribute("data-theme", "light");
-    }
-    // dark is the default (no attribute needed since :root is dark)
-
     const savedLang = localStorage.getItem("bloom_lang");
     if (savedLang === "ru" || savedLang === "en") setLang(savedLang);
 
@@ -562,15 +554,6 @@ const canvasProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(nul
   useEffect(() => { localStorage.setItem("bloom_min_prob", String(minProb)); }, [minProb]);
   useEffect(() => { localStorage.setItem("bloom_max_levels", String(maxLevels)); }, [maxLevels]);
   useEffect(() => { localStorage.setItem("bloom_embedding_model", embeddingModel); }, [embeddingModel]);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem("bloom_theme", theme);
-    if (theme === "light") {
-      document.documentElement.setAttribute("data-theme", "light");
-    } else {
-      document.documentElement.removeAttribute("data-theme");
-    }
-  }, [theme]);
   useEffect(() => { localStorage.setItem("bloom_annotator", annotator); }, [annotator]);
 
   useEffect(() => {
@@ -1455,6 +1438,7 @@ const analysisFlowSteps = [
 
   return (
     <div className={styles.page}>
+      <a href="#studio-content" className={styles.skipLink}>Перейти к содержимому</a>
 
       {/* ── Header ─────────────────────────────────────── */}
       <header className={styles.header}>
@@ -1471,7 +1455,7 @@ const analysisFlowSteps = [
           </div>
 
           {/* Dataset selector */}
-          <div className={styles.headerDataset} title="Сменить датасет">
+          <button type="button" className={styles.headerDataset} title="Выбрать датасет" onClick={() => { const input = document.getElementById("studio-dataset"); input?.scrollIntoView({ block: "center" }); input?.focus(); }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-muted)", flexShrink: 0 }}>
               <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>
             </svg>
@@ -1480,16 +1464,16 @@ const analysisFlowSteps = [
               <div className={styles.headerDatasetVal}>{ds ? `#${ds}` : "— не выбран"}</div>
             </div>
             <span style={{ color: "var(--text-muted)", fontSize: 10, marginLeft: 4 }}>▾</span>
-          </div>
+          </button>
 
           {/* Global search */}
-          <div className={styles.headerSearch}>
+          <button type="button" className={styles.headerSearch} onClick={() => setActiveTab("search")} aria-label="Открыть поиск по материалам">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-muted)", flexShrink: 0 }}>
               <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
             </svg>
-            <span className={styles.headerSearchPlaceholder}>Поиск по узлам, документам, датасетам…</span>
-            <span className={styles.headerSearchKbd}>⌘K</span>
-          </div>
+            <span className={styles.headerSearchPlaceholder}>Поиск по материалам</span>
+            <span className={styles.headerSearchKbd}>S</span>
+          </button>
 
           <div className={styles.metaRow}>
             {/* API health */}
@@ -1497,9 +1481,6 @@ const analysisFlowSteps = [
               <span className={[styles.dot, apiStatus === "ok" ? styles.dotOk : styles.dotBad].join(" ")} />
               {apiStatus === "ok" ? "API · работает" : "API недоступен"}
             </div>
-
-            {/* Version */}
-            <span className={styles.kbd} style={{ fontSize: 10.5 }}>v0.9.3</span>
 
             {/* Job indicator */}
             {lastJob && (
@@ -1532,8 +1513,7 @@ const analysisFlowSteps = [
               <button className={[styles.langOption, lang === "en" ? styles.langOptionActive : ""].join(" ")} onClick={() => { setLang("en"); localStorage.setItem("bloom_lang", "en"); }} type="button">EN</button>
             </div>
 
-            {/* Avatar */}
-            <div className={styles.avatar}>БР</div>
+
           </div>
         </div>
       </header>
@@ -1542,7 +1522,7 @@ const analysisFlowSteps = [
       <div className={styles.shell}>
 
         {/* ── Sidebar nav ──────────────────────────────── */}
-        <nav className={styles.nav}>
+        <nav className={styles.nav} aria-label="Разделы студии">
           {/* New Analysis CTA */}
           <button className={styles.navPrimaryBtn} onClick={() => setActiveTab("analysis")} type="button">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
@@ -1550,7 +1530,7 @@ const analysisFlowSteps = [
             <span style={{ marginLeft: "auto", opacity: 0.85, fontSize: 10, fontFamily: "var(--font-mono)" }}>⌘N</span>
           </button>
 
-          <div className={styles.navSectionTitle}>РАБОТА</div>
+          <div className={styles.navSectionTitle}>Работа</div>
 
           <button
             className={[styles.navBtn, activeTab === "analysis" ? styles.navBtnActive : ""].join(" ")}
@@ -1621,37 +1601,7 @@ const analysisFlowSteps = [
             <span className={styles.navHint}>C</span>
           </button>
 
-          <div className={styles.navSectionTitle}>ДАННЫЕ</div>
-
-          <button className={styles.navBtn} onClick={() => setActiveTab("dashboard")} type="button">
-            <span className={styles.navIcon}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>
-              </svg>
-            </span>
-            <span className={styles.navLabel}>Датасеты</span>
-            <span className={styles.navHint} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>4</span>
-          </button>
-
-          <button className={styles.navBtn} type="button">
-            <span className={styles.navIcon}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
-              </svg>
-            </span>
-            <span className={styles.navLabel}>Документы</span>
-            <span className={styles.navHint} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>{nodes.length > 0 ? "✓" : "—"}</span>
-          </button>
-
-          <button className={styles.navBtn} type="button">
-            <span className={styles.navIcon}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M13 2L3 14h7l-1 8 11-14h-7z"/>
-              </svg>
-            </span>
-            <span className={styles.navLabel}>Очередь задач</span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", padding: "1px 6px", border: "1px solid var(--border)", borderRadius: 4 }}>2/4</span>
-          </button>
+          <div className={styles.navSectionTitle}>Параметры</div>
 
           <button className={styles.navBtn} onClick={() => setShowSettings(true)} type="button">
             <span className={styles.navIcon}>
@@ -1662,29 +1612,14 @@ const analysisFlowSteps = [
             <span className={styles.navLabel}>Настройки</span>
           </button>
 
-          {/* Providers panel */}
-          <div className={styles.navProviders}>
-            <div className={styles.navProviderHeader}>ПРОВАЙДЕРЫ</div>
-            <div className={styles.navProviderRow}>
-              <span className={styles.navProviderDot} style={{ color: "var(--success)" }} />
-              <span className={styles.navProviderLabel}>Эмбеддинги</span>
-              <span className={styles.navProviderVal}>e5-large</span>
-            </div>
-            <div className={styles.navProviderRow}>
-              <span className={styles.navProviderDot} style={{ color: apiStatus === "ok" ? "var(--success)" : "var(--error)" }} />
-              <span className={styles.navProviderLabel}>LLM</span>
-              <span className={styles.navProviderVal}>qwen3:14b</span>
-            </div>
-            <div className={styles.navProviderRow}>
-              <span className={styles.navProviderDot} style={{ color: "var(--success)" }} />
-              <span className={styles.navProviderLabel}>База данных</span>
-              <span className={styles.navProviderVal}>pgvector</span>
-            </div>
-          </div>
         </nav>
 
         {/* ── Main area ────────────────────────────────── */}
-        <main className={styles.main}>
+        <main className={styles.main} id="studio-content" tabIndex={-1}>
+          <div className={styles.workspaceHeader}>
+            <span>Рабочая область</span>
+            <h1>{{analysis: "Анализ материалов", graph: "Граф знаний", labeling: "Разметка", search: "Поиск по материалам", dashboard: "Обзор и метрики", canvas: "Canvas LMS"}[activeTab]}</h1>
+          </div>
 
           {/* Error banner */}
           {error && (
@@ -1695,7 +1630,7 @@ const analysisFlowSteps = [
                 onClick={() => setError(null)}
                 style={{
                   flexShrink: 0, background: "none", border: "none", cursor: "pointer",
-                  color: "#fca5a5", fontSize: 18, lineHeight: 1, padding: "0 2px",
+                  color: "var(--error)", fontSize: 18, lineHeight: 1, padding: "0 2px",
                   opacity: 0.7, marginLeft: 4,
                 }}
                 title="Закрыть"
@@ -3730,7 +3665,7 @@ const analysisFlowSteps = [
                 />
               </label>
               {apiStatus === "down" && (
-                <div style={{ padding: "8px 10px", borderRadius: 7, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", fontSize: 12, color: "#f87171", marginBottom: 6 }}>
+                <div style={{ padding: "8px 10px", borderRadius: 7, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", fontSize: 12, color: "var(--error)", marginBottom: 6 }}>
                   Backend недоступен — проверь что Docker запущен и backend-контейнер поднят
                 </div>
               )}
@@ -3794,6 +3729,7 @@ const analysisFlowSteps = [
               <label className={styles.fieldLabel}>
                 Dataset ID (ввести вручную)
                 <input
+                  id="studio-dataset"
                   className={styles.dsInput}
                   type="number"
                   placeholder="1"
@@ -4086,24 +4022,6 @@ const analysisFlowSteps = [
                 />
               </div>
 
-              <div className={styles.settingsSectionTitle} style={{ marginTop: 16 }}>Тема</div>
-              <div className={styles.themeSwitchRow}>
-                <button
-                  className={[styles.themeOption, theme === "light" ? styles.themeOptionActive : ""].join(" ")}
-                  onClick={() => setTheme("light")}
-                  type="button"
-                >
-                  Светлая
-                </button>
-                <button
-                  className={[styles.themeOption, theme === "dark" ? styles.themeOptionActive : ""].join(" ")}
-                  onClick={() => setTheme("dark")}
-                  type="button"
-                >
-                  Тёмная
-                </button>
-              </div>
-
               <div className={styles.settingsSectionTitle} style={{ marginTop: 16 }}>Эмбеддинги</div>
 
               <div className={styles.settingsRow}>
@@ -4305,152 +4223,29 @@ const analysisFlowSteps = [
         </div>
       )}
 
-      {/* ── Footer ─────────────────────────────────────── */}
-      <footer style={{
-        position: "relative",
-        padding: "32px 32px 28px",
-        marginTop: 8,
-      }}>
-        {/* gradient divider */}
-        <div style={{
-          position: "absolute",
-          top: 0, left: "5%", right: "5%",
-          height: 1,
-          background: "linear-gradient(90deg, transparent, var(--border-2) 25%, var(--border-2) 75%, transparent)",
-        }} />
-
-        <div style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: 32,
-          flexWrap: "wrap",
-        }}>
-
-          {/* ── Brand column ── */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 200 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 8,
-                background: "linear-gradient(135deg, #6366f1 0%, #06b6d4 100%)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 16, boxShadow: "0 0 12px rgba(99,102,241,0.3)",
-              }}>🌸</div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)", letterSpacing: "-0.2px" }}>
-                  Bloom RAG Studio
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
-                  Knowledge Taxonomy Engine
-                </div>
-              </div>
-            </div>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, maxWidth: 260 }}>
-              Инструмент для автоматической классификации учебных материалов по таксономии Блума с RAG-индексацией и визуализацией графа знаний.
-            </p>
-            {/* tech badges */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
-              {[["Next.js", "#fff"], ["FastAPI", "#009688"], ["PostgreSQL", "#336791"], ["pgvector", "#c084fc"], ["OpenAI", "#10a37f"]].map(([label, color]) => (
-                <span key={label} style={{
-                  fontSize: 10, fontWeight: 600, letterSpacing: "0.3px",
-                  padding: "2px 7px", borderRadius: 4,
-                  border: `1px solid ${color}33`,
-                  background: `${color}11`,
-                  color: color === "#fff" ? "var(--text-secondary)" : color,
-                }}>{label}</span>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Center: quick links ── */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.6px", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>
-              Ресурсы
-            </div>
-            {[
-              { label: "API Docs", href: `${apiBase}/docs`, icon: "📄" },
-              { label: "Health Check", href: `${apiBase}/health`, icon: "🟢" },
-              { label: "OpenAPI JSON", href: `${apiBase}/openapi.json`, icon: "⚙️" },
-            ].map(({ label, href, icon }) => (
-              <a key={label} href={href} target="_blank" rel="noopener noreferrer" style={{
-                display: "flex", alignItems: "center", gap: 7,
-                fontSize: 12, color: "var(--text-muted)", textDecoration: "none",
-                transition: "color 0.15s",
-              }}
-                onMouseEnter={e => { e.currentTarget.style.color = "var(--text-accent)"; }}
-                onMouseLeave={e => { e.currentTarget.style.color = "var(--text-muted)"; }}
-              >
-                <span style={{ fontSize: 11 }}>{icon}</span>
-                {label}
-              </a>
-            ))}
-          </div>
-
-          {/* ── Developer column ── */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.6px", color: "var(--text-muted)", textTransform: "uppercase" }}>
-              Разработчик
-            </div>
-            <a
-              href="https://t.me/JapanDino"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 9,
-                padding: "9px 16px", borderRadius: 12,
-                border: "1px solid var(--border-2)",
-                background: "var(--bg-card)",
-                textDecoration: "none", color: "var(--text-secondary)",
-                fontSize: 13, fontWeight: 500,
-                transition: "all 0.18s ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = "rgba(99,102,241,0.45)";
-                e.currentTarget.style.background = "rgba(99,102,241,0.08)";
-                e.currentTarget.style.color = "var(--text-accent)";
-                e.currentTarget.style.boxShadow = "0 0 20px rgba(99,102,241,0.18)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = "var(--border-2)";
-                e.currentTarget.style.background = "var(--bg-card)";
-                e.currentTarget.style.color = "var(--text-secondary)";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0, opacity: 0.85 }}>
-                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.19 13.67l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.958.889z"/>
-              </svg>
-              <span>JapanDino</span>
-            </a>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "right", lineHeight: 1.5 }}>
-              Bloom RAG Studio © {new Date().getFullYear()}<br/>
-              <span style={{ opacity: 0.6 }}>MIT License</span>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <footer className={styles.footer}>Bloom RAG Studio <span>Инструменты для работы с материалами курса</span><a href="https://github.com/JapanDino/RAG-tool" target="_blank" rel="noopener noreferrer">О проекте</a></footer>
 
       {/* ── RAG Chat ──────────────────────────────────────────────── */}
       <button
         onClick={() => setChatOpen(v => !v)}
         title="RAG-чат"
         style={{
-          position: "fixed", bottom: 24, right: 24, zIndex: 9999,
+          position: "fixed", bottom: 48, right: 24, zIndex: 9999,
           width: 52, height: 52, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.15)", cursor: "pointer",
-          background: chatOpen ? "#6366f1" : "#6366f1",
-          boxShadow: "0 4px 20px rgba(99,102,241,0.5)",
+          background: "var(--accent)",
+          boxShadow: "var(--shadow-md)",
           fontSize: 22, display: "flex", alignItems: "center", justifyContent: "center",
           color: "#fff",
           transition: "transform 0.15s",
         }}
       >
-        {chatOpen ? "✕" : "💬"}
+        {chatOpen ? "✕" : <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 4h16v12H9l-5 4z"/><path d="M8 8h8M8 12h5"/></svg>}
       </button>
 
       {chatOpen && (
         <div style={{
-          position: "fixed", bottom: 88, right: 24, zIndex: 999,
-          width: 380, height: 520, display: "flex", flexDirection: "column",
+          position: "fixed", bottom: 112, right: 16, zIndex: 999,
+          width: "min(380px, calc(100vw - 32px))", height: "min(520px, calc(100dvh - 136px))", display: "flex", flexDirection: "column",
           background: "var(--bg-card)", border: "1px solid var(--border)",
           borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.3)", overflow: "hidden",
         }}>
@@ -4458,7 +4253,7 @@ const analysisFlowSteps = [
             padding: "10px 14px", borderBottom: "1px solid var(--border)",
             fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 8,
           }}>
-            💬 RAG-чат
+            Помощник по материалам
             <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 400, marginLeft: "auto" }}>
               {ds ? `dataset #${ds}` : "без датасета"}
             </span>

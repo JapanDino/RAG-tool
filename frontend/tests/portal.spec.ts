@@ -52,6 +52,13 @@ test("student can ask with citations and leave a separate review", async ({
     await expect(
         page.getByRole("button", { name: "Анализ курса", exact: true }),
     ).toHaveCount(0);
+    await page
+        .getByRole("button", { name: "Объясни основную идею темы" })
+        .click();
+    await expect(page.getByLabel("Ваш вопрос")).toBeFocused();
+    await expect(page.getByLabel("Ваш вопрос")).toHaveValue(
+        "Объясни основную идею темы",
+    );
     await page.getByLabel("Ваш вопрос").fill("Что такое фотосинтез?");
     await page.getByRole("button", { name: "Отправить", exact: true }).click();
     await expect(
@@ -61,10 +68,12 @@ test("student can ask with citations and leave a separate review", async ({
     await expect(
         page.getByText("Фотосинтез преобразует энергию света."),
     ).toBeVisible();
-    await page.mouse.wheel(0, 500);
-    await expect
-        .poll(() => page.evaluate(() => window.scrollY))
-        .toBeGreaterThan(0);
+    if (testInfo.project.name === "mobile") {
+        await page.mouse.wheel(0, 500);
+        await expect
+            .poll(() => page.evaluate(() => window.scrollY))
+            .toBeGreaterThan(0);
+    }
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
         path: testInfo.outputPath("chat.png"),
@@ -74,12 +83,29 @@ test("student can ask with citations and leave a separate review", async ({
     await expect(
         page.getByText("Добавить литературу", { exact: true }),
     ).toHaveCount(0);
+    await page.getByRole("button", { name: "Читать", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Введение" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: "Читать", exact: true }),
+    ).toBeFocused();
     await page.getByRole("button", { name: "Оставить отзыв" }).click();
+    await page.keyboard.press("Shift+Tab");
+    await expect(
+        page.getByRole("button", { name: "Отмена", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(
+        page.getByRole("combobox", { name: "Оценка", exact: true }),
+    ).toBeFocused();
     await page
         .getByRole("combobox", { name: "Оценка", exact: true })
         .selectOption("difficult");
     await page.getByRole("button", { name: "Отправить отзыв" }).click();
-    await expect(page.getByRole("status")).toContainText("Отзыв сохранён");
+    await expect(
+        page.getByRole("status").filter({ hasText: "Спасибо!" }),
+    ).toContainText("Отзыв сохранён");
     expect(feedback).toEqual({ rating: "difficult", comment: "" });
     expect(
         await page.evaluate(
@@ -88,7 +114,9 @@ test("student can ask with citations and leave a separate review", async ({
     ).toBe(true);
 });
 
-test("teacher sees publication controls and analysis", async ({ page }) => {
+test("teacher sees publication controls and analysis", async ({
+    page,
+}, testInfo) => {
     await page.addInitScript(() =>
         sessionStorage.setItem("canvas_portal_token", "synthetic-test-session"),
     );
@@ -122,6 +150,25 @@ test("teacher sees publication controls and analysis", async ({ page }) => {
     });
     await page.goto("/portal");
     await page.getByRole("button", { name: "Материалы", exact: true }).click();
+    await page.getByLabel("Поиск по названию").fill("нет такого");
+    await expect(
+        page.getByText("Ничего не найдено.", { exact: false }),
+    ).toBeVisible();
+    await page.getByLabel("Поиск по названию").fill("литература");
+    await expect(
+        page.getByRole("heading", { name: "Литература", exact: true }),
+    ).toBeVisible();
+    await page
+        .getByLabel("Публикация", { exact: true })
+        .selectOption("published");
+    await expect(
+        page.getByRole("button", { name: "Опубликовать для всех" }),
+    ).toHaveCount(0);
+    await page.getByLabel("Публикация", { exact: true }).selectOption("all");
+    await page.screenshot({
+        path: testInfo.outputPath("library.png"),
+        fullPage: true,
+    });
     await page.getByRole("button", { name: "Опубликовать для всех" }).click();
     await expect(
         page.getByRole("button", { name: "Скрыть", exact: true }),

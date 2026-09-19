@@ -17,6 +17,8 @@
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
 
+[Обзор обновлённого интерфейса и скриншоты](docs/INTERFACE.md) — светлая навигация курса, чат с источниками, библиотека преподавателя и Studio.
+
 ## Зачем проект
 
 Bloom RAG Studio помогает быстро понять, какие когнитивные уровни преобладают в учебном тексте, задании, модуле курса или наборе документов.
