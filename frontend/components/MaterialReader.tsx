@@ -25,6 +25,7 @@ export default function MaterialReader({
     onClose,
     onDownload,
     allowReview,
+    teacher = false,
 }: {
     source: MaterialSource;
     token: string;
@@ -34,6 +35,7 @@ export default function MaterialReader({
     onClose: () => void;
     onDownload: () => void;
     allowReview: boolean;
+    teacher?: boolean;
 }) {
     const [context, setContext] = useState<ReadingContext>({
         document_id: source.document_id,
@@ -167,7 +169,7 @@ export default function MaterialReader({
                     onTouchEnd={selectText}
                 >
                     <p className={s.muted}>
-                        {source.published
+                        {source.published || teacher
                             ? "Выделите текст внутри абзаца или нажмите «Разобрать фрагмент»."
                             : "Проверьте текст и иллюстрации перед публикацией. Разбор в чате станет доступен после публикации."}
                     </p>
@@ -197,7 +199,7 @@ export default function MaterialReader({
                             <div className={s.chunkHeading}>
                                 {c.page && <span>Страница {c.page}</span>}
                                 <button
-                                    disabled={!source.published}
+                                    disabled={!source.published && !teacher}
                                     onClick={() =>
                                         setContext({
                                             document_id: source.document_id,
@@ -216,7 +218,7 @@ export default function MaterialReader({
                     ))}
                 </div>
                 <div className={s.readerChat}>
-                    {source.published ? (
+                    {source.published || teacher ? (
                         <>
                             {context.chunk_id && (
                                 <div className={s.actions}>
@@ -254,6 +256,7 @@ export default function MaterialReader({
                                 </div>
                             )}
                             <CourseChat
+                                preview={teacher}
                                 key={source.document_id}
                                 compact
                                 allowReview={allowReview}

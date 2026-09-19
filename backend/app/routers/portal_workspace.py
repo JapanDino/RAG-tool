@@ -134,6 +134,8 @@ def answer_feedback(
 async def stream_chat(
     payload: portal.Question, session: portal.SessionUser, db: portal.Database
 ):
+    portal.validate_preview(session, payload)
+    session = {**session, "_preview": payload.preview}
     rate_limit(session, "chat", 60)
     if not payload.message.strip():
         raise HTTPException(422, "Введите вопрос")
@@ -176,9 +178,16 @@ async def stream_chat(
                     candidates,
                     json.loads(extract_json_block(raw)),
                 )
+            await run_in_threadpool(
+                portal.course_review.record_preview, db, session, payload, result
+            )
             review = await run_in_threadpool(
                 lambda: course_quality.record(
-                    db, session, payload.message, result, share=payload.share_for_review
+                    db,
+                    session,
+                    payload.message,
+                    result,
+                    share=payload.share_for_review and not payload.preview,
                 )
             )
             result.update(review)

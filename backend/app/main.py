@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import datasets, search, export, annotate, jobs, status, rubrics, analyze, taxonomy, nodes, graph, labeling, evaluate, canvas, chat
 from .routers.labeling import nodes_router as labeling_nodes_router
-from .routers import lti, portal, portal_workspace, portal_study, portal_imports
+from .routers import lti, portal, portal_workspace, portal_study, portal_imports, portal_review
 
 from .services.portal_maintenance import lifespan
 
@@ -71,6 +71,7 @@ app.include_router(portal.router)
 app.include_router(portal_workspace.router)
 app.include_router(portal_study.router)
 app.include_router(portal_imports.router)
+app.include_router(portal_review.router)
 
 @app.get("/health")
 def health():

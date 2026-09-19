@@ -1,4 +1,6 @@
 import s from "../styles/portal.module.css";
+import BloomReviewForm, { TeacherReview } from "./BloomReviewForm";
+import { PortalAPI } from "./CourseChat";
 
 const levels: Record<string, string> = {
     remember: "Запомнить",
@@ -33,6 +35,9 @@ export type Analysis = {
     examples: {
         document_id: number;
         chunk_id?: number;
+        text_hash?: string;
+        knowledge?: string[];
+        review?: TeacherReview | null;
         title: string;
         text: string;
         levels: string[];
@@ -54,9 +59,13 @@ export type Analysis = {
 export default function BloomAnalysis({
     analysis,
     onSource,
+    api,
+    onSaved,
 }: {
     analysis: Analysis | null;
     onSource: (document: number, chunk?: number) => void;
+    api: PortalAPI;
+    onSaved: () => Promise<void>;
 }) {
     return (
         <section className={s.panel}>
@@ -228,6 +237,11 @@ export default function BloomAnalysis({
                             >
                                 Открыть контекст в материале
                             </button>
+                            <BloomReviewForm
+                                example={example}
+                                api={api}
+                                onSaved={onSaved}
+                            />
                         </details>
                     ))}
                     {!!analysis.references?.length && (

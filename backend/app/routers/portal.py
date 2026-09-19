@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from ..db.session import get_db
 from ..models.models import Chunk, Document
-from ..services import canvas_client, course_quality
+from ..services import canvas_client, course_quality, course_review
 from ..services.answer_layout import LAYOUT_PROMPT, validated_layout
 from ..services.bloom_rubric import (
     REFERENCES,
@@ -73,6 +73,7 @@ class Question(StrictInput):
     response_style: Literal["auto", "simple", "steps", "diagram", "check"] = "auto"
     context: ReadingContext | None = None
     share_for_review: bool = False
+    preview: bool = False
 
 
 class ReadingContext(StrictInput):
@@ -209,6 +210,8 @@ def canvas_current(db: Session, session: dict, item: dict) -> bool:
 
 
 def metric(db: Session, session: dict, kind: str):
+    if session.get("_preview"):
+        return
     db.execute(
         text("""INSERT INTO portal_metrics(course_id,day,kind,count) VALUES (:course,CURRENT_DATE,:kind,1)
         ON CONFLICT(course_id,day,kind) DO UPDATE SET count=portal_metrics.count+1"""),
@@ -732,6 +735,7 @@ def summary(session: SessionUser, db: Database):
 @router.get("/analysis")
 def analysis(session: SessionUser, db: Database):
     require_teacher(session)
+    saved_reviews = course_review.reviews(db, session["course_id"])
     rows = (
         db.execute(
             text("""SELECT d.id,d.title,c.id AS chunk_id,c.text FROM documents d JOIN portal_materials m ON m.document_id=d.id
@@ -759,6 +763,10 @@ def analysis(session: SessionUser, db: Database):
                 "chunk_id": row["chunk_id"],
                 "title": row["title"],
                 "text": row["text"][:300],
+                "text_hash": course_review.text_hash(row["text"]),
+                "review": saved_reviews.get(
+                    (row["id"], course_review.text_hash(row["text"]))
+                ),
                 **result,
             }
         )
@@ -781,8 +789,17 @@ def analysis(session: SessionUser, db: Database):
 
 
 def retrieve(
-    db: Session, session: dict, question: str, document_id: int | None = None
+    db: Session,
+    session: dict,
+    question: str,
+    document_id: int | None = None,
+    *,
+    preview: bool = False,
 ) -> list[dict]:
+    if preview:
+        require_teacher(session)
+        if not document_id:
+            raise HTTPException(422, "Выберите материал для проверки")
     model = current_embedding_model()
     if model.startswith(("hash:", "random:")):
         raise HTTPException(503, "Semantic search is unavailable")
@@ -793,7 +810,7 @@ def retrieve(
         1-(e.vec <=> CAST(:vector AS vector)) AS score
         FROM chunks c JOIN embeddings e ON e.chunk_id=c.id JOIN documents d ON d.id=c.document_id
         JOIN portal_materials m ON m.document_id=d.id
-        WHERE m.course_id=:course AND d.dataset_id=:dataset AND m.published=TRUE AND d.status='ready'
+        WHERE m.course_id=:course AND d.dataset_id=:dataset AND (m.published=TRUE OR :preview=TRUE) AND d.status='ready'
           AND (CAST(:doc AS integer) IS NULL OR d.id=:doc)
           AND e.model=:model AND e.vec IS NOT NULL
         ORDER BY e.vec <=> CAST(:vector AS vector) LIMIT 8"""),
@@ -803,6 +820,7 @@ def retrieve(
                 "dataset": session["dataset_id"],
                 "model": model,
                 "doc": document_id,
+                "preview": preview,
             },
         )
         .mappings()
@@ -814,20 +832,25 @@ def retrieve(
             continue
         doc_id = row["document_id"]
         if doc_id not in checked:
-            checked[doc_id] = canvas_current(db, session, material(db, session, doc_id))
+            checked[doc_id] = canvas_current(
+                db, session, material(db, session, doc_id, allow_draft=preview)
+            )
         if checked[doc_id]:
             result.append(dict(row))
     return result[:6]
 
 
 def resolve_passages(db: Session, session: dict, payload: Question) -> list[dict]:
+    validate_preview(session, payload)
     if not payload.context:
         return retrieve(db, session, payload.message)
     selected = payload.context
-    item = material(db, session, selected.document_id)
+    item = material(db, session, selected.document_id, allow_draft=payload.preview)
     if not canvas_current(db, session, item):
         raise HTTPException(404, "Источник больше недоступен")
-    rows = retrieve(db, session, payload.message, selected.document_id)
+    rows = retrieve(
+        db, session, payload.message, selected.document_id, preview=payload.preview
+    )
     if selected.chunk_id:
         chunk = (
             db.query(Chunk)
@@ -859,6 +882,10 @@ def resolve_passages(db: Session, session: dict, payload: Question) -> list[dict
 
 def prepare_chat(db: Session, session: dict, payload: Question):
     passages = resolve_passages(db, session, payload)
+    if payload.preview:
+        session["_preview_hash"] = course_review.document_hash(
+            db, payload.context.document_id
+        )
     if not passages:
         return [], [], ""
     context = [
@@ -909,6 +936,12 @@ def prepare_chat(db: Session, session: dict, payload: Question):
 def finish_answer(
     db: Session, session: dict, payload: Question, passages, candidates, answer
 ):
+    if payload.preview and session.get("_preview_hash") != course_review.document_hash(
+        db, payload.context.document_id
+    ):
+        raise HTTPException(
+            409, "Материал изменился во время проверки. Повторите вопрос."
+        )
     ids = answer.get("citations")
     allowed = {p["id"] for p in passages}
     if (
@@ -923,7 +956,9 @@ def finish_answer(
     # Recheck publication immediately before returning evidence after a potentially slow LLM request.
     for row in passages:
         if row["id"] in ids:
-            item = material(db, session, row["document_id"])
+            item = material(
+                db, session, row["document_id"], allow_draft=payload.preview
+            )
             if not canvas_current(db, session, item):
                 raise HTTPException(409, "Источник изменился. Повторите вопрос.")
     metric(db, session, "answers_with_sources")
@@ -960,8 +995,21 @@ def finish_answer(
     }
 
 
+def validate_preview(session, payload):
+    if payload.preview:
+        require_teacher(session)
+        if not payload.context:
+            raise HTTPException(422, "Для проверки выберите конкретный материал")
+        if payload.share_for_review:
+            raise HTTPException(
+                422, "Проверка преподавателя не записывается в журнал учеников"
+            )
+
+
 @router.post("/chat")
 def chat(payload: Question, session: SessionUser, db: Database):
+    validate_preview(session, payload)
+    session = {**session, "_preview": payload.preview}
     rate_limit(session, "chat", 60)
     if not payload.message.strip():
         raise HTTPException(422, "Введите вопрос")
@@ -978,9 +1026,14 @@ def chat(payload: Question, session: SessionUser, db: Database):
                 )
             )
             result = finish_answer(db, session, payload, passages, candidates, answer)
+        course_review.record_preview(db, session, payload, result)
         result.update(
             course_quality.record(
-                db, session, payload.message, result, share=payload.share_for_review
+                db,
+                session,
+                payload.message,
+                result,
+                share=payload.share_for_review and not payload.preview,
             )
         )
         return result

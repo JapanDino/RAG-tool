@@ -6,6 +6,7 @@ import MaterialReader, { MaterialSource } from "../components/MaterialReader";
 import QualityPanel from "../components/QualityPanel";
 import CanvasImport from "../components/CanvasImport";
 import BloomAnalysis, { Analysis } from "../components/BloomAnalysis";
+import CourseReadiness from "../components/CourseReadiness";
 
 type Material = {
     document_id: number;
@@ -155,7 +156,7 @@ export default function Portal() {
                     throw new Error(
                         "Сервис временно недоступен. Попробуйте позже или сообщите преподавателю.",
                     );
-                if (response.status === 404)
+                if (response.status === 404 && !path.startsWith("/study"))
                     throw new Error(
                         "Материал больше недоступен. Обновите страницу, чтобы увидеть актуальную библиотеку.",
                     );
@@ -261,6 +262,7 @@ export default function Portal() {
         chat: "Чат",
         materials: "Материалы",
         analysis: "Анализ курса",
+        readiness: "Готовность курса",
         summary: "Обратная связь",
         quality: "Качество ответов",
     }[tab];
@@ -345,6 +347,7 @@ export default function Portal() {
                                 ...(teacher
                                     ? [
                                           ["analysis", "Анализ курса"],
+                                          ["readiness", "Готовность курса"],
                                           ["summary", "Обратная связь"],
                                           ["quality", "Качество ответов"],
                                       ]
@@ -669,8 +672,22 @@ export default function Portal() {
                             </section>
                         )}
 
+                        {tab === "readiness" && teacher && (
+                            <CourseReadiness
+                                api={api}
+                                onSource={openSource}
+                                onMaterials={() => {
+                                    setTab("materials");
+                                    void run(refresh);
+                                }}
+                            />
+                        )}
                         {tab === "analysis" && teacher && (
                             <BloomAnalysis
+                                api={api}
+                                onSaved={async () =>
+                                    setAnalysis(await api("/analysis"))
+                                }
                                 analysis={analysis}
                                 onSource={openSource}
                             />
@@ -744,6 +761,7 @@ export default function Portal() {
                     onClose={() => setSource(null)}
                 >
                     <MaterialReader
+                        teacher={teacher}
                         allowReview={!teacher}
                         key={source.document_id}
                         source={source}

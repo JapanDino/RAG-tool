@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 def purge_expired():
     with SessionLocal() as db:
         db.execute(text("DELETE FROM portal_quality WHERE day <= CURRENT_DATE-30"))
+        db.execute(text("DELETE FROM portal_study_sessions WHERE expires_at <= NOW()"))
         db.commit()
 
 

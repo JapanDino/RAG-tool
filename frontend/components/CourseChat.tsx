@@ -36,6 +36,12 @@ type Exercise = {
     correct: boolean;
     can_reveal: boolean;
     citations: Citation[];
+    topic?: string;
+    question_number?: number;
+    total_questions?: number;
+    draft_answer?: string;
+    completed?: boolean;
+    history?: { question: string; correct: boolean; attempts: number }[];
 };
 
 export default function CourseChat({
@@ -48,6 +54,7 @@ export default function CourseChat({
     compact = false,
     allowReview = true,
     active = true,
+    preview = false,
 }: {
     token: string;
     api: PortalAPI;
@@ -58,6 +65,7 @@ export default function CourseChat({
     compact?: boolean;
     allowReview?: boolean;
     active?: boolean;
+    preview?: boolean;
 }) {
     const id = useId();
     const [messages, setMessages] = useState<Message[]>([]);
@@ -76,6 +84,8 @@ export default function CourseChat({
     const [ready, setReady] = useState(false);
     const [notes, setNotes] = useState("");
     const [exercise, setExercise] = useState<Exercise | null>(null);
+    const [resumable, setResumable] = useState<Exercise | null>(null);
+    const [saveStatus, setSaveStatus] = useState("");
     const [attempt, setAttempt] = useState("");
     const [solution, setSolution] = useState<{
         answer: string;
@@ -85,8 +95,68 @@ export default function CourseChat({
     const textarea = useRef<HTMLTextAreaElement>(null);
     const log = useRef<HTMLDivElement>(null);
     const storageKey = scope
-        ? `course-workspace:${scope}:${context?.document_id || "course"}`
+        ? `course-workspace:${scope}:${preview ? "preview:" : ""}${context?.document_id || "course"}`
         : null;
+    useEffect(() => {
+        if (preview) return;
+        let live = true;
+        api(`/study/current?document_id=${context?.document_id || 0}`)
+            .then((state) => {
+                if (live && state?.id) setResumable(state);
+            })
+            .catch(() => {
+                if (live)
+                    setPracticeError(
+                        "Не удалось восстановить тренировку. Источник мог измениться; можно начать новую.",
+                    );
+            });
+        return () => {
+            live = false;
+        };
+    }, [api, context?.document_id, preview]);
+    useEffect(() => {
+        if (!exercise?.question_number || exercise.completed) return;
+        if (busy) {
+            setSaveStatus("");
+            return;
+        }
+        if (attempt === (exercise.draft_answer || "")) {
+            setSaveStatus(attempt ? "Черновик ответа сохранён" : "");
+            return;
+        }
+        let live = true;
+        setSaveStatus("Сохраняем ответ…");
+        const timer = setTimeout(() => {
+            api(`/study/${exercise.id}/draft`, {
+                method: "PUT",
+                body: JSON.stringify({
+                    answer: attempt,
+                    question_number: exercise.question_number,
+                }),
+            })
+                .then(() => {
+                    if (live) setSaveStatus("Черновик ответа сохранён");
+                })
+                .catch(() => {
+                    if (live)
+                        setSaveStatus(
+                            "Не удалось сохранить черновик. Не закрывайте страницу до повтора.",
+                        );
+                });
+        }, 600);
+        return () => {
+            live = false;
+            clearTimeout(timer);
+        };
+    }, [
+        api,
+        exercise?.id,
+        exercise?.question_number,
+        exercise?.completed,
+        exercise?.draft_answer,
+        attempt,
+        busy,
+    ]);
     useEffect(() => {
         if (!active) return;
         let live = true;
@@ -218,6 +288,7 @@ export default function CourseChat({
                     response_style: style,
                     context,
                     share_for_review: quality && share,
+                    preview,
                 }),
                 signal: controller.signal,
             });
@@ -317,6 +388,8 @@ export default function CourseChat({
             );
             setAttempt("");
             setSolution(null);
+            setSaveStatus("");
+            setResumable(null);
         });
     }
     const openCitation = (c: Citation) =>
@@ -341,6 +414,14 @@ export default function CourseChat({
                 Объяснения по материалам курса и рекомендованной литературе.
                 Проверяйте ответы по источникам.
             </p>
+            {preview && (
+                <p className={s.disclosure}>
+                    Проверка преподавателя. Чат использует выбранный материал,
+                    включая черновик. Материал не публикуется; вопросы не
+                    попадают в журнал учеников и общие счётчики. Проверьте смысл
+                    ответа и цитаты перед публикацией.
+                </p>
+            )}
             {preferencesError && (
                 <div role="alert" className={s.error}>
                     <p>{preferencesError}</p>
@@ -575,13 +656,15 @@ export default function CourseChat({
                     placeholder="Например: объясни эту тему на простом примере"
                 />
                 <div className={s.composerFooter}>
-                    <button
-                        type="button"
-                        disabled={busy || quality === null}
-                        onClick={startPractice}
-                    >
-                        Проверь понимание
-                    </button>
+                    {!preview && (
+                        <button
+                            type="button"
+                            disabled={busy || quality === null}
+                            onClick={startPractice}
+                        >
+                            Проверь понимание
+                        </button>
+                    )}
                     {busy && abort.current ? (
                         <button
                             key="stop"
@@ -611,6 +694,46 @@ export default function CourseChat({
                     )}
                 </div>
             </form>
+            {!preview && !exercise && resumable && (
+                <div className={s.disclosure}>
+                    <p>
+                        {resumable.completed
+                            ? "Завершённая тренировка"
+                            : "Сохранённая тренировка"}
+                        : {resumable.topic}. Вопрос {resumable.question_number}{" "}
+                        из {resumable.total_questions}.
+                    </p>
+                    <button
+                        disabled={busy}
+                        onClick={() =>
+                            void practice(async () => {
+                                const current = await api(
+                                    `/study/current?document_id=${context?.document_id || 0}`,
+                                );
+                                if (!current?.id)
+                                    throw new Error(
+                                        "Срок тренировки истёк. Начните новую.",
+                                    );
+                                setExercise(current);
+                                setAttempt(current.draft_answer || "");
+                                setSolution(null);
+                                setSaveStatus("");
+                            })
+                        }
+                    >
+                        {resumable.completed
+                            ? "Открыть результат"
+                            : "Продолжить тренировку"}
+                    </button>
+                </div>
+            )}
+            {!preview && (
+                <p className={s.muted}>
+                    Тренировка состоит из трёх вопросов. Прогресс и черновик
+                    ответа сохраняются в вашей учётной записи на 7 дней после
+                    последнего изменения, отдельно от журнала преподавателя.
+                </p>
+            )}
             {practiceError && !exercise && (
                 <p role="alert" className={s.error}>
                     {practiceError}
@@ -622,48 +745,101 @@ export default function CourseChat({
                         <h3>Проверка понимания</h3>
                         <button
                             disabled={busy}
-                            onClick={() => setExercise(null)}
+                            onClick={() =>
+                                void practice(async () => {
+                                    if (
+                                        exercise.question_number &&
+                                        !exercise.completed
+                                    )
+                                        await api(
+                                            `/study/${exercise.id}/draft`,
+                                            {
+                                                method: "PUT",
+                                                body: JSON.stringify({
+                                                    answer: attempt,
+                                                    question_number:
+                                                        exercise.question_number,
+                                                }),
+                                            },
+                                        );
+                                    setResumable({
+                                        ...exercise,
+                                        draft_answer: attempt,
+                                    });
+                                    setExercise(null);
+                                })
+                            }
                         >
                             Закрыть упражнение
                         </button>
                     </div>
-                    <p>{exercise.question}</p>
+                    <p>
+                        {exercise.completed
+                            ? "Тренировка завершена"
+                            : `Вопрос ${exercise.question_number || 1} из ${exercise.total_questions || 3}`}
+                    </p>
+                    {!exercise.completed && <p>{exercise.question}</p>}
+                    {!!exercise.history?.length && (
+                        <details open={exercise.completed}>
+                            <summary>Результаты вопросов</summary>
+                            <ol>
+                                {exercise.history.map((item, i) => (
+                                    <li key={i}>
+                                        {item.question} —{" "}
+                                        {item.correct
+                                            ? "ответ принят помощником"
+                                            : "нужно повторить"}
+                                        , попыток: {item.attempts}.
+                                    </li>
+                                ))}
+                            </ol>
+                        </details>
+                    )}
                     <p className={s.muted}>
                         Тренировка с ИИ; оценка в Canvas не выставляется.
-                        Упражнение доступно в течение часа.
+                        Прогресс хранится 7 дней после последнего изменения.
                     </p>
                     {practiceError && (
                         <p role="alert" className={s.error}>
                             {practiceError}
                         </p>
                     )}
-                    <form
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            void practice(async () => {
-                                setExercise(
-                                    await api(`/study/${exercise.id}/attempt`, {
-                                        method: "POST",
-                                        body: JSON.stringify({
-                                            answer: attempt,
-                                        }),
-                                    }),
-                                );
-                            });
-                        }}
-                    >
-                        <label htmlFor={`${id}-attempt`}>Ваш ответ</label>
-                        <textarea
-                            id={`${id}-attempt`}
-                            value={attempt}
-                            onChange={(e) => setAttempt(e.target.value)}
-                            rows={3}
-                            maxLength={3000}
-                        />
-                        <button disabled={busy || !attempt.trim()}>
-                            Проверить ответ
-                        </button>
-                    </form>
+                    {!exercise.completed && (
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                void practice(async () => {
+                                    setExercise(
+                                        await api(
+                                            `/study/${exercise.id}/attempt`,
+                                            {
+                                                method: "POST",
+                                                body: JSON.stringify({
+                                                    answer: attempt,
+                                                    question_number:
+                                                        exercise.question_number,
+                                                }),
+                                            },
+                                        ),
+                                    );
+                                });
+                            }}
+                        >
+                            <label htmlFor={`${id}-attempt`}>Ваш ответ</label>
+                            <textarea
+                                id={`${id}-attempt`}
+                                value={attempt}
+                                onChange={(e) => setAttempt(e.target.value)}
+                                rows={3}
+                                maxLength={3000}
+                                disabled={busy}
+                            />
+                            {saveStatus && <p role="status">{saveStatus}</p>}
+                            <button disabled={busy || !attempt.trim()}>
+                                Проверить ответ
+                            </button>
+                        </form>
+                    )}
                     {exercise.feedback && (
                         <p role="status">
                             {exercise.feedback} Попыток: {exercise.attempts}.
@@ -675,6 +851,33 @@ export default function CourseChat({
                         </p>
                     )}
                     <div className={s.actions}>
+                        {!exercise.completed && exercise.question_number && (
+                            <button
+                                disabled={busy || !exercise.attempts}
+                                onClick={() =>
+                                    void practice(async () => {
+                                        const next = await api(
+                                            `/study/${exercise.id}/next`,
+                                            {
+                                                method: "POST",
+                                                body: JSON.stringify({
+                                                    question_number:
+                                                        exercise.question_number,
+                                                }),
+                                            },
+                                        );
+                                        setExercise(next);
+                                        setAttempt(next.draft_answer || "");
+                                        setSolution(null);
+                                        setSaveStatus("");
+                                    })
+                                }
+                            >
+                                {exercise.question_number === 3
+                                    ? "Завершить тренировку"
+                                    : "Следующий вопрос"}
+                            </button>
+                        )}
                         <button disabled={busy} onClick={startPractice}>
                             Новое упражнение
                         </button>
@@ -696,6 +899,10 @@ export default function CourseChat({
                             </button>
                         )}
                     </div>
+                    <p className={s.muted}>
+                        «Новое упражнение» заменит сохранённую тренировку в этом
+                        разделе.
+                    </p>
                     {solution && (
                         <div>
                             <h4>Разбор решения</h4>

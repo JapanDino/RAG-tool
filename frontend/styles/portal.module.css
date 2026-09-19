@@ -981,3 +981,31 @@
     margin: 8px 0;
     white-space: pre-wrap;
 }
+.reviewChoices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+}
+.reviewChoices label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.reviewChoices input {
+    width: auto;
+}
+.reviewEntry fieldset {
+    min-width: 0;
+    margin: 12px 0;
+    border: 1px solid #dce0e3;
+    padding: 12px;
+}
+.reviewEntry select,
+.reviewEntry textarea {
+    max-width: 100%;
+    width: 100%;
+}
+.reviewEntry h3,
+.reviewEntry p {
+    overflow-wrap: anywhere;
+}
